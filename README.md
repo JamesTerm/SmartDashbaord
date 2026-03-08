@@ -13,7 +13,7 @@ Lightweight C++ dashboard for FRC, inspired by WPILib SmartDashboard.
 - `SmartDashboard` - Qt desktop app
 - `SmartDashboard_Interface_direct` - subscriber/consumer transport layer
 - `ClientInterface_direct` - publisher/producer transport layer + sample publisher
-- Design + notes: `design/SmartDashboard_Design.md`, `Agent_Session_Notes.md`
+- Design + notes: `design/SmartDashboard_Design.md`, `docs/history.md`, `Agent_Session_Notes.md`
 
 ## Quick start (Windows + MSVC + vcpkg)
 
@@ -77,3 +77,4 @@ Use this check for dashboard -> app/client command flow:
 - Runtime deployment is being stabilized for fully reproducible vcpkg-only startup.
 
 For architecture and implementation details, see `design/SmartDashboard_Design.md`.
+For FRC dashboard/telemetry background and architectural evolution, see `docs/history.md`.

@@ -120,3 +120,13 @@
 - Updated command tests with animated 2-second visual windows so manual checks can verify updates continue on already-populated widgets.
 - Added manual roundtrip sample `sd_command_roundtrip_sample` and README instructions for live dashboard validation.
 - Added `File -> Clear Widgets` action in dashboard to reset runtime widget/model state without restarting app.
+
+## Documentation checkpoint (2026-03-08)
+
+- Added historical architecture document `docs/history.md` for students/mentors covering:
+  - early FRC telemetry constraints and dashboard goals
+  - SmartDashboard + NetworkTables design benefits and scaling limitations
+  - evolution through Shuffleboard, Glass, and AdvantageScope
+  - architectural lessons (transport/UI separation, structured telemetry, live vs log pipelines)
+  - project-specific direction: avoiding NetworkTables-style distributed state bloat in favor of a simpler, predictable pipeline
+- Updated `README.md` documentation references to include `docs/history.md` for discoverability.
