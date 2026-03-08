@@ -8,6 +8,8 @@ class QProgressBar;
 class QDial;
 class QGridLayout;
 class QFrame;
+class QKeyEvent;
+class QPaintEvent;
 
 namespace sd::widgets
 {
@@ -23,6 +25,13 @@ namespace sd::widgets
         String
     };
 
+    enum class EditInteractionMode
+    {
+        MoveOnly,
+        ResizeOnly,
+        MoveAndResize
+    };
+
     class VariableTile final : public QFrame
     {
         Q_OBJECT
@@ -34,6 +43,9 @@ namespace sd::widgets
         void SetBoolValue(bool value);
         void SetDoubleValue(double value);
         void SetStringValue(const QString& value);
+        void SetShowEditHandles(bool showHandles);
+        void SetSnapToGrid(bool enabled, int gridSize = 8);
+        void SetEditInteractionMode(EditInteractionMode mode);
 
         QString GetKey() const;
         VariableType GetType() const;
@@ -47,26 +59,52 @@ namespace sd::widgets
         void ControlStringEdited(const QString& key, const QString& value);
 
     protected:
+        void paintEvent(QPaintEvent* event) override;
         void mousePressEvent(QMouseEvent* event) override;
         void mouseMoveEvent(QMouseEvent* event) override;
         void mouseReleaseEvent(QMouseEvent* event) override;
+        void keyPressEvent(QKeyEvent* event) override;
         void contextMenuEvent(QContextMenuEvent* event) override;
 
     private:
+        enum class DragMode
+        {
+            None,
+            Move,
+            ResizeLeft,
+            ResizeRight,
+            ResizeTop,
+            ResizeBottom,
+            ResizeTopLeft,
+            ResizeTopRight,
+            ResizeBottomLeft,
+            ResizeBottomRight
+        };
+
         void BuildContextMenu(QMenu& menu);
         QString FormatValueText() const;
         void UpdateWidgetPresentation();
         void UpdateValueDisplay();
         int DoubleToPercent(double value) const;
         void UpdateBoolLedAppearance();
+        DragMode HitTestDragMode(const QPoint& localPos) const;
+        void UpdateCursorForPosition(const QPoint& localPos);
 
         QString m_key;
         VariableType m_type;
         QString m_widgetType;
         bool m_editable = false;
+        bool m_showEditHandles = true;
+        bool m_snapToGrid = true;
+        int m_gridSize = 8;
+        EditInteractionMode m_editInteractionMode = EditInteractionMode::MoveAndResize;
         QPoint m_dragOrigin;
+        QPoint m_dragStartGlobal;
+        QRect m_dragStartGeometry;
+        DragMode m_dragMode = DragMode::None;
         bool m_boolValue = false;
         double m_doubleValue = 0.0;
+        bool m_settingGaugeProgrammatically = false;
         QString m_stringValue;
 
         QLabel* m_titleLabel = nullptr;

@@ -59,6 +59,27 @@ MainWindow::MainWindow(QWidget* parent)
     m_editableAction->setCheckable(true);
     connect(m_editableAction, &QAction::triggered, this, &MainWindow::OnToggleEditable);
 
+    m_snapToGridAction = viewMenu->addAction("Snap to grid (8px)");
+    m_snapToGridAction->setCheckable(true);
+    m_snapToGridAction->setChecked(m_snapToGrid);
+    connect(m_snapToGridAction, &QAction::triggered, this, &MainWindow::OnToggleSnapToGrid);
+
+    QMenu* interactionMenu = viewMenu->addMenu("Editable interaction");
+    m_moveModeAction = interactionMenu->addAction("Move only");
+    m_moveModeAction->setCheckable(true);
+    m_resizeModeAction = interactionMenu->addAction("Resize only");
+    m_resizeModeAction->setCheckable(true);
+    m_moveResizeModeAction = interactionMenu->addAction("Move and resize");
+    m_moveResizeModeAction->setCheckable(true);
+
+    connect(m_moveModeAction, &QAction::triggered, this, &MainWindow::OnSetMoveMode);
+    connect(m_resizeModeAction, &QAction::triggered, this, &MainWindow::OnSetResizeMode);
+    connect(m_moveResizeModeAction, &QAction::triggered, this, &MainWindow::OnSetMoveResizeMode);
+
+    m_moveModeAction->setChecked(false);
+    m_resizeModeAction->setChecked(false);
+    m_moveResizeModeAction->setChecked(true);
+
     m_statusLabel = new QLabel("State: Disconnected", this);
     statusBar()->addPermanentWidget(m_statusLabel);
 
@@ -110,6 +131,56 @@ void MainWindow::OnToggleEditable()
     for (auto& [_, tile] : m_tiles)
     {
         tile->SetEditable(m_isEditable);
+        tile->SetSnapToGrid(m_snapToGrid, 8);
+        tile->SetEditInteractionMode(m_editInteractionMode);
+    }
+}
+
+void MainWindow::OnToggleSnapToGrid()
+{
+    m_snapToGrid = m_snapToGridAction->isChecked();
+    for (auto& [_, tile] : m_tiles)
+    {
+        tile->SetSnapToGrid(m_snapToGrid, 8);
+    }
+}
+
+void MainWindow::OnSetMoveMode()
+{
+    m_editInteractionMode = sd::widgets::EditInteractionMode::MoveOnly;
+    m_moveModeAction->setChecked(true);
+    m_resizeModeAction->setChecked(false);
+    m_moveResizeModeAction->setChecked(false);
+
+    for (auto& [_, tile] : m_tiles)
+    {
+        tile->SetEditInteractionMode(m_editInteractionMode);
+    }
+}
+
+void MainWindow::OnSetResizeMode()
+{
+    m_editInteractionMode = sd::widgets::EditInteractionMode::ResizeOnly;
+    m_moveModeAction->setChecked(false);
+    m_resizeModeAction->setChecked(true);
+    m_moveResizeModeAction->setChecked(false);
+
+    for (auto& [_, tile] : m_tiles)
+    {
+        tile->SetEditInteractionMode(m_editInteractionMode);
+    }
+}
+
+void MainWindow::OnSetMoveResizeMode()
+{
+    m_editInteractionMode = sd::widgets::EditInteractionMode::MoveAndResize;
+    m_moveModeAction->setChecked(false);
+    m_resizeModeAction->setChecked(false);
+    m_moveResizeModeAction->setChecked(true);
+
+    for (auto& [_, tile] : m_tiles)
+    {
+        tile->SetEditInteractionMode(m_editInteractionMode);
     }
 }
 
@@ -227,6 +298,8 @@ sd::widgets::VariableTile* MainWindow::GetOrCreateTile(const QString& key, sd::w
 
     tile->setObjectName(QString("tile_%1").arg(QString::number(m_tiles.size() + 1)));
     tile->SetEditable(m_isEditable);
+    tile->SetSnapToGrid(m_snapToGrid, 8);
+    tile->SetEditInteractionMode(m_editInteractionMode);
 
     auto savedIt = m_savedLayoutByKey.find(keyStd);
     if (savedIt != m_savedLayoutByKey.end())

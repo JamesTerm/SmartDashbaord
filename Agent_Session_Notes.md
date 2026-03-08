@@ -130,3 +130,24 @@
   - architectural lessons (transport/UI separation, structured telemetry, live vs log pipelines)
   - project-specific direction: avoiding NetworkTables-style distributed state bloat in favor of a simpler, predictable pipeline
 - Updated `README.md` documentation references to include `docs/history.md` for discoverability.
+
+## Widget editing and UX checkpoint (2026-03-08)
+
+- Added editable canvas interaction controls in `View`:
+  - `Snap to grid (8px)`
+  - `Editable interaction` modes: `Move only`, `Resize only`, `Move and resize`
+- Implemented tile move/resize UX for editable mode:
+  - drag-to-move and edge/corner resize hit-testing
+  - keyboard nudging (`Arrows`) and keyboard resize (`Ctrl+Arrows`), with coarse step via `Shift`
+  - reduced tile minimum size to allow intentional cropping workflows
+- Enforced layout-only behavior when editable is enabled:
+  - writable controls and gauge interactions are disabled/mouse-transparent in edit mode
+  - control value publishes are blocked during layout adjustments
+- Updated widget presentation/details:
+  - bool checkbox layout now shows variable name on the left and control on the right
+  - string widget menu labels now explicitly distinguish read-only vs writable options
+  - `Change to...` menu now checks the currently selected widget type
+- Restored interactive gauge behavior for runtime control (editable off):
+  - dial publishes normalized double commands on user manipulation
+  - programmatic update guard prevents feedback-loop publishes
+  - cursor now consistently shows horizontal double-arrow for gauge interaction in non-editable mode
