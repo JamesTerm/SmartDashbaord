@@ -18,6 +18,7 @@ target_compile_features(ClientInterface_direct PUBLIC cxx_std_20)
 target_link_libraries(ClientInterface_direct
     PUBLIC
         SmartDashboard_DirectCommon
+        SmartDashboard_Interface_direct
 )
 
 add_executable(sd_direct_publisher_sample
@@ -25,6 +26,15 @@ add_executable(sd_direct_publisher_sample
 )
 
 target_link_libraries(sd_direct_publisher_sample
+    PRIVATE
+        ClientInterface_direct
+)
+
+add_executable(sd_command_roundtrip_sample
+    samples/command_roundtrip_sample.cpp
+)
+
+target_link_libraries(sd_command_roundtrip_sample
     PRIVATE
         ClientInterface_direct
 )

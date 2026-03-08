@@ -29,6 +29,7 @@ namespace sd::model
         );
 
         void ResetSequenceTracking();
+        void Clear();
 
     private:
         std::unordered_map<std::string, VariableRecord> m_records;

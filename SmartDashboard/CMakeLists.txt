@@ -18,14 +18,19 @@ qt_add_executable(SmartDashboardApp WIN32
     src/layout/layout_serializer.cpp
     src/transport/direct_subscriber_adapter.h
     src/transport/direct_subscriber_adapter.cpp
+    src/transport/direct_publisher_adapter.h
+    src/transport/direct_publisher_adapter.cpp
     src/widgets/variable_tile.h
     src/widgets/variable_tile.cpp
+    src/widgets/tile_control_widget.h
+    src/widgets/tile_control_widget.cpp
 )
 
 target_include_directories(SmartDashboardApp
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
         ${CMAKE_SOURCE_DIR}/SmartDashboard_Interface_direct/include
+        ${CMAKE_SOURCE_DIR}/ClientInterface_direct/include
 )
 
 target_link_libraries(SmartDashboardApp
@@ -34,6 +39,7 @@ target_link_libraries(SmartDashboardApp
         Qt6::Gui
         Qt6::Widgets
         SmartDashboard_Interface_direct
+        ClientInterface_direct
 )
 
 target_compile_features(SmartDashboardApp PRIVATE cxx_std_20)

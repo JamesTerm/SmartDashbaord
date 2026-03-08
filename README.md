@@ -29,6 +29,8 @@ Lightweight C++ dashboard for FRC, inspired by WPILib SmartDashboard.
 Optional sample publisher:
 
 - `build/ClientInterface_direct/Debug/sd_direct_publisher_sample.exe`
+- Command roundtrip sample (manual dashboard writeback check):
+  - `build/ClientInterface_direct/Debug/sd_command_roundtrip_sample.exe`
 - Tests now publish to the same default direct channel used by the dashboard (good for live manual testing).
 - To force isolated per-test channels instead:
   - `set SD_DIRECT_TEST_USE_ISOLATED_CHANNELS=1 && build/ClientInterface_direct/Debug/ClientInterface_direct_tests.exe --gtest_filter=DirectPublisherTests.StreamsSineWaveDouble`
@@ -47,6 +49,20 @@ Use this loop to validate end-to-end publisher/subscriber behavior:
    - values continue updating during the test window
 4. Re-run the same test to confirm reconnect behavior:
    - existing tiles should continue updating after publisher restart
+
+## Manual command roundtrip check
+
+Use this check for dashboard -> app/client command flow:
+
+1. Start dashboard:
+   - `build/SmartDashboard/Debug/SmartDashboardApp.exe`
+2. Run roundtrip sample:
+   - `build/ClientInterface_direct/Debug/sd_command_roundtrip_sample.exe`
+3. In dashboard, for key `Integration/Armed`:
+   - right-click tile -> `Change to...` -> `Checkbox control`
+   - check the box
+4. Expected result:
+   - sample exits with success (`Roundtrip command received. Success.`)
 
 ## Windows build note (vcpkg + PowerShell)
 

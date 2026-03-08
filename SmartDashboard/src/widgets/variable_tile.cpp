@@ -1,5 +1,7 @@
 #include "widgets/variable_tile.h"
 
+#include "widgets/tile_control_widget.h"
+
 #include <QAction>
 #include <QContextMenuEvent>
 #include <QDial>
@@ -71,6 +73,28 @@ namespace sd::widgets
         m_layout->addWidget(m_boolLed, 0, 1, 1, 1, Qt::AlignLeft | Qt::AlignVCenter);
         m_layout->addWidget(m_progressBar, 0, 1, 1, 1);
         m_layout->addWidget(m_gauge, 0, 1, 1, 1);
+
+        m_controlWidget = new TileControlWidget(m_type, this);
+        m_controlWidget->setVisible(false);
+
+        m_layout->addWidget(m_controlWidget, 1, 0, 1, 2);
+
+        connect(m_controlWidget, &TileControlWidget::BoolEdited, this, [this](bool value)
+        {
+            emit ControlBoolEdited(m_key, value);
+        });
+        connect(m_controlWidget, &TileControlWidget::DoubleEdited, this, [this](double value)
+        {
+            emit ControlDoubleEdited(m_key, value);
+        });
+        connect(m_controlWidget, &TileControlWidget::StringEdited, this, [this](const QString& value)
+        {
+            emit ControlStringEdited(m_key, value);
+        });
+
+        // Control widgets should stay interactive in editable mode as well,
+        // so we do not emit change on each drag operation from the tile itself.
+        setMouseTracking(true);
 
         setMinimumSize(180, 64);
         UpdateWidgetPresentation();
@@ -181,15 +205,18 @@ namespace sd::widgets
             case VariableType::Bool:
                 addWidgetAction("LED indicator", "bool.led");
                 addWidgetAction("True/False text", "bool.text");
+                addWidgetAction("Checkbox control", "bool.checkbox");
                 break;
             case VariableType::Double:
                 addWidgetAction("Numeric text", "double.numeric");
                 addWidgetAction("Progress bar", "double.progress");
                 addWidgetAction("Gauge", "double.gauge");
+                addWidgetAction("Slider control", "double.slider");
                 break;
             case VariableType::String:
                 addWidgetAction("Text label", "string.text");
                 addWidgetAction("Multiline", "string.multiline");
+                addWidgetAction("Edit control", "string.edit");
                 break;
             default:
                 break;
@@ -220,19 +247,25 @@ namespace sd::widgets
         // map persisted widgetType id to one concrete visual presentation.
         const bool isBoolLed = (m_widgetType == "bool.led");
         const bool isBoolText = (m_widgetType == "bool.text");
+        const bool isBoolCheckbox = (m_widgetType == "bool.checkbox");
         const bool isDoubleNumeric = (m_widgetType == "double.numeric");
         const bool isDoubleProgress = (m_widgetType == "double.progress");
         const bool isDoubleGauge = (m_widgetType == "double.gauge");
+        const bool isDoubleSlider = (m_widgetType == "double.slider");
         const bool isStringText = (m_widgetType == "string.text");
         const bool isStringMultiline = (m_widgetType == "string.multiline");
+        const bool isStringEdit = (m_widgetType == "string.edit");
 
         const bool showBoolLed = (m_type == VariableType::Bool && isBoolLed);
         const bool showBoolText = (m_type == VariableType::Bool && isBoolText);
+        const bool showBoolCheckbox = (m_type == VariableType::Bool && isBoolCheckbox);
         const bool showDoubleNumeric = (m_type == VariableType::Double && isDoubleNumeric);
         const bool showDoubleProgress = (m_type == VariableType::Double && isDoubleProgress);
         const bool showDoubleGauge = (m_type == VariableType::Double && isDoubleGauge);
+        const bool showDoubleSlider = (m_type == VariableType::Double && isDoubleSlider);
         const bool showStringText = (m_type == VariableType::String && isStringText);
         const bool showStringMultiline = (m_type == VariableType::String && isStringMultiline);
+        const bool showStringEdit = (m_type == VariableType::String && isStringEdit);
 
         m_boolLed->setVisible(showBoolLed);
         m_progressBar->setVisible(showDoubleProgress);
@@ -242,21 +275,34 @@ namespace sd::widgets
         m_valueLabel->setVisible(showValueLabel);
         m_titleLabel->setVisible(!showDoubleGauge);
 
-        if (showDoubleGauge)
+        const bool showControl = showBoolCheckbox || showDoubleSlider || showStringEdit;
+        m_controlWidget->setVisible(showControl);
+
+        if (showControl)
+        {
+            m_layout->addWidget(m_titleLabel, 0, 0, 1, 2, Qt::AlignLeft | Qt::AlignTop);
+            m_layout->addWidget(m_controlWidget, 1, 0, 1, 2);
+        }
+        else
+        {
+            m_layout->addWidget(m_controlWidget, 1, 0, 1, 2);
+        }
+
+        if (!showControl && showDoubleGauge)
         {
             m_layout->addWidget(m_gauge, 1, 0, 1, 2, Qt::AlignHCenter | Qt::AlignVCenter);
         }
-        else if (showDoubleProgress)
+        else if (!showControl && showDoubleProgress)
         {
             m_layout->addWidget(m_titleLabel, 0, 0, 1, 2, Qt::AlignLeft | Qt::AlignTop);
             m_layout->addWidget(m_progressBar, 1, 0, 1, 2);
         }
-        else if (showStringMultiline)
+        else if (!showControl && showStringMultiline)
         {
             m_layout->addWidget(m_titleLabel, 0, 0, 1, 1, Qt::AlignLeft | Qt::AlignTop);
             m_layout->addWidget(m_valueLabel, 1, 0, 1, 2);
         }
-        else
+        else if (!showControl)
         {
             m_layout->addWidget(m_titleLabel, 0, 0, 1, 1, Qt::AlignLeft | Qt::AlignVCenter);
             m_layout->addWidget(m_valueLabel, 0, 1, 1, 1);
@@ -279,6 +325,23 @@ namespace sd::widgets
 
     void VariableTile::UpdateValueDisplay()
     {
+        if (m_controlWidget->isVisible())
+        {
+            if (m_type == VariableType::Bool)
+            {
+                m_controlWidget->SetBoolValue(m_boolValue);
+            }
+            else if (m_type == VariableType::Double)
+            {
+                m_controlWidget->SetDoubleValue(m_doubleValue);
+            }
+            else if (m_type == VariableType::String)
+            {
+                m_controlWidget->SetStringValue(m_stringValue);
+            }
+            return;
+        }
+
         if (m_progressBar->isVisible())
         {
             m_progressBar->setValue(DoubleToPercent(m_doubleValue));
@@ -323,4 +386,5 @@ namespace sd::widgets
             QString("background-color: %1; border-radius: 7px; border: 1px solid #4b4b4b;").arg(color)
         );
     }
+
 }

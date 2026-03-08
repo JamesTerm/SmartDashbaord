@@ -11,6 +11,11 @@ class QFrame;
 
 namespace sd::widgets
 {
+    class TileControlWidget;
+}
+
+namespace sd::widgets
+{
     enum class VariableType
     {
         Bool,
@@ -37,6 +42,9 @@ namespace sd::widgets
 
     signals:
         void ChangeWidgetRequested(const QString& key, const QString& widgetType);
+        void ControlBoolEdited(const QString& key, bool value);
+        void ControlDoubleEdited(const QString& key, double value);
+        void ControlStringEdited(const QString& key, const QString& value);
 
     protected:
         void mousePressEvent(QMouseEvent* event) override;
@@ -67,5 +75,6 @@ namespace sd::widgets
         QDial* m_gauge = nullptr;
         QFrame* m_boolLed = nullptr;
         QGridLayout* m_layout = nullptr;
+        TileControlWidget* m_controlWidget = nullptr;
     };
 }

@@ -16,6 +16,14 @@ namespace sd::direct
         PublisherConfig publisher;
         SubscriberConfig subscriber;
         bool enableSubscriber = true;
+
+        // Optional command channel (dashboard -> app/client) for writable controls.
+        SubscriberConfig commandSubscriber {
+            L"Local\\SmartDashboard.Direct.Command.Buffer",
+            L"Local\\SmartDashboard.Direct.Command.DataAvailable",
+            L"Local\\SmartDashboard.Direct.Command.Heartbeat"
+        };
+        bool enableCommandSubscriber = false;
     };
 
     struct SubscriptionToken
@@ -60,6 +68,12 @@ namespace sd::direct
         SubscriptionToken SubscribeDouble(std::string key, DoubleChangedCallback callback, bool invokeImmediately = true);
         SubscriptionToken SubscribeString(std::string key, StringChangedCallback callback, bool invokeImmediately = true);
         bool Unsubscribe(const SubscriptionToken& token);
+
+        // Callback for writable dashboard controls coming back to app/client.
+        // Returns a typed subscription token that can be removed with Unsubscribe.
+        SubscriptionToken SubscribeBooleanCommand(std::string key, BoolChangedCallback callback, bool invokeImmediately = false);
+        SubscriptionToken SubscribeDoubleCommand(std::string key, DoubleChangedCallback callback, bool invokeImmediately = false);
+        SubscriptionToken SubscribeStringCommand(std::string key, StringChangedCallback callback, bool invokeImmediately = false);
 
     private:
         struct Impl;

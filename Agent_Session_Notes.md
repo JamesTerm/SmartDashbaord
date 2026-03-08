@@ -101,3 +101,22 @@
 - Added single-instance guard for `SmartDashboardApp` on Windows using named mutex `Local\\SmartDashboard.SingleInstance`.
   - If already running, app now shows a message box and exits.
 - Multi-instance note: current direct ring transport remains effectively single-consumer due to shared read cursor; one dashboard instance is the supported mode for now.
+
+## Bidirectional controls checkpoint (2026-03-08)
+
+- Added initial dashboard -> app/client command channel support using separate direct transport names:
+  - `Local\\SmartDashboard.Direct.Command.Buffer`
+  - `Local\\SmartDashboard.Direct.Command.DataAvailable`
+  - `Local\\SmartDashboard.Direct.Command.Heartbeat`
+- Added command publish adapter in dashboard (`DirectPublisherAdapter`) and wired editable control signals from tiles into command publishes.
+- Extended tile widget modes with writable controls:
+  - `bool.checkbox`
+  - `double.slider`
+  - `string.edit`
+- Added reusable `TileControlWidget` to host interactive controls and keep telemetry display widgets separate.
+- Extended `SmartDashboardClient` with optional command subscriber and command callback subscriptions:
+  - `SubscribeBooleanCommand`, `SubscribeDoubleCommand`, `SubscribeStringCommand`
+- Added command-channel tests in `smartdashboard_client_tests.cpp` for bool/double/string receive paths.
+- Updated command tests with animated 2-second visual windows so manual checks can verify updates continue on already-populated widgets.
+- Added manual roundtrip sample `sd_command_roundtrip_sample` and README instructions for live dashboard validation.
+- Added `File -> Clear Widgets` action in dashboard to reset runtime widget/model state without restarting app.

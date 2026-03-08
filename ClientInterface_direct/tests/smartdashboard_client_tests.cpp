@@ -6,6 +6,7 @@
 #include <chrono>
 #include <cstdint>
 #include <functional>
+#include <mutex>
 #include <string>
 #include <thread>
 
@@ -43,6 +44,19 @@ namespace sd::direct
                 std::this_thread::sleep_for(10ms);
             }
             return predicate();
+        }
+
+        template <typename TickFn>
+        void AnimateForVisualCheck(SmartDashboardClient& client, TickFn&& onTick)
+        {
+            // 2-second animation window so manual verification can confirm updates
+            // continue to flow for already-populated widgets.
+            for (int i = 0; i < 20; ++i)
+            {
+                onTick(i);
+                client.FlushNow();
+                std::this_thread::sleep_for(100ms);
+            }
         }
     }
 
@@ -101,6 +115,193 @@ namespace sd::direct
         ));
         EXPECT_GE(callbackCount.load(), 1);
 
+        EXPECT_TRUE(client.Unsubscribe(token));
+        client.Stop();
+    }
+
+    TEST(SmartDashboardClientTests, ReceivesBoolCommandFromDashboardChannel)
+    {
+        SmartDashboardClientConfig config;
+        config.enableCommandSubscriber = true;
+        config.publisher.autoFlushThread = false;
+
+        SmartDashboardClient client(config);
+        ASSERT_TRUE(client.Start());
+
+        client.PutString("Demo/Visual/TestName", "Bool command receive");
+        client.PutBoolean("Demo/Command/Enabled", false);
+        ASSERT_TRUE(client.FlushNow());
+
+        std::atomic<bool> commandValue {false};
+        std::atomic<int> commandCount {0};
+
+        const auto token = client.SubscribeBooleanCommand(
+            "Demo/Command/Enabled",
+            [&commandValue, &commandCount](bool value)
+            {
+                commandValue.store(value);
+                commandCount.fetch_add(1);
+            }
+        );
+        ASSERT_TRUE(static_cast<bool>(token));
+
+        PublisherConfig commandPubCfg;
+        commandPubCfg.mappingName = L"Local\\SmartDashboard.Direct.Command.Buffer";
+        commandPubCfg.dataEventName = L"Local\\SmartDashboard.Direct.Command.DataAvailable";
+        commandPubCfg.heartbeatEventName = L"Local\\SmartDashboard.Direct.Command.Heartbeat";
+        commandPubCfg.autoFlushThread = false;
+
+        auto commandPublisher = CreateDirectPublisher(commandPubCfg);
+        ASSERT_TRUE(commandPublisher->Start());
+        commandPublisher->PublishBool("Demo/Command/Enabled", true);
+        ASSERT_TRUE(commandPublisher->FlushNow());
+
+        ASSERT_TRUE(WaitUntil(
+            [&commandValue]()
+            {
+                return commandValue.load();
+            },
+            2s
+        ));
+        EXPECT_GE(commandCount.load(), 1);
+
+        AnimateForVisualCheck(client, [&client](int i)
+        {
+            client.PutBoolean("Demo/Command/Enabled", (i % 2) == 0);
+            client.PutString("Demo/Visual/TestName", "Bool command receive (animating)");
+        });
+
+        commandPublisher->Stop();
+        EXPECT_TRUE(client.Unsubscribe(token));
+        client.Stop();
+    }
+
+    TEST(SmartDashboardClientTests, ReceivesDoubleCommandFromDashboardChannel)
+    {
+        SmartDashboardClientConfig config;
+        config.enableCommandSubscriber = true;
+        config.publisher.autoFlushThread = false;
+
+        SmartDashboardClient client(config);
+        ASSERT_TRUE(client.Start());
+
+        client.PutString("Demo/Visual/TestName", "Double command receive");
+        client.PutDouble("Demo/Command/Throttle", 0.0);
+        ASSERT_TRUE(client.FlushNow());
+
+        std::atomic<double> commandValue {0.0};
+        std::atomic<int> commandCount {0};
+
+        const auto token = client.SubscribeDoubleCommand(
+            "Demo/Command/Throttle",
+            [&commandValue, &commandCount](double value)
+            {
+                commandValue.store(value);
+                commandCount.fetch_add(1);
+            }
+        );
+        ASSERT_TRUE(static_cast<bool>(token));
+
+        PublisherConfig commandPubCfg;
+        commandPubCfg.mappingName = L"Local\\SmartDashboard.Direct.Command.Buffer";
+        commandPubCfg.dataEventName = L"Local\\SmartDashboard.Direct.Command.DataAvailable";
+        commandPubCfg.heartbeatEventName = L"Local\\SmartDashboard.Direct.Command.Heartbeat";
+        commandPubCfg.autoFlushThread = false;
+
+        auto commandPublisher = CreateDirectPublisher(commandPubCfg);
+        ASSERT_TRUE(commandPublisher->Start());
+        commandPublisher->PublishDouble("Demo/Command/Throttle", 0.42);
+        ASSERT_TRUE(commandPublisher->FlushNow());
+
+        ASSERT_TRUE(WaitUntil(
+            [&commandValue]()
+            {
+                return commandValue.load() > 0.4;
+            },
+            2s
+        ));
+        EXPECT_GE(commandCount.load(), 1);
+
+        AnimateForVisualCheck(client, [&client](int i)
+        {
+            const double t = static_cast<double>(i) / 19.0;
+            const double ramp = -1.0 + (2.0 * t);
+            client.PutDouble("Demo/Command/Throttle", ramp);
+            client.PutString("Demo/Visual/TestName", "Double command receive (animating)");
+        });
+
+        commandPublisher->Stop();
+        EXPECT_TRUE(client.Unsubscribe(token));
+        client.Stop();
+    }
+
+    TEST(SmartDashboardClientTests, ReceivesStringCommandFromDashboardChannel)
+    {
+        SmartDashboardClientConfig config;
+        config.enableCommandSubscriber = true;
+        config.publisher.autoFlushThread = false;
+
+        SmartDashboardClient client(config);
+        ASSERT_TRUE(client.Start());
+
+        client.PutString("Demo/Visual/TestName", "String command receive");
+        client.PutString("Demo/Command/Mode", "Waiting");
+        ASSERT_TRUE(client.FlushNow());
+
+        std::atomic<int> commandCount {0};
+        std::string lastValue;
+        std::mutex mutex;
+
+        const auto token = client.SubscribeStringCommand(
+            "Demo/Command/Mode",
+            [&lastValue, &mutex, &commandCount](const std::string& value)
+            {
+                std::lock_guard<std::mutex> lock(mutex);
+                lastValue = value;
+                commandCount.fetch_add(1);
+            }
+        );
+        ASSERT_TRUE(static_cast<bool>(token));
+
+        PublisherConfig commandPubCfg;
+        commandPubCfg.mappingName = L"Local\\SmartDashboard.Direct.Command.Buffer";
+        commandPubCfg.dataEventName = L"Local\\SmartDashboard.Direct.Command.DataAvailable";
+        commandPubCfg.heartbeatEventName = L"Local\\SmartDashboard.Direct.Command.Heartbeat";
+        commandPubCfg.autoFlushThread = false;
+
+        auto commandPublisher = CreateDirectPublisher(commandPubCfg);
+        ASSERT_TRUE(commandPublisher->Start());
+        commandPublisher->PublishString("Demo/Command/Mode", "Manual");
+        ASSERT_TRUE(commandPublisher->FlushNow());
+
+        ASSERT_TRUE(WaitUntil(
+            [&lastValue, &mutex]()
+            {
+                std::lock_guard<std::mutex> lock(mutex);
+                return lastValue == "Manual";
+            },
+            2s
+        ));
+        EXPECT_GE(commandCount.load(), 1);
+
+        AnimateForVisualCheck(client, [&client](int i)
+        {
+            if ((i % 3) == 0)
+            {
+                client.PutString("Demo/Command/Mode", "Manual");
+            }
+            else if ((i % 3) == 1)
+            {
+                client.PutString("Demo/Command/Mode", "Assist");
+            }
+            else
+            {
+                client.PutString("Demo/Command/Mode", "Auto");
+            }
+            client.PutString("Demo/Visual/TestName", "String command receive (animating)");
+        });
+
+        commandPublisher->Stop();
         EXPECT_TRUE(client.Unsubscribe(token));
         client.Stop();
     }

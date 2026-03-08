@@ -52,6 +52,7 @@ namespace sd::direct
         SmartDashboardClientConfig config;
         std::unique_ptr<IDirectPublisher> publisher;
         std::unique_ptr<IDirectSubscriber> subscriber;
+        std::unique_ptr<IDirectSubscriber> commandSubscriber;
         bool running = false;
 
         mutable std::mutex mutex;
@@ -61,6 +62,9 @@ namespace sd::direct
         std::unordered_map<std::string, std::vector<BoolSubscription>> boolSubscribers;
         std::unordered_map<std::string, std::vector<DoubleSubscription>> doubleSubscribers;
         std::unordered_map<std::string, std::vector<StringSubscription>> stringSubscribers;
+        std::unordered_map<std::string, std::vector<BoolSubscription>> boolCommandSubscribers;
+        std::unordered_map<std::string, std::vector<DoubleSubscription>> doubleCommandSubscribers;
+        std::unordered_map<std::string, std::vector<StringSubscription>> stringCommandSubscribers;
 
         void HandleUpdate(const VariableUpdate& update)
         {
@@ -148,6 +152,73 @@ namespace sd::direct
             }
         }
 
+        void HandleCommandUpdate(const VariableUpdate& update)
+        {
+            std::vector<BoolChangedCallback> boolCallbacks;
+            std::vector<DoubleChangedCallback> doubleCallbacks;
+            std::vector<StringChangedCallback> stringCallbacks;
+
+            {
+                std::lock_guard<std::mutex> lock(mutex);
+
+                if (update.type == ValueType::Bool)
+                {
+                    auto subIt = boolCommandSubscribers.find(update.key);
+                    if (subIt != boolCommandSubscribers.end())
+                    {
+                        for (const BoolSubscription& sub : subIt->second)
+                        {
+                            boolCallbacks.push_back(sub.callback);
+                        }
+                    }
+                }
+                else if (update.type == ValueType::Double)
+                {
+                    auto subIt = doubleCommandSubscribers.find(update.key);
+                    if (subIt != doubleCommandSubscribers.end())
+                    {
+                        for (const DoubleSubscription& sub : subIt->second)
+                        {
+                            doubleCallbacks.push_back(sub.callback);
+                        }
+                    }
+                }
+                else if (update.type == ValueType::String)
+                {
+                    auto subIt = stringCommandSubscribers.find(update.key);
+                    if (subIt != stringCommandSubscribers.end())
+                    {
+                        for (const StringSubscription& sub : subIt->second)
+                        {
+                            stringCallbacks.push_back(sub.callback);
+                        }
+                    }
+                }
+            }
+
+            if (update.type == ValueType::Bool)
+            {
+                for (const auto& callback : boolCallbacks)
+                {
+                    callback(update.value.boolValue);
+                }
+            }
+            else if (update.type == ValueType::Double)
+            {
+                for (const auto& callback : doubleCallbacks)
+                {
+                    callback(update.value.doubleValue);
+                }
+            }
+            else if (update.type == ValueType::String)
+            {
+                for (const auto& callback : stringCallbacks)
+                {
+                    callback(update.value.stringValue);
+                }
+            }
+        }
+
         bool TryReadCachedBoolean(std::string_view key, bool& outValue) const
         {
             std::lock_guard<std::mutex> lock(mutex);
@@ -191,6 +262,10 @@ namespace sd::direct
     SmartDashboardClient::SmartDashboardClient(const SmartDashboardClientConfig& config)
         : m_impl(std::make_unique<Impl>(config))
     {
+        if (m_impl->config.enableCommandSubscriber)
+        {
+            m_impl->commandSubscriber = CreateDirectSubscriber(m_impl->config.commandSubscriber);
+        }
     }
 
     SmartDashboardClient::~SmartDashboardClient()
@@ -234,6 +309,29 @@ namespace sd::direct
             }
         }
 
+        if (m_impl->commandSubscriber)
+        {
+            const bool started = m_impl->commandSubscriber->Start(
+                [this](const VariableUpdate& update)
+                {
+                    m_impl->HandleCommandUpdate(update);
+                },
+                [](ConnectionState)
+                {
+                }
+            );
+
+            if (!started)
+            {
+                if (m_impl->subscriber)
+                {
+                    m_impl->subscriber->Stop();
+                }
+                m_impl->publisher->Stop();
+                return false;
+            }
+        }
+
         m_impl->running = true;
         return true;
     }
@@ -248,6 +346,10 @@ namespace sd::direct
         if (m_impl->subscriber)
         {
             m_impl->subscriber->Stop();
+        }
+        if (m_impl->commandSubscriber)
+        {
+            m_impl->commandSubscriber->Stop();
         }
         if (m_impl->publisher)
         {
@@ -471,6 +573,54 @@ namespace sd::direct
         return SubscriptionToken {std::move(key), ValueType::String, id};
     }
 
+    SubscriptionToken SmartDashboardClient::SubscribeBooleanCommand(std::string key, BoolChangedCallback callback, bool)
+    {
+        if (!m_impl || !callback)
+        {
+            return {};
+        }
+
+        std::uint64_t id = 0;
+        {
+            std::lock_guard<std::mutex> lock(m_impl->mutex);
+            id = m_impl->nextSubscriptionId++;
+            m_impl->boolCommandSubscribers[key].push_back(BoolSubscription {id, callback});
+        }
+        return SubscriptionToken {std::move(key), ValueType::Bool, id};
+    }
+
+    SubscriptionToken SmartDashboardClient::SubscribeDoubleCommand(std::string key, DoubleChangedCallback callback, bool)
+    {
+        if (!m_impl || !callback)
+        {
+            return {};
+        }
+
+        std::uint64_t id = 0;
+        {
+            std::lock_guard<std::mutex> lock(m_impl->mutex);
+            id = m_impl->nextSubscriptionId++;
+            m_impl->doubleCommandSubscribers[key].push_back(DoubleSubscription {id, callback});
+        }
+        return SubscriptionToken {std::move(key), ValueType::Double, id};
+    }
+
+    SubscriptionToken SmartDashboardClient::SubscribeStringCommand(std::string key, StringChangedCallback callback, bool)
+    {
+        if (!m_impl || !callback)
+        {
+            return {};
+        }
+
+        std::uint64_t id = 0;
+        {
+            std::lock_guard<std::mutex> lock(m_impl->mutex);
+            id = m_impl->nextSubscriptionId++;
+            m_impl->stringCommandSubscribers[key].push_back(StringSubscription {id, callback});
+        }
+        return SubscriptionToken {std::move(key), ValueType::String, id};
+    }
+
     bool SmartDashboardClient::Unsubscribe(const SubscriptionToken& token)
     {
         if (!m_impl || !token)
@@ -483,58 +633,112 @@ namespace sd::direct
         if (token.type == ValueType::Bool)
         {
             auto it = m_impl->boolSubscribers.find(token.key);
-            if (it == m_impl->boolSubscribers.end())
+            if (it != m_impl->boolSubscribers.end())
+            {
+                auto& vec = it->second;
+                const auto before = vec.size();
+                vec.erase(
+                    std::remove_if(vec.begin(), vec.end(), [&token](const BoolSubscription& sub)
+                    {
+                        return sub.id == token.id;
+                    }),
+                    vec.end()
+                );
+                if (vec.size() != before)
+                {
+                    return true;
+                }
+            }
+
+            auto cmdIt = m_impl->boolCommandSubscribers.find(token.key);
+            if (cmdIt == m_impl->boolCommandSubscribers.end())
             {
                 return false;
             }
 
-            auto& vec = it->second;
-            const auto before = vec.size();
-            vec.erase(
-                std::remove_if(vec.begin(), vec.end(), [&token](const BoolSubscription& sub)
+            auto& cmdVec = cmdIt->second;
+            const auto cmdBefore = cmdVec.size();
+            cmdVec.erase(
+                std::remove_if(cmdVec.begin(), cmdVec.end(), [&token](const BoolSubscription& sub)
                 {
                     return sub.id == token.id;
                 }),
-                vec.end()
+                cmdVec.end()
             );
-            return vec.size() != before;
+            return cmdVec.size() != cmdBefore;
         }
 
         if (token.type == ValueType::Double)
         {
             auto it = m_impl->doubleSubscribers.find(token.key);
-            if (it == m_impl->doubleSubscribers.end())
+            if (it != m_impl->doubleSubscribers.end())
+            {
+                auto& vec = it->second;
+                const auto before = vec.size();
+                vec.erase(
+                    std::remove_if(vec.begin(), vec.end(), [&token](const DoubleSubscription& sub)
+                    {
+                        return sub.id == token.id;
+                    }),
+                    vec.end()
+                );
+                if (vec.size() != before)
+                {
+                    return true;
+                }
+            }
+
+            auto cmdIt = m_impl->doubleCommandSubscribers.find(token.key);
+            if (cmdIt == m_impl->doubleCommandSubscribers.end())
             {
                 return false;
             }
 
+            auto& cmdVec = cmdIt->second;
+            const auto cmdBefore = cmdVec.size();
+            cmdVec.erase(
+                std::remove_if(cmdVec.begin(), cmdVec.end(), [&token](const DoubleSubscription& sub)
+                {
+                    return sub.id == token.id;
+                }),
+                cmdVec.end()
+            );
+            return cmdVec.size() != cmdBefore;
+        }
+
+        auto it = m_impl->stringSubscribers.find(token.key);
+        if (it != m_impl->stringSubscribers.end())
+        {
             auto& vec = it->second;
             const auto before = vec.size();
             vec.erase(
-                std::remove_if(vec.begin(), vec.end(), [&token](const DoubleSubscription& sub)
+                std::remove_if(vec.begin(), vec.end(), [&token](const StringSubscription& sub)
                 {
                     return sub.id == token.id;
                 }),
                 vec.end()
             );
-            return vec.size() != before;
+            if (vec.size() != before)
+            {
+                return true;
+            }
         }
 
-        auto it = m_impl->stringSubscribers.find(token.key);
-        if (it == m_impl->stringSubscribers.end())
+        auto cmdIt = m_impl->stringCommandSubscribers.find(token.key);
+        if (cmdIt == m_impl->stringCommandSubscribers.end())
         {
             return false;
         }
 
-        auto& vec = it->second;
-        const auto before = vec.size();
-        vec.erase(
-            std::remove_if(vec.begin(), vec.end(), [&token](const StringSubscription& sub)
+        auto& cmdVec = cmdIt->second;
+        const auto cmdBefore = cmdVec.size();
+        cmdVec.erase(
+            std::remove_if(cmdVec.begin(), cmdVec.end(), [&token](const StringSubscription& sub)
             {
                 return sub.id == token.id;
             }),
-            vec.end()
+            cmdVec.end()
         );
-        return vec.size() != before;
+        return cmdVec.size() != cmdBefore;
     }
 }

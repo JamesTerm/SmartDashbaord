@@ -1,6 +1,7 @@
 #include "app/main_window.h"
 
 #include "layout/layout_serializer.h"
+#include "transport/direct_publisher_adapter.h"
 
 #include <QAction>
 #include <QApplication>
@@ -48,8 +49,10 @@ MainWindow::MainWindow(QWidget* parent)
     QMenu* fileMenu = menuBar()->addMenu("&File");
     QAction* saveLayoutAction = fileMenu->addAction("Save Layout");
     QAction* loadLayoutAction = fileMenu->addAction("Load Layout");
+    QAction* clearWidgetsAction = fileMenu->addAction("Clear Widgets");
     connect(saveLayoutAction, &QAction::triggered, this, &MainWindow::OnSaveLayout);
     connect(loadLayoutAction, &QAction::triggered, this, &MainWindow::OnLoadLayout);
+    connect(clearWidgetsAction, &QAction::triggered, this, &MainWindow::OnClearWidgets);
 
     QMenu* viewMenu = menuBar()->addMenu("&View");
     m_editableAction = viewMenu->addAction("Editable");
@@ -72,6 +75,9 @@ MainWindow::MainWindow(QWidget* parent)
         &MainWindow::OnConnectionStateChanged
     );
 
+    m_commandPublisher = new DirectPublisherAdapter(this);
+    m_commandPublisher->Start();
+
     connect(
         qApp,
         &QCoreApplication::aboutToQuit,
@@ -92,6 +98,10 @@ MainWindow::MainWindow(QWidget* parent)
 MainWindow::~MainWindow()
 {
     m_subscriberAdapter.Stop();
+    if (m_commandPublisher != nullptr)
+    {
+        m_commandPublisher->Stop();
+    }
 }
 
 void MainWindow::OnToggleEditable()
@@ -173,6 +183,25 @@ void MainWindow::OnLoadLayout()
     }
 }
 
+void MainWindow::OnClearWidgets()
+{
+    // Clear dashboard runtime state so repopulation behavior can be retested
+    // without restarting the app process.
+    for (auto& [_, tile] : m_tiles)
+    {
+        if (tile != nullptr)
+        {
+            tile->deleteLater();
+        }
+    }
+
+    m_tiles.clear();
+    m_savedLayoutByKey.clear();
+    m_variableStore.Clear();
+    m_nextTileOffset = 0;
+    m_lastTransportSeq = 0;
+}
+
 sd::widgets::VariableTile* MainWindow::GetOrCreateTile(const QString& key, sd::widgets::VariableType type)
 {
     const std::string keyStd = key.toStdString();
@@ -192,6 +221,9 @@ sd::widgets::VariableTile* MainWindow::GetOrCreateTile(const QString& key, sd::w
             tile->setProperty("widgetType", widgetType);
         }
     );
+    connect(tile, &sd::widgets::VariableTile::ControlBoolEdited, this, &MainWindow::OnControlBoolEdited);
+    connect(tile, &sd::widgets::VariableTile::ControlDoubleEdited, this, &MainWindow::OnControlDoubleEdited);
+    connect(tile, &sd::widgets::VariableTile::ControlStringEdited, this, &MainWindow::OnControlStringEdited);
 
     tile->setObjectName(QString("tile_%1").arg(QString::number(m_tiles.size() + 1)));
     tile->SetEditable(m_isEditable);
@@ -265,4 +297,28 @@ void MainWindow::SaveWindowGeometry() const
     QSettings settings("SmartDashboard", "SmartDashboardApp");
     settings.setValue("window/geometry", saveGeometry());
     settings.setValue("window/state", saveState());
+}
+
+void MainWindow::OnControlBoolEdited(const QString& key, bool value)
+{
+    if (m_commandPublisher != nullptr)
+    {
+        m_commandPublisher->PublishBool(key, value);
+    }
+}
+
+void MainWindow::OnControlDoubleEdited(const QString& key, double value)
+{
+    if (m_commandPublisher != nullptr)
+    {
+        m_commandPublisher->PublishDouble(key, value);
+    }
+}
+
+void MainWindow::OnControlStringEdited(const QString& key, const QString& value)
+{
+    if (m_commandPublisher != nullptr)
+    {
+        m_commandPublisher->PublishString(key, value);
+    }
 }

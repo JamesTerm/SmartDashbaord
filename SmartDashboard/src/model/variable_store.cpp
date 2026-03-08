@@ -45,4 +45,9 @@ namespace sd::model
             record.seq = 0;
         }
     }
+
+    void VariableStore::Clear()
+    {
+        m_records.clear();
+    }
 }

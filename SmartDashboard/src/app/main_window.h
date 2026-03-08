@@ -31,6 +31,10 @@ private slots:
     void OnConnectionStateChanged(int state);
     void OnSaveLayout();
     void OnLoadLayout();
+    void OnClearWidgets();
+    void OnControlBoolEdited(const QString& key, bool value);
+    void OnControlDoubleEdited(const QString& key, double value);
+    void OnControlStringEdited(const QString& key, const QString& value);
 
 private:
     using TileMap = std::unordered_map<std::string, sd::widgets::VariableTile*>;
@@ -51,4 +55,5 @@ private:
     LayoutMap m_savedLayoutByKey;
     sd::model::VariableStore m_variableStore;
     DirectSubscriberAdapter m_subscriberAdapter;
+    class DirectPublisherAdapter* m_commandPublisher = nullptr;
 };
