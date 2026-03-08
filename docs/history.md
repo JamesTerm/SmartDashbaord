@@ -194,6 +194,30 @@ This repository is an experimental C++ dashboard prototype exploring an alternat
 - It focuses on a **simpler data pipeline** aimed at clarity, predictable behavior, and performance.
 - It treats architecture as a teaching tool so students can see where transport decisions affect UI and system reliability.
 
+### What this project preserves (and why it remains useful)
+
+Even while avoiding NetworkTables, this repository intentionally preserves several ideas that made prior FRC tooling effective:
+
+- **Simple, typed publishing surface**: `PutBoolean`/`PutDouble`/`PutString` and corresponding `get` patterns (passive/assertive/callback) keep robot-side usage approachable.
+- **Key-based dashboard workflow**: dynamic key discovery and widget binding still support rapid iteration during build season.
+- **Transport abstraction boundary**: app/client logic depends on interfaces, not a single protocol, which keeps future transport swaps practical.
+- **Runtime layout ergonomics**: editable widget placement and persistence preserve the “tune it live” workflow teams rely on.
+- **Cross-team extensibility**: keeping the direct layer modular allows other teams to plug in alternate backends without rewriting UI/model code.
+
+These preserved concepts are useful because they keep onboarding and iteration speed high while reducing distributed shared-state complexity.
+
+### Deliberate trade-offs in current prototype
+
+- **Single-dashboard-instance operation** is currently enforced for reliability with the present ring-buffer read-cursor model.
+- **Direct transport simplicity over full feature parity** was chosen to get a deterministic baseline before broader multi-client semantics.
+- **Incremental bidirectional support** (dashboard -> app controls) is being added in slices to keep behavior testable and understandable.
+
+### Expansion paths for future teams
+
+- Add a multi-consumer cursor strategy if true concurrent dashboard instances are required.
+- Add additional transport adapters (e.g., different IPC/network backends) behind the same client/subscriber interfaces.
+- Keep the typed API and widget/model boundaries stable so teams can evolve transport independently of UI behavior.
+
 As the project evolves, this history should be updated with concrete results, trade-offs observed in testing, and final design decisions.
 
 ## Closing perspective
