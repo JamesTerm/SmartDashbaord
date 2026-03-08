@@ -15,6 +15,7 @@ namespace sd::direct
     {
         constexpr std::size_t kHeaderSize = sizeof(wire::RingHeader);
 
+        // Circular buffer (ring buffer) occupancy calculation.
         std::uint32_t RingUsed(const RingAttachResult& ring)
         {
             const std::uint32_t writeIndex = ring.header->writeIndex.load(std::memory_order_acquire);
@@ -28,11 +29,14 @@ namespace sd::direct
             return ring.capacity - (readIndex - writeIndex);
         }
 
+        // Circular buffer free-space calculation with one-byte guard slot
+        // (classic ring-buffer full/empty disambiguation).
         std::uint32_t RingFree(const RingAttachResult& ring)
         {
             return ring.capacity - RingUsed(ring) - 1U;
         }
 
+        // Two-segment wrap copy into a circular buffer.
         void CopyToRing(const RingAttachResult& ring, std::uint32_t index, const std::uint8_t* bytes, std::uint32_t count)
         {
             if (count == 0)
@@ -49,6 +53,7 @@ namespace sd::direct
             }
         }
 
+        // Two-segment wrap copy out of a circular buffer.
         void CopyFromRing(const RingAttachResult& ring, std::uint32_t index, std::uint8_t* outBytes, std::uint32_t count)
         {
             if (count == 0)
@@ -65,6 +70,7 @@ namespace sd::direct
             }
         }
 
+        // Message framing step: compute serialized value payload size by type.
         std::uint16_t ComputeValueLen(ValueType type, const VariableValue& value)
         {
             switch (type)
@@ -121,6 +127,8 @@ namespace sd::direct
         auto* header = static_cast<wire::RingHeader*>(mappingBase);
         const std::uint32_t payloadCapacity = static_cast<std::uint32_t>(mappingBytes - kHeaderSize);
 
+        // Versioned shared-memory handshake: if layout does not match,
+        // publisher-side attach can reinitialize the memory region.
         const bool needsInit =
             (header->magic != wire::kMagic) ||
             (header->version != wire::kVersion) ||
@@ -172,6 +180,8 @@ namespace sd::direct
         const std::uint16_t valueLen = ComputeValueLen(type, value);
         const std::uint32_t totalBytes = static_cast<std::uint32_t>(sizeof(wire::MessageHeader) + keyLen + valueLen);
 
+        // Drop policy: if frame cannot fit now, account drop and return.
+        // (No blocking/backpressure in this v1 transport.)
         if (totalBytes >= ring.capacity)
         {
             outDroppedCount = ring.header->droppedCount.fetch_add(1, std::memory_order_acq_rel) + 1;
@@ -184,6 +194,7 @@ namespace sd::direct
             return false;
         }
 
+        // Serialize message as: header + key bytes + value bytes.
         wire::MessageHeader msg {};
         msg.messageBytes = static_cast<std::uint16_t>(totalBytes);
         msg.messageType = static_cast<std::uint8_t>(wire::MsgType::Upsert);
@@ -270,12 +281,15 @@ namespace sd::direct
 
         wire::MessageHeader msg {};
         std::memcpy(&msg, msgBytes.data(), sizeof(msg));
+        // Corruption guard: on malformed frame header, fast-forward to writer.
+        // This is a resynchronization strategy to keep consumer alive.
         if (msg.messageBytes < sizeof(wire::MessageHeader))
         {
             ring.header->readIndex.store(writeIndex, std::memory_order_release);
             return false;
         }
 
+        // Skip unsupported frame types while keeping read cursor consistent.
         if (msg.messageType != static_cast<std::uint8_t>(wire::MsgType::Upsert))
         {
             const std::uint32_t nextRead = (readIndex + msg.messageBytes) % ring.capacity;
@@ -283,6 +297,7 @@ namespace sd::direct
             return false;
         }
 
+        // Framing invariant check: declared message size must match key/value lengths.
         const std::uint32_t payloadBytes = static_cast<std::uint32_t>(msg.keyLen + msg.valueLen);
         if (static_cast<std::uint32_t>(msg.messageBytes) != sizeof(wire::MessageHeader) + payloadBytes)
         {

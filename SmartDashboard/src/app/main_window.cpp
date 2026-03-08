@@ -78,6 +78,7 @@ MainWindow::MainWindow(QWidget* parent)
         this,
         [this]()
         {
+            // Persist both tile layout and top-level window geometry on shutdown.
             OnSaveLayout();
             SaveWindowGeometry();
         }
@@ -104,6 +105,8 @@ void MainWindow::OnToggleEditable()
 
 void MainWindow::OnVariableUpdateReceived(const QString& key, int valueType, const QVariant& value, quint64 seq)
 {
+    // Sequence rollback detection: publisher restart resets seq,
+    // so reset per-key sequence gating to accept new session updates.
     if (seq != 0 && m_lastTransportSeq != 0 && seq < m_lastTransportSeq)
     {
         m_variableStore.ResetSequenceTracking();
@@ -141,6 +144,7 @@ void MainWindow::OnConnectionStateChanged(int state)
     const int connected = static_cast<int>(sd::direct::ConnectionState::Connected);
     if (state == connected)
     {
+        // Reconnect handling: reset sequence gating when transport re-enters connected state.
         m_variableStore.ResetSequenceTracking();
     }
 
@@ -218,6 +222,7 @@ sd::widgets::VariableTile* MainWindow::GetOrCreateTile(const QString& key, sd::w
 
 void MainWindow::UpdateWindowConnectionText(int state)
 {
+    // Finite-state mapping from transport enum -> UI status text.
     QString stateText = "Disconnected";
     if (state == static_cast<int>(sd::direct::ConnectionState::Connecting))
     {
@@ -238,6 +243,7 @@ void MainWindow::UpdateWindowConnectionText(int state)
 
 void MainWindow::LoadWindowGeometry()
 {
+    // Restore persisted main-window geometry/state (Qt settings-backed Memento pattern).
     QSettings settings("SmartDashboard", "SmartDashboardApp");
     const QVariant geometry = settings.value("window/geometry");
     const QVariant state = settings.value("window/state");
@@ -255,6 +261,7 @@ void MainWindow::LoadWindowGeometry()
 
 void MainWindow::SaveWindowGeometry() const
 {
+    // Save persisted main-window geometry/state for next launch.
     QSettings settings("SmartDashboard", "SmartDashboardApp");
     settings.setValue("window/geometry", saveGeometry());
     settings.setValue("window/state", saveState());

@@ -5,6 +5,7 @@
 
 namespace sd::direct
 {
+    // Value type discriminator carried with each update.
     enum class ValueType : std::uint8_t
     {
         Bool = 1,
@@ -12,6 +13,7 @@ namespace sd::direct
         String = 3
     };
 
+    // Generic value container used in callbacks.
     struct VariableValue
     {
         bool boolValue = false;
@@ -19,15 +21,22 @@ namespace sd::direct
         std::string stringValue;
     };
 
+    // One logical update produced by a publisher and consumed by subscribers.
     struct VariableUpdate
     {
+        // Topic/key name (for example "Drive/Speed").
         std::string key;
         ValueType type;
         VariableValue value;
+
+        // Monotonic transport sequence number (resets when publisher restarts).
         std::uint64_t seq;
+
+        // Publisher source timestamp in microseconds.
         std::uint64_t sourceTimestampUs;
     };
 
+    // Subscriber connection state to publisher heartbeat/data flow.
     enum class ConnectionState : std::uint8_t
     {
         Disconnected = 0,

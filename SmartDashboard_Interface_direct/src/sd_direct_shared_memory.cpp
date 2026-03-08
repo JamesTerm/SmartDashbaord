@@ -13,6 +13,7 @@ namespace sd::direct
     {
         Close();
 
+        // Win32 named shared-memory segment (cross-process memory transport).
         m_mapping = CreateFileMappingW(
             INVALID_HANDLE_VALUE,
             nullptr,
@@ -76,6 +77,7 @@ namespace sd::direct
     {
         Close();
 
+        // Auto-reset event synchronization primitive (one waiter released per signal).
         m_handle = CreateEventW(nullptr, FALSE, FALSE, eventName.c_str());
         if (m_handle == nullptr)
         {

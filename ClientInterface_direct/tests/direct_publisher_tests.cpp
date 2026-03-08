@@ -35,6 +35,9 @@ namespace sd::direct
 
         TestChannels MakeTestChannels()
         {
+            // Teaching mode default: use the same channel names as SmartDashboardApp,
+            // so students can run these tests and immediately see UI updates.
+            // Set SD_DIRECT_TEST_USE_ISOLATED_CHANNELS=1 to isolate each test run.
             const char* useIsolated = std::getenv("SD_DIRECT_TEST_USE_ISOLATED_CHANNELS");
             if (useIsolated == nullptr || std::string(useIsolated) != "1")
             {
@@ -61,6 +64,7 @@ namespace sd::direct
 
         bool WaitUntil(const std::function<bool()>& predicate, std::chrono::milliseconds timeout)
         {
+            // Poll with a small sleep to avoid busy-waiting while still reacting quickly.
             const auto deadline = std::chrono::steady_clock::now() + timeout;
             while (std::chrono::steady_clock::now() < deadline)
             {
@@ -83,6 +87,8 @@ namespace sd::direct
             PublishFn&& publish
         )
         {
+            // Manual publish loop used by all tests.
+            // We flush each iteration so subscriber callbacks receive new data promptly.
             const auto start = std::chrono::steady_clock::now();
             while (std::chrono::steady_clock::now() - start < duration)
             {
@@ -98,6 +104,7 @@ namespace sd::direct
 
     TEST(DirectPublisherTests, StreamsCreativeBoolPattern)
     {
+        // Subscriber reads updates (dashboard side), publisher writes updates (client side).
         const TestChannels channels = MakeTestChannels();
 
         SubscriberConfig subConfig;
@@ -109,6 +116,7 @@ namespace sd::direct
         pubConfig.mappingName = channels.mappingName;
         pubConfig.dataEventName = channels.dataEventName;
         pubConfig.heartbeatEventName = channels.heartbeatEventName;
+        // Disable auto flush for deterministic behavior in tests.
         pubConfig.autoFlushThread = false;
 
         auto subscriber = CreateDirectSubscriber(subConfig);
@@ -120,6 +128,7 @@ namespace sd::direct
         ASSERT_TRUE(subscriber->Start(
             [&observed, &observedMutex](const VariableUpdate& update)
             {
+                // Filter to the exact key/type this test owns.
                 if (update.key != "Test/Bool" || update.type != ValueType::Bool)
                 {
                     return;
@@ -137,6 +146,7 @@ namespace sd::direct
 
         PublishForDuration(*publisher, 3s, 100ms, [&publisher](std::chrono::milliseconds elapsed, std::chrono::milliseconds)
         {
+            // Example bool pattern: TTFFF repeat every 5 slots.
             const auto slot = elapsed.count() / 100;
             const bool value = ((slot % 5) == 0) || ((slot % 5) == 1);
             publisher->PublishBool("Test/Bool", value);
@@ -210,6 +220,7 @@ namespace sd::direct
 
         PublishForDuration(*publisher, 3s, 20ms, [&publisher](std::chrono::milliseconds elapsed, std::chrono::milliseconds duration)
         {
+            // Sweep phase from -pi to +pi over the test duration, then publish sin(phase).
             const double progress = std::clamp(
                 static_cast<double>(elapsed.count()) / static_cast<double>(duration.count()),
                 0.0,
@@ -295,6 +306,7 @@ namespace sd::direct
 
         PublishForDuration(*publisher, 3s, 120ms, [&publisher, &statuses, &statusIndex](std::chrono::milliseconds, std::chrono::milliseconds)
         {
+            // Rotate through sample status text values.
             publisher->PublishString("Test/Status", statuses[statusIndex]);
             statusIndex = (statusIndex + 1) % statuses.size();
         });
@@ -317,6 +329,8 @@ namespace sd::direct
             distinct.insert(observed.begin(), observed.end());
         }
 
+        // Direct transport keeps latest values per key between flushes,
+        // so under timing variability we assert a realistic minimum.
         EXPECT_GE(distinct.size(), 2U);
     }
 }

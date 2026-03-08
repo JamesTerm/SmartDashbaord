@@ -216,6 +216,8 @@ namespace sd::widgets
 
     void VariableTile::UpdateWidgetPresentation()
     {
+        // Widget strategy selection:
+        // map persisted widgetType id to one concrete visual presentation.
         const bool isBoolLed = (m_widgetType == "bool.led");
         const bool isBoolText = (m_widgetType == "bool.text");
         const bool isDoubleNumeric = (m_widgetType == "double.numeric");
@@ -300,6 +302,7 @@ namespace sd::widgets
 
     int VariableTile::DoubleToPercent(double value) const
     {
+        // Normalization algorithm: map -1..1 input domain to 0..100 UI control range.
         double clamped = value;
         if (clamped < -1.0)
         {

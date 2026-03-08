@@ -25,6 +25,7 @@ bool DirectSubscriberAdapter::Start()
     return m_subscriber->Start(
         [this](const sd::direct::VariableUpdate& update)
         {
+            // Adapter pattern: convert transport-native payload into Qt-friendly QVariant.
             QVariant value;
             switch (update.type)
             {
@@ -42,6 +43,7 @@ bool DirectSubscriberAdapter::Start()
                     break;
             }
 
+            // Thread-hop boundary: marshal callbacks onto Qt event loop thread.
             QMetaObject::invokeMethod(this, [this, update, value]()
             {
                 emit VariableUpdateReceived(
@@ -54,6 +56,7 @@ bool DirectSubscriberAdapter::Start()
         },
         [this](sd::direct::ConnectionState state)
         {
+            // Marshal state changes onto Qt event loop thread as well.
             QMetaObject::invokeMethod(this, [this, state]()
             {
                 emit ConnectionStateChanged(static_cast<int>(state));

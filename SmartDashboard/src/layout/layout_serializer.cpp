@@ -24,6 +24,7 @@ namespace sd::layout
             return false;
         }
 
+        // Snapshot pattern: serialize current widget metadata/geometry to JSON.
         QJsonArray widgets;
         const QObjectList children = canvas->children();
         for (QObject* child : children)
@@ -88,6 +89,7 @@ namespace sd::layout
             return false;
         }
 
+        // Defensive parsing: skip incomplete entries and keep loading valid ones.
         outEntries.clear();
         const QJsonArray widgets = doc.object().value("widgets").toArray();
         for (const QJsonValue& value : widgets)

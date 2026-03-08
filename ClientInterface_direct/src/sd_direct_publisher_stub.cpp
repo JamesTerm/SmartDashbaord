@@ -31,6 +31,7 @@ namespace sd::direct
                 return true;
             }
 
+            // Shared-memory producer endpoint setup.
             bool created = false;
             const std::size_t mappingBytes = sizeof(wire::RingHeader) + m_config.ringBufferBytes;
             if (!m_region.OpenOrCreate(m_config.mappingName, mappingBytes, created))
@@ -62,6 +63,7 @@ namespace sd::direct
 
             if (m_config.autoFlushThread)
             {
+                // Periodic publisher loop (fixed-rate flush pattern).
                 m_worker = std::thread(&DirectPublisherStub::RunLoop, this);
             }
 
@@ -119,6 +121,9 @@ namespace sd::direct
             std::unordered_map<std::string, PendingValue> pending;
             {
                 std::lock_guard<std::mutex> lock(m_pendingMutex);
+
+                // Coalescing/latest-value cache pattern:
+                // keep only the most recent value per key for this flush window.
                 pending.swap(m_pending);
             }
 
@@ -139,6 +144,7 @@ namespace sd::direct
 
                 if (!wrote)
                 {
+                    // Non-blocking drop strategy if ring has no room.
                     m_droppedCount.store(dropped);
                     continue;
                 }
@@ -182,6 +188,8 @@ namespace sd::direct
             while (m_running.load())
             {
                 FlushNow();
+
+                // Fixed-interval scheduling (periodic timer loop).
                 std::this_thread::sleep_for(m_config.flushPeriod);
             }
         }

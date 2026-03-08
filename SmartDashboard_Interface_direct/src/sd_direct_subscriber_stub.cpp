@@ -32,6 +32,7 @@ namespace sd::direct
             m_state = std::move(onState);
             SetState(ConnectionState::Connecting);
 
+            // Shared-memory consumer endpoint setup.
             bool created = false;
             const std::size_t mappingBytes = sizeof(wire::RingHeader) + wire::kDefaultCapacityBytes;
             if (!m_region.OpenOrCreate(m_config.mappingName, mappingBytes, created))
@@ -64,6 +65,8 @@ namespace sd::direct
             }
 
             m_running.store(true);
+
+            // Dedicated receive worker thread.
             m_worker = std::thread(&DirectSubscriberStub::RunLoop, this);
 
             return true;
@@ -124,10 +127,13 @@ namespace sd::direct
         {
             while (m_running.load())
             {
+                // Event-driven wait loop (reacts to publisher data event).
                 const DWORD waitResult = m_dataEvent.Wait(static_cast<DWORD>(m_config.waitTimeout.count()));
                 if (waitResult == WAIT_OBJECT_0)
                 {
                     VariableUpdate update;
+
+                    // Drain pattern: consume all currently queued ring messages.
                     while (ReadNextUpsert(m_ring, update))
                     {
                         m_lastSeq.store(update.seq, std::memory_order_release);
@@ -145,6 +151,7 @@ namespace sd::direct
                         m_ring.header->lastProducerHeartbeatUs.load(std::memory_order_acquire);
                     const std::uint64_t staleLimitUs = static_cast<std::uint64_t>(m_config.staleTimeout.count()) * 1000ULL;
 
+                    // Heartbeat timeout -> stale-state detection algorithm.
                     if (producerHeartbeatUs == 0)
                     {
                         SetState(ConnectionState::Connecting);
@@ -164,6 +171,7 @@ namespace sd::direct
 
                 if (waitResult == WAIT_FAILED)
                 {
+                    // Backoff to avoid tight retry loop on transient wait failures.
                     std::this_thread::sleep_for(std::chrono::milliseconds(10));
                 }
             }

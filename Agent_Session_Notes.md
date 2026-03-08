@@ -6,6 +6,14 @@
 - Code style uses ANSI/Allman indentation; keep brace/indent alignment consistent with existing blocks to avoid drift.
 - Use Windows CRLF line endings for C++ source files in this repo.
 
+## Documentation and teaching comments rule
+
+- Treat this codebase as both production code and a learning reference.
+- Add concise, high-value comments in `.cpp` files when logic is non-trivial (timing behavior, concurrency, transport semantics, state handling, etc.).
+- For advanced algorithms/patterns, include the concept name directly in comments where implemented (for example: ring buffer, round-robin, coalescing/latest-value cache, debounce, backoff).
+- Keep comments practical and instructional: explain *why* a pattern is used and what trade-off it makes, not just what the line does.
+- Avoid noisy comments on obvious code paths; focus comments on places likely to confuse first-time readers.
+
 ## Design docs
 
 - Primary design document: `design/SmartDashboard_Design.md`

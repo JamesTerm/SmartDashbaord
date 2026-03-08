@@ -33,11 +33,26 @@ Optional sample publisher:
 - To force isolated per-test channels instead:
   - `set SD_DIRECT_TEST_USE_ISOLATED_CHANNELS=1 && build/ClientInterface_direct/Debug/ClientInterface_direct_tests.exe --gtest_filter=DirectPublisherTests.StreamsSineWaveDouble`
 
+## Live test loop
+
+Use this loop to validate end-to-end publisher/subscriber behavior:
+
+1. Start dashboard:
+   - `build/SmartDashboard/Debug/SmartDashboardApp.exe`
+2. In a second terminal, run one stream test (shared channel default):
+   - `build/ClientInterface_direct/Debug/ClientInterface_direct_tests.exe --gtest_filter=DirectPublisherTests.StreamsSineWaveDouble`
+3. Confirm behavior in the app:
+   - connection state transitions to `Connected`
+   - tiles are created/updated for the streamed key(s)
+   - values continue updating during the test window
+4. Re-run the same test to confirm reconnect behavior:
+   - existing tiles should continue updating after publisher restart
+
 ## Windows build note (vcpkg + PowerShell)
 
 - This repo sets Visual Studio global `VcpkgXUseBuiltInApplocalDeps=true` in `CMakeLists.txt` to avoid recurring `pwsh.exe` lookup noise on machines that only have Windows PowerShell.
 - If you copy this setup into other projects, you can reuse the same `CMAKE_VS_GLOBALS` setting for cleaner MSBuild output.
-- Optional Qt runtime companion DLL misses (`dxcompiler.dll`, `dxil.dll`, `opengl32sw.dll`) are hidden by default to keep student-facing build output clean.
+- Optional Qt runtime companion DLL misses (`dxcompiler.dll`, `dxil.dll`, `opengl32sw.dll`) are hidden by default to keep build output clean.
 - Enable deploy diagnostics only when needed with `-DSMARTDASHBOARD_VERBOSE_QT_DEPLOY=ON`.
 
 ## Current status

@@ -11,6 +11,8 @@ namespace sd::model
         std::uint64_t seq
     )
     {
+        // Last-write-wins by sequence number per key.
+        // This rejects stale/out-of-order updates for an existing key.
         auto it = m_records.find(key);
         if (it == m_records.end())
         {
@@ -36,6 +38,8 @@ namespace sd::model
 
     void VariableStore::ResetSequenceTracking()
     {
+        // Preserve last values but clear sequence gate so a new publisher session
+        // (with seq restarted near 1) can update existing keys.
         for (auto& [_, record] : m_records)
         {
             record.seq = 0;

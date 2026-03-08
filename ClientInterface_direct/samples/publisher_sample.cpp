@@ -6,6 +6,7 @@
 
 int main()
 {
+    // Minimal publisher example: start, publish key/value updates, flush, stop.
     sd::direct::PublisherConfig config;
     auto publisher = sd::direct::CreateDirectPublisher(config);
 
@@ -17,6 +18,7 @@ int main()
 
     for (int i = 0; i < 10; ++i)
     {
+        // Simple periodic stream pattern for demo purposes.
         publisher->PublishBool("Robot/Enabled", (i % 2) == 0);
         publisher->PublishDouble("Drive/Speed", i * 0.5);
         publisher->PublishString("Status/Mode", (i % 2) == 0 ? "Auto" : "Teleop");
