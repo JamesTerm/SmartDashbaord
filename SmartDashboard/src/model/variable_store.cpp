@@ -33,4 +33,12 @@ namespace sd::model
 
         return it->second;
     }
+
+    void VariableStore::ResetSequenceTracking()
+    {
+        for (auto& [_, record] : m_records)
+        {
+            record.seq = 0;
+        }
+    }
 }

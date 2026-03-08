@@ -8,6 +8,8 @@
 #include <QLabel>
 #include <QMenu>
 #include <QMenuBar>
+#include <QPalette>
+#include <QSettings>
 #include <QStatusBar>
 #include <QVariant>
 #include <QWidget>
@@ -39,7 +41,8 @@ MainWindow::MainWindow(QWidget* parent)
 
     m_canvas = new QWidget(this);
     m_canvas->setObjectName("dashboardCanvas");
-    m_canvas->setStyleSheet("background-color: #f0f4f7;");
+    m_canvas->setAutoFillBackground(true);
+    m_canvas->setBackgroundRole(QPalette::Window);
     setCentralWidget(m_canvas);
 
     QMenu* fileMenu = menuBar()->addMenu("&File");
@@ -73,10 +76,15 @@ MainWindow::MainWindow(QWidget* parent)
         qApp,
         &QCoreApplication::aboutToQuit,
         this,
-        &MainWindow::OnSaveLayout
+        [this]()
+        {
+            OnSaveLayout();
+            SaveWindowGeometry();
+        }
     );
 
     OnLoadLayout();
+    LoadWindowGeometry();
     m_subscriberAdapter.Start();
 }
 
@@ -96,6 +104,12 @@ void MainWindow::OnToggleEditable()
 
 void MainWindow::OnVariableUpdateReceived(const QString& key, int valueType, const QVariant& value, quint64 seq)
 {
+    if (seq != 0 && m_lastTransportSeq != 0 && seq < m_lastTransportSeq)
+    {
+        m_variableStore.ResetSequenceTracking();
+    }
+    m_lastTransportSeq = seq;
+
     const sd::widgets::VariableType variableType = ToVariableType(valueType);
     const std::string keyStd = key.toStdString();
     const sd::model::VariableRecord& record = m_variableStore.Upsert(keyStd, variableType, value, seq);
@@ -124,6 +138,12 @@ void MainWindow::OnVariableUpdateReceived(const QString& key, int valueType, con
 
 void MainWindow::OnConnectionStateChanged(int state)
 {
+    const int connected = static_cast<int>(sd::direct::ConnectionState::Connected);
+    if (state == connected)
+    {
+        m_variableStore.ResetSequenceTracking();
+    }
+
     UpdateWindowConnectionText(state);
 }
 
@@ -214,4 +234,28 @@ void MainWindow::UpdateWindowConnectionText(int state)
 
     setWindowTitle(QString("SmartDashboard - %1").arg(stateText));
     m_statusLabel->setText(QString("State: %1").arg(stateText));
+}
+
+void MainWindow::LoadWindowGeometry()
+{
+    QSettings settings("SmartDashboard", "SmartDashboardApp");
+    const QVariant geometry = settings.value("window/geometry");
+    const QVariant state = settings.value("window/state");
+
+    if (geometry.isValid())
+    {
+        restoreGeometry(geometry.toByteArray());
+    }
+
+    if (state.isValid())
+    {
+        restoreState(state.toByteArray());
+    }
+}
+
+void MainWindow::SaveWindowGeometry() const
+{
+    QSettings settings("SmartDashboard", "SmartDashboardApp");
+    settings.setValue("window/geometry", saveGeometry());
+    settings.setValue("window/state", saveState());
 }

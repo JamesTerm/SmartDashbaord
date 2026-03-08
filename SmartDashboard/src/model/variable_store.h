@@ -28,6 +28,8 @@ namespace sd::model
             std::uint64_t seq
         );
 
+        void ResetSequenceTracking();
+
     private:
         std::unordered_map<std::string, VariableRecord> m_records;
     };

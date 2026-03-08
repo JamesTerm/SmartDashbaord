@@ -29,6 +29,16 @@ Lightweight C++ dashboard for FRC, inspired by WPILib SmartDashboard.
 Optional sample publisher:
 
 - `build/ClientInterface_direct/Debug/sd_direct_publisher_sample.exe`
+- Tests now publish to the same default direct channel used by the dashboard (good for live manual testing).
+- To force isolated per-test channels instead:
+  - `set SD_DIRECT_TEST_USE_ISOLATED_CHANNELS=1 && build/ClientInterface_direct/Debug/ClientInterface_direct_tests.exe --gtest_filter=DirectPublisherTests.StreamsSineWaveDouble`
+
+## Windows build note (vcpkg + PowerShell)
+
+- This repo sets Visual Studio global `VcpkgXUseBuiltInApplocalDeps=true` in `CMakeLists.txt` to avoid recurring `pwsh.exe` lookup noise on machines that only have Windows PowerShell.
+- If you copy this setup into other projects, you can reuse the same `CMAKE_VS_GLOBALS` setting for cleaner MSBuild output.
+- Optional Qt runtime companion DLL misses (`dxcompiler.dll`, `dxil.dll`, `opengl32sw.dll`) are hidden by default to keep student-facing build output clean.
+- Enable deploy diagnostics only when needed with `-DSMARTDASHBOARD_VERBOSE_QT_DEPLOY=ON`.
 
 ## Current status
 

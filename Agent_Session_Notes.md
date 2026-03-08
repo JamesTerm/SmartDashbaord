@@ -51,3 +51,20 @@
 1. Run/collect `QT_DEBUG_PLUGINS=1` output on a clean deploy folder.
 2. Decide final vcpkg-only deployment contract (no cross-project DLL sourcing).
 3. Lock deployment script behavior and verify F5 startup from Visual Studio.
+
+## Progress checkpoint (2026-03-08)
+
+- Added GoogleTest-based publisher streaming tests for bool/double/string in `ClientInterface_direct/tests/direct_publisher_tests.cpp`.
+- Test streaming defaults to shared dashboard channel for live manual verification; isolated channel mode is available via `SD_DIRECT_TEST_USE_ISOLATED_CHANNELS=1`.
+- Stabilized tests for latest-value transport semantics:
+  - deterministic publishing by disabling publisher auto-flush thread in tests
+  - rotating string distinct-count expectation adjusted to realistic minimum
+  - bool observation threshold adjusted to avoid timing-related flakiness
+- Added app window persistence (size/position/state) using `QSettings` in `MainWindow`.
+- Fixed reconnect behavior when producer restarts and sequence resets:
+  - added `VariableStore::ResetSequenceTracking()`
+  - reset sequence tracking on reconnect/sequence rollback detection
+- Updated dashboard canvas background to use system palette role (`QPalette::Window`) instead of hardcoded color.
+- Reduced Windows build noise for students:
+  - enabled `VcpkgXUseBuiltInApplocalDeps=true` via `CMAKE_VS_GLOBALS`
+  - hid optional Qt deploy DLL missing messages by default (`SMARTDASHBOARD_VERBOSE_QT_DEPLOY=OFF`, opt-in verbose toggle)

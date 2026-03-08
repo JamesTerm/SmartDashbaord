@@ -6,6 +6,14 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+if(MSVC)
+    set(CMAKE_VS_GLOBALS
+        "${CMAKE_VS_GLOBALS};VcpkgXUseBuiltInApplocalDeps=true"
+    )
+endif()
+
+include(CTest)
+
 add_subdirectory(SmartDashboard_Interface_direct)
 add_subdirectory(ClientInterface_direct)
 add_subdirectory(SmartDashboard)

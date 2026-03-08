@@ -2,6 +2,10 @@ if(NOT DEFINED SOURCE_BIN OR NOT DEFINED SOURCE_PLUGINS OR NOT DEFINED DEST_DIR)
     message(FATAL_ERROR "SOURCE_BIN, SOURCE_PLUGINS, and DEST_DIR must be set")
 endif()
 
+if(NOT DEFINED QT_DEPLOY_VERBOSE)
+    set(QT_DEPLOY_VERBOSE OFF)
+endif()
+
 if(NOT EXISTS "${SOURCE_BIN}")
     message(FATAL_ERROR "SOURCE_BIN does not exist: ${SOURCE_BIN}")
 endif()
@@ -91,7 +95,9 @@ foreach(_dll IN LISTS _extra_runtime_dlls)
     endforeach()
 
     if(NOT _copied)
-        message(STATUS "CopyQtRuntime: optional runtime DLL not found: ${_dll}")
+        if(QT_DEPLOY_VERBOSE)
+            message(STATUS "CopyQtRuntime: optional runtime DLL not found: ${_dll}")
+        endif()
     endif()
 endforeach()
 

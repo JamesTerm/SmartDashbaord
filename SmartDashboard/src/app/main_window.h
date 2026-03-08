@@ -10,6 +10,7 @@
 
 #include <string>
 
+#include <cstdint>
 #include <unordered_map>
 
 class QAction;
@@ -37,12 +38,15 @@ private:
 
     sd::widgets::VariableTile* GetOrCreateTile(const QString& key, sd::widgets::VariableType type);
     void UpdateWindowConnectionText(int state);
+    void LoadWindowGeometry();
+    void SaveWindowGeometry() const;
 
     QWidget* m_canvas = nullptr;
     QLabel* m_statusLabel = nullptr;
     QAction* m_editableAction = nullptr;
     bool m_isEditable = false;
     int m_nextTileOffset = 0;
+    std::uint64_t m_lastTransportSeq = 0;
     TileMap m_tiles;
     LayoutMap m_savedLayoutByKey;
     sd::model::VariableStore m_variableStore;

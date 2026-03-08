@@ -40,6 +40,7 @@ target_compile_features(SmartDashboardApp PRIVATE cxx_std_20)
 
 if(WIN32)
     set(SMARTDASHBOARD_QT_EXTRA_DLL_DIRS "" CACHE STRING "Optional semicolon-separated directories to search for Qt runtime companion DLLs")
+    option(SMARTDASHBOARD_VERBOSE_QT_DEPLOY "Show optional Qt deploy diagnostics" OFF)
 
     set(_qt_conf "${CMAKE_CURRENT_SOURCE_DIR}/dist/win/qt.conf")
     set(_qt_tools_bin "")
@@ -140,7 +141,7 @@ if(WIN32)
 
             add_custom_command(TARGET SmartDashboardApp POST_BUILD
                 COMMAND "${CMAKE_COMMAND}" -DSOURCE_BIN="${_vcpkg_bin}" -DSOURCE_PLUGINS="${_vcpkg_plugins}"
-                        -DDEST_DIR="$<TARGET_FILE_DIR:SmartDashboardApp>" -DQT_CONF="${_qt_conf}" -DQT_TOOLS_BIN="${_qt_tools_bin}" -DEXTRA_DLL_DIRS="${SMARTDASHBOARD_QT_EXTRA_DLL_DIRS}"
+                        -DDEST_DIR="$<TARGET_FILE_DIR:SmartDashboardApp>" -DQT_CONF="${_qt_conf}" -DQT_TOOLS_BIN="${_qt_tools_bin}" -DEXTRA_DLL_DIRS="${SMARTDASHBOARD_QT_EXTRA_DLL_DIRS}" -DQT_DEPLOY_VERBOSE=${SMARTDASHBOARD_VERBOSE_QT_DEPLOY}
                         -P "${CMAKE_SOURCE_DIR}/cmake/CopyQtRuntime.cmake"
                 COMMENT "Copying Qt runtime from vcpkg for SmartDashboardApp"
             )
