@@ -1,5 +1,7 @@
 # SmartDashboard (C++) Design
 
+- Edit this file when technical architecture or implementation design changes.
+
 ## Purpose
 
 Build a focused C++ dashboard inspired by WPILib SmartDashboard, but intentionally trimmed to the core use case:

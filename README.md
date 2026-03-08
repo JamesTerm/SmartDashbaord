@@ -13,7 +13,16 @@ Lightweight C++ dashboard for FRC, inspired by WPILib SmartDashboard.
 - `SmartDashboard` - Qt desktop app
 - `SmartDashboard_Interface_direct` - subscriber/consumer transport layer
 - `ClientInterface_direct` - publisher/producer transport layer + sample publisher
-- Design + notes: `design/SmartDashboard_Design.md`, `docs/history.md`, `Agent_Session_Notes.md`
+
+## Documentation map
+
+- `docs/requirements.md` - human-authored requirements and acceptance criteria (what/why)
+- `design/SmartDashboard_Design.md` - technical architecture and implementation details (how)
+- `docs/development_workflow.md` - incremental development/review/validation loop used in this repo
+- `docs/testing.md` - automated test suite and manual validation commands
+- `docs/ai_development_guidelines.md` - expectations for responsible AI-assisted development
+- `docs/history.md` - FRC dashboard/telemetry historical context for students
+- `Agent_Session_Notes.md` - chronological engineering session log and checkpoints
 
 ## Quick start (Windows + MSVC + vcpkg)
 
@@ -25,6 +34,19 @@ Lightweight C++ dashboard for FRC, inspired by WPILib SmartDashboard.
    - `cmake --build build --config Debug`
 4. Run:
    - `build/SmartDashboard/Debug/SmartDashboardApp.exe`
+
+## Automated tests
+
+This repo includes an automated GoogleTest suite for direct transport and client behaviors.
+
+1. Configure with tests enabled:
+   - `cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DBUILD_TESTING=ON -DCMAKE_TOOLCHAIN_FILE="D:/code/vcpkg/scripts/buildsystems/vcpkg.cmake"`
+2. Build tests:
+   - `cmake --build build --config Debug --target ClientInterface_direct_tests`
+3. Run tests:
+   - `ctest --test-dir build --build-config Debug --output-on-failure`
+
+See `docs/testing.md` for test scope and focused test commands.
 
 Optional sample publisher:
 

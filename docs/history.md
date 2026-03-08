@@ -2,6 +2,8 @@
 
 This document explains how FRC dashboard and telemetry architectures evolved, why key design decisions were made, and how those lessons inform modern tools.
 
+- Edit this file when educational historical context needs updates.
+
 Audience: students and mentors who want to understand software architecture trade-offs, not just tool names.
 
 ## Why this history matters

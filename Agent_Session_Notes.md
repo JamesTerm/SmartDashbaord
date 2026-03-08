@@ -1,5 +1,7 @@
 # Agent session notes
 
+- Edit this file only for chronological development session notes and checkpoints.
+
 ## Workflow note
 
 - `apply_patch` expects workspace-relative paths (forward slashes). Avoid absolute Windows paths to prevent separator errors.
@@ -151,3 +153,16 @@
   - dial publishes normalized double commands on user manipulation
   - programmatic update guard prevents feedback-loop publishes
   - cursor now consistently shows horizontal double-arrow for gauge interaction in non-editable mode
+
+## Documentation clarity checkpoint (2026-03-08)
+
+- Added documentation structure to make review paths explicit for mentors/students:
+  - `docs/requirements.md` (human-authored requirements and acceptance criteria)
+  - `docs/testing.md` (automated + manual validation workflows)
+  - `docs/development_workflow.md` (incremental implementation/review loop)
+  - `docs/ai_development_guidelines.md` (guardrails for AI-assisted development)
+- Updated `README.md` with a documentation map and explicit automated test commands (`BUILD_TESTING=ON`, `ClientInterface_direct_tests`, `ctest`).
+- Added per-document "when to edit this file" guidance to improve source-of-truth discoverability:
+  - `design/SmartDashboard_Design.md`
+  - `docs/history.md`
+  - `Agent_Session_Notes.md`
