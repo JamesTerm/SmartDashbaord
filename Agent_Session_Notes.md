@@ -89,3 +89,15 @@
   - progress bar shows variable name on top and uses full width below
   - gauge hides variable name for cleaner visual appearance
   - multiline string uses a dedicated second row with wrapping
+
+## API and stability checkpoint (2026-03-08)
+
+- Added `SmartDashboardClient` facade in `ClientInterface_direct` to support three get styles:
+  - passive `TryGet*` (read-if-present)
+  - assertive `Get*(default)` (publish default when missing)
+  - callback `Subscribe*` (listen for typed key updates)
+- Added `smartdashboard_client_tests.cpp` with coverage for assertive get + passive read + callback update flow.
+- Improved local determinism for facade users by updating local cache/callbacks on `Put*` before transport flush.
+- Added single-instance guard for `SmartDashboardApp` on Windows using named mutex `Local\\SmartDashboard.SingleInstance`.
+  - If already running, app now shows a message box and exits.
+- Multi-instance note: current direct ring transport remains effectively single-consumer due to shared read cursor; one dashboard instance is the supported mode for now.

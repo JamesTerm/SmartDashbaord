@@ -4,6 +4,7 @@ project(ClientInterface_direct LANGUAGES CXX)
 
 add_library(ClientInterface_direct STATIC
     src/sd_direct_publisher_stub.cpp
+    src/sd_smartdashboard_client.cpp
 )
 
 target_include_directories(ClientInterface_direct
@@ -41,6 +42,7 @@ if(BUILD_TESTING)
 
     add_executable(ClientInterface_direct_tests
         tests/direct_publisher_tests.cpp
+        tests/smartdashboard_client_tests.cpp
     )
 
     target_link_libraries(ClientInterface_direct_tests
