@@ -34,6 +34,9 @@
 - Layout load applies entries to existing session widgets and can instantiate saved widgets immediately at startup.
 - Direct client now includes a retained key-value store (shared-memory + mutex + optional file persistence) to provide authoritative direct-table semantics.
 - `TryGet/Get` now fall back to retained store on cache miss; this addresses cross-run config retrieval for iterative tuning tests.
+- Line plot now supports optional `Show Number Lines` and `Show Grid Lines` with persisted layout properties.
+- Line plot rendering refinements: manual Y-limit clipping, endpoint-inclusive tick labels, adaptive decimal precision, and faster Y auto-range response for smaller buffers.
+- `StreamsSineWaveDouble` now applies `SweepSeconds` changes on the active run (no extra run required).
 
 ## Known constraints / active considerations
 

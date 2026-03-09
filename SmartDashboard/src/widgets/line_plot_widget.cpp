@@ -6,6 +6,9 @@
 #include <QPen>
 
 #include <algorithm>
+#include <cmath>
+#include <limits>
+#include <vector>
 
 namespace sd::widgets
 {
@@ -77,6 +80,18 @@ namespace sd::widgets
         update();
     }
 
+    void LinePlotWidget::SetShowNumberLines(bool enabled)
+    {
+        m_showNumberLines = enabled;
+        update();
+    }
+
+    void LinePlotWidget::SetShowGridLines(bool enabled)
+    {
+        m_showGridLines = enabled;
+        update();
+    }
+
     void LinePlotWidget::paintEvent(QPaintEvent* event)
     {
         QWidget::paintEvent(event);
@@ -84,7 +99,11 @@ namespace sd::widgets
         QPainter painter(this);
         painter.setRenderHint(QPainter::Antialiasing, true);
 
-        const QRect drawRect = rect().adjusted(6, 6, -6, -6);
+        const int leftPad = m_showNumberLines ? 44 : 6;
+        const int rightPad = 6;
+        const int topPad = 6;
+        const int bottomPad = m_showNumberLines ? 24 : 6;
+        const QRect drawRect = rect().adjusted(leftPad, topPad, -rightPad, -bottomPad);
         if (drawRect.width() <= 2 || drawRect.height() <= 2)
         {
             return;
@@ -107,12 +126,206 @@ namespace sd::widgets
             return;
         }
 
+        auto chooseTickStep = [](double span, int targetTicks)
+        {
+            if (span <= 0.0 || targetTicks <= 0)
+            {
+                return 1.0;
+            }
+
+            const double rough = span / static_cast<double>(targetTicks);
+            const double power = std::pow(10.0, std::floor(std::log10(rough)));
+            const double normalized = rough / power;
+
+            double step = power;
+            if (normalized <= 1.0)
+            {
+                step = 1.0 * power;
+            }
+            else if (normalized <= 2.0)
+            {
+                step = 2.0 * power;
+            }
+            else if (normalized <= 5.0)
+            {
+                step = 5.0 * power;
+            }
+            else
+            {
+                step = 10.0 * power;
+            }
+
+            return step;
+        };
+
+        auto formatTick = [](double value)
+        {
+            const double absValue = std::abs(value);
+            if (absValue >= 100.0)
+            {
+                return QString::number(value, 'f', 0);
+            }
+            if (absValue >= 10.0)
+            {
+                return QString::number(value, 'f', 1);
+            }
+            return QString::number(value, 'f', 2);
+        };
+
+        const double xStep = chooseTickStep(xSpan, std::max(2, drawRect.width() / 90));
+        const double yStep = chooseTickStep(ySpan, std::max(2, drawRect.height() / 60));
+
+        std::vector<double> xTickValues;
+        int xTickSegments = 1;
+        if (m_showNumberLines)
+        {
+            // Endpoint-inclusive x labels with pixel-driven spacing.
+            const int interiorTickCount = std::max(4, drawRect.width() / 80);
+            xTickSegments = interiorTickCount + 1;
+            for (int idx = 0; idx <= xTickSegments; ++idx)
+            {
+                const double ratio = static_cast<double>(idx) / static_cast<double>(xTickSegments);
+                xTickValues.push_back(xRange.min + (ratio * xSpan));
+            }
+        }
+        else
+        {
+            const double xStartTick = std::ceil(xRange.min / xStep) * xStep;
+            for (double xTick = xStartTick; xTick <= xRange.max + (xStep * 0.5); xTick += xStep)
+            {
+                xTickValues.push_back(xTick);
+            }
+        }
+
+        std::vector<double> yTickValues;
+        int yTickSegments = 1;
+        if (m_showNumberLines)
+        {
+            // Keep endpoint labels at min/max, then add interior divisions with
+            // roughly consistent pixel spacing and at least 3 interior ticks.
+            const int interiorTickCount = std::max(3, drawRect.height() / 28);
+            yTickSegments = interiorTickCount + 1;
+            for (int idx = 0; idx <= yTickSegments; ++idx)
+            {
+                const double ratio = static_cast<double>(idx) / static_cast<double>(yTickSegments);
+                yTickValues.push_back(yRange.min + (ratio * ySpan));
+            }
+        }
+        else
+        {
+            const double yStartTick = std::ceil(yRange.min / yStep) * yStep;
+            for (double yTick = yStartTick; yTick <= yRange.max + (yStep * 0.5); yTick += yStep)
+            {
+                yTickValues.push_back(yTick);
+            }
+        }
+
+        if (m_showGridLines)
+        {
+            painter.setPen(QPen(QColor("#2d2d2d"), 1));
+
+            for (const double xTick : xTickValues)
+            {
+                const double xn = (xTick - xRange.min) / xSpan;
+                if (xn < -0.001 || xn > 1.001)
+                {
+                    continue;
+                }
+
+                const qreal xPixel = drawRect.left() + (xn * drawRect.width());
+                painter.drawLine(QPointF(xPixel, drawRect.top()), QPointF(xPixel, drawRect.bottom()));
+            }
+
+            for (const double yTick : yTickValues)
+            {
+                const double yn = (yTick - yRange.min) / ySpan;
+                if (yn < -0.001 || yn > 1.001)
+                {
+                    continue;
+                }
+
+                const qreal yPixel = drawRect.bottom() - (yn * drawRect.height());
+                painter.drawLine(QPointF(drawRect.left(), yPixel), QPointF(drawRect.right(), yPixel));
+            }
+        }
+
+        if (m_showNumberLines)
+        {
+            painter.setPen(QPen(QColor("#5a5a5a"), 1));
+
+            const double xDisplayStep = xSpan / static_cast<double>(xTickSegments);
+            const double yDisplayStep = ySpan / static_cast<double>(yTickSegments);
+            auto decimalsForStep = [](double step)
+            {
+                const double absStep = std::abs(step);
+                if (absStep >= 1.0)
+                {
+                    return 1;
+                }
+                if (absStep >= 0.1)
+                {
+                    return 1;
+                }
+                if (absStep >= 0.01)
+                {
+                    return 2;
+                }
+                return 3;
+            };
+
+            const int xDecimals = decimalsForStep(xDisplayStep);
+            const int yDecimals = decimalsForStep(yDisplayStep);
+
+            auto formatXTick = [xDecimals](double value)
+            {
+                return QString::number(value, 'f', xDecimals);
+            };
+            auto formatYTick = [yDecimals](double value)
+            {
+                return QString::number(value, 'f', yDecimals);
+            };
+            for (const double xTick : xTickValues)
+            {
+                const double xn = (xTick - xRange.min) / xSpan;
+                if (xn < -0.001 || xn > 1.001)
+                {
+                    continue;
+                }
+
+                const qreal xPixel = drawRect.left() + (xn * drawRect.width());
+                painter.drawLine(QPointF(xPixel, drawRect.bottom()), QPointF(xPixel, drawRect.bottom() + 4));
+                painter.drawText(
+                    QRectF(xPixel - 30.0, drawRect.bottom() + 5.0, 60.0, 16.0),
+                    Qt::AlignHCenter | Qt::AlignTop,
+                    formatXTick(xTick)
+                );
+            }
+
+            for (const double yTick : yTickValues)
+            {
+                const double yn = (yTick - yRange.min) / ySpan;
+                if (yn < -0.001 || yn > 1.001)
+                {
+                    continue;
+                }
+
+                const qreal yPixel = drawRect.bottom() - (yn * drawRect.height());
+                painter.drawLine(QPointF(drawRect.left() - 4, yPixel), QPointF(drawRect.left(), yPixel));
+                painter.drawText(
+                    QRectF(0.0, yPixel - 8.0, drawRect.left() - 6.0, 16.0),
+                    Qt::AlignRight | Qt::AlignVCenter,
+                    formatYTick(yTick)
+                );
+            }
+        }
+
         QPainterPath path;
         bool first = true;
         for (const SamplePoint& sample : m_samples)
         {
             const double xNormalized = (sample.xSeconds - xRange.min) / xSpan;
-            const double yNormalized = (sample.yValue - yRange.min) / ySpan;
+            const double clippedY = std::clamp(sample.yValue, yRange.min, yRange.max);
+            const double yNormalized = (clippedY - yRange.min) / ySpan;
 
             const qreal xPixel = drawRect.left() + (xNormalized * drawRect.width());
             const qreal yPixel = drawRect.bottom() - (yNormalized * drawRect.height());
@@ -161,21 +374,9 @@ namespace sd::widgets
             return AxisRange{ 0.0, 1.0 };
         }
 
-        // Auto-ranging behavior mirrors FRC style: start normalized at [0,1],
-        // then expand min/max only when incoming values exceed current bounds.
-        double minY = 0.0;
-        double maxY = 1.0;
-        for (const SamplePoint& sample : m_samples)
-        {
-            if (sample.yValue < minY)
-            {
-                minY = sample.yValue;
-            }
-            if (sample.yValue > maxY)
-            {
-                maxY = sample.yValue;
-            }
-        }
+        const YExtents recent = ComputeRecentYExtents();
+        double minY = std::min(0.0, recent.min);
+        double maxY = std::max(1.0, recent.max);
 
         if (maxY <= minY)
         {
@@ -183,5 +384,33 @@ namespace sd::widgets
         }
 
         return AxisRange{ minY, maxY };
+    }
+
+    LinePlotWidget::YExtents LinePlotWidget::ComputeRecentYExtents() const
+    {
+        if (m_samples.empty())
+        {
+            return YExtents{ 0.0, 1.0 };
+        }
+
+        const size_t sampleCount = m_samples.size();
+        const size_t windowCount = std::min(sampleCount, static_cast<size_t>(m_bufferSizeSamples));
+        const size_t startIndex = sampleCount - windowCount;
+
+        double minY = std::numeric_limits<double>::max();
+        double maxY = std::numeric_limits<double>::lowest();
+        for (size_t i = startIndex; i < sampleCount; ++i)
+        {
+            const double value = m_samples[i].yValue;
+            minY = std::min(minY, value);
+            maxY = std::max(maxY, value);
+        }
+
+        if (minY > maxY)
+        {
+            return YExtents{ 0.0, 1.0 };
+        }
+
+        return YExtents{ minY, maxY };
     }
 }

@@ -7,6 +7,16 @@ Curated milestone history for this repository.
 
 ## 2026-03-09 - Gauge editing workflow and layout persistence
 
+- Refined `double.lineplot` behavior and readability:
+  - manual Y-axis bounds now clip out-of-range sample rendering
+  - added optional axis rendering controls:
+    - `linePlotShowNumberLines`
+    - `linePlotShowGridLines`
+  - improved tick generation to endpoint-inclusive, pixel-driven spacing on both axes when number lines are enabled
+  - improved tick label formatting with adaptive decimal precision (tenths by default, hundredths when needed)
+  - aligned grid-line positions with rendered tick positions
+  - improved Y auto-range responsiveness for smaller buffer sizes
+- Updated `StreamsSineWaveDouble` timing semantics so `SweepSeconds` edits apply on the active run.
 - Added direct retained-table semantics to `SmartDashboardClient` for authoritative latest-value ownership in direct mode:
   - shared-memory retained store with named mutex for cross-process coordination
   - optional retained file persistence path (default under `%LOCALAPPDATA%`)
@@ -107,3 +117,11 @@ Curated milestone history for this repository.
   - playback engine re-injects recorded events through the same event path as live data
   - timeline model tracks playback position, duration, and speed
   - future UI controls can bind to timeline state (play/pause/scrub) without changing widget data semantics
+
+## Retained store follow-up checklist (short)
+
+- Define conflict policy for retained writes when multiple producers publish the same key (source priority vs seq/timestamp precedence).
+- Specify retained-schema behavior for type changes on existing keys (reject, migrate, or last-write-wins with type replacement).
+- Add explicit retained GC/limits policy (max entries, eviction strategy, and diagnostics when evictions occur).
+- Add transport-parity contract tests so direct/NT/TCP adapters share the same `TryGet/Get` retained semantics.
+- Clarify stream fan-out roadmap: retained latest-value ownership is shared now, but ring payload consumption is still single-consumer.

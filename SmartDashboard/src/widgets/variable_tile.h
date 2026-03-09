@@ -54,6 +54,8 @@ namespace sd::widgets
         void SetDefaultSize(const QSize& size);
         void SetGaugeProperties(double lowerLimit, double upperLimit, double tickInterval, bool showTickMarks);
         void SetLinePlotProperties(int bufferSizeSamples, bool autoYAxis, double yLowerLimit, double yUpperLimit);
+        void SetLinePlotNumberLinesVisible(bool visible);
+        void SetLinePlotGridLinesVisible(bool visible);
         void SetDoubleNumericEditable(bool editable);
         void ResetLinePlotGraph();
 
@@ -138,6 +140,8 @@ namespace sd::widgets
         bool m_gaugeShowTickMarks = true;
         int m_linePlotBufferSizeSamples = 5000;
         bool m_linePlotAutoYAxis = true;
+        bool m_linePlotShowNumberLines = false;
+        bool m_linePlotShowGridLines = false;
         double m_linePlotYLowerLimit = 0.0;
         double m_linePlotYUpperLimit = 1.0;
         QString m_stringValue;

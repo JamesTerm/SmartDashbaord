@@ -19,6 +19,8 @@ namespace sd::widgets
         void SetBufferSizeSamples(int samples);
         void SetYAxisModeAuto(bool enabled);
         void SetYAxisLimits(double lowerLimit, double upperLimit);
+        void SetShowNumberLines(bool enabled);
+        void SetShowGridLines(bool enabled);
 
     protected:
         void paintEvent(QPaintEvent* event) override;
@@ -36,14 +38,23 @@ namespace sd::widgets
             double yValue = 0.0;
         };
 
+        struct YExtents
+        {
+            double min = 0.0;
+            double max = 1.0;
+        };
+
         AxisRange ComputeXRange() const;
         AxisRange ComputeYRange() const;
+        YExtents ComputeRecentYExtents() const;
 
         std::deque<SamplePoint> m_samples;
         std::chrono::steady_clock::time_point m_startTime;
         bool m_hasStarted = false;
         int m_bufferSizeSamples = 5000;
         bool m_autoYAxis = true;
+        bool m_showNumberLines = false;
+        bool m_showGridLines = false;
         double m_manualYLowerLimit = 0.0;
         double m_manualYUpperLimit = 1.0;
     };

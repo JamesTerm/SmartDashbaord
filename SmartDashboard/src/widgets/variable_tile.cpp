@@ -173,6 +173,8 @@ namespace sd::widgets
             m_linePlotYLowerLimit,
             m_linePlotYUpperLimit
         );
+        SetLinePlotNumberLinesVisible(m_linePlotShowNumberLines);
+        SetLinePlotGridLinesVisible(m_linePlotShowGridLines);
         SetDoubleNumericEditable(m_doubleNumericEditable);
         UpdateWidgetPresentation();
         UpdateValueDisplay();
@@ -289,6 +291,20 @@ namespace sd::widgets
         setProperty("linePlotYLowerLimit", m_linePlotYLowerLimit);
         setProperty("linePlotYUpperLimit", m_linePlotYUpperLimit);
 
+        ApplyLinePlotSettings();
+    }
+
+    void VariableTile::SetLinePlotNumberLinesVisible(bool visible)
+    {
+        m_linePlotShowNumberLines = visible;
+        setProperty("linePlotShowNumberLines", m_linePlotShowNumberLines);
+        ApplyLinePlotSettings();
+    }
+
+    void VariableTile::SetLinePlotGridLinesVisible(bool visible)
+    {
+        m_linePlotShowGridLines = visible;
+        setProperty("linePlotShowGridLines", m_linePlotShowGridLines);
         ApplyLinePlotSettings();
     }
 
@@ -1107,6 +1123,12 @@ namespace sd::widgets
         auto* autoYAxisCheck = new QCheckBox(&dialog);
         autoYAxisCheck->setChecked(m_linePlotAutoYAxis);
 
+        auto* numberLinesCheck = new QCheckBox(&dialog);
+        numberLinesCheck->setChecked(m_linePlotShowNumberLines);
+
+        auto* gridLinesCheck = new QCheckBox(&dialog);
+        gridLinesCheck->setChecked(m_linePlotShowGridLines);
+
         auto* upperLimitSpin = new QDoubleSpinBox(&dialog);
         upperLimitSpin->setDecimals(3);
         upperLimitSpin->setRange(-1e6, 1e6);
@@ -1128,6 +1150,8 @@ namespace sd::widgets
 
         form->addRow("Buffer Size (samples)", bufferSizeSpin);
         form->addRow("Auto Y Axis", autoYAxisCheck);
+        form->addRow("Show Number Lines", numberLinesCheck);
+        form->addRow("Show Grid Lines", gridLinesCheck);
         form->addRow("Upper Limit", upperLimitSpin);
         form->addRow("Lower Limit", lowerLimitSpin);
 
@@ -1148,6 +1172,8 @@ namespace sd::widgets
             lowerLimitSpin->value(),
             upperLimitSpin->value()
         );
+        SetLinePlotNumberLinesVisible(numberLinesCheck->isChecked());
+        SetLinePlotGridLinesVisible(gridLinesCheck->isChecked());
     }
 
     void VariableTile::ApplyGaugeSettings()
@@ -1191,6 +1217,8 @@ namespace sd::widgets
         m_linePlot->SetBufferSizeSamples(m_linePlotBufferSizeSamples);
         m_linePlot->SetYAxisModeAuto(m_linePlotAutoYAxis);
         m_linePlot->SetYAxisLimits(m_linePlotYLowerLimit, m_linePlotYUpperLimit);
+        m_linePlot->SetShowNumberLines(m_linePlotShowNumberLines);
+        m_linePlot->SetShowGridLines(m_linePlotShowGridLines);
     }
 
     VariableTile::DragMode VariableTile::HitTestDragMode(const QPoint& localPos) const

@@ -21,6 +21,8 @@ namespace sd::layout
         QVariant gaugeShowTickMarks;
         QVariant linePlotBufferSizeSamples;
         QVariant linePlotAutoYAxis;
+        QVariant linePlotShowNumberLines;
+        QVariant linePlotShowGridLines;
         QVariant linePlotYLowerLimit;
         QVariant linePlotYUpperLimit;
         QVariant doubleNumericEditable;

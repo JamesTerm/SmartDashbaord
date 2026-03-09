@@ -73,6 +73,8 @@ namespace sd::layout
             const QVariant gaugeShow = widget->property("gaugeShowTickMarks");
             const QVariant linePlotBufferSize = widget->property("linePlotBufferSizeSamples");
             const QVariant linePlotAutoY = widget->property("linePlotAutoYAxis");
+            const QVariant linePlotShowNumberLines = widget->property("linePlotShowNumberLines");
+            const QVariant linePlotShowGridLines = widget->property("linePlotShowGridLines");
             const QVariant linePlotYLower = widget->property("linePlotYLowerLimit");
             const QVariant linePlotYUpper = widget->property("linePlotYUpperLimit");
             const QVariant doubleNumericEditable = widget->property("doubleNumericEditable");
@@ -99,6 +101,14 @@ namespace sd::layout
             if (linePlotAutoY.isValid())
             {
                 entry["linePlotAutoYAxis"] = linePlotAutoY.toBool();
+            }
+            if (linePlotShowNumberLines.isValid())
+            {
+                entry["linePlotShowNumberLines"] = linePlotShowNumberLines.toBool();
+            }
+            if (linePlotShowGridLines.isValid())
+            {
+                entry["linePlotShowGridLines"] = linePlotShowGridLines.toBool();
             }
             if (linePlotYLower.isValid())
             {
@@ -201,6 +211,14 @@ namespace sd::layout
             if (entry.contains("linePlotAutoYAxis"))
             {
                 layoutEntry.linePlotAutoYAxis = entry.value("linePlotAutoYAxis").toBool();
+            }
+            if (entry.contains("linePlotShowNumberLines"))
+            {
+                layoutEntry.linePlotShowNumberLines = entry.value("linePlotShowNumberLines").toBool();
+            }
+            if (entry.contains("linePlotShowGridLines"))
+            {
+                layoutEntry.linePlotShowGridLines = entry.value("linePlotShowGridLines").toBool();
             }
             if (entry.contains("linePlotYLowerLimit"))
             {

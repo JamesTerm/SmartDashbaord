@@ -84,6 +84,15 @@ namespace
             );
         }
 
+        if (entry.linePlotShowNumberLines.isValid())
+        {
+            tile->SetLinePlotNumberLinesVisible(entry.linePlotShowNumberLines.toBool());
+        }
+        if (entry.linePlotShowGridLines.isValid())
+        {
+            tile->SetLinePlotGridLinesVisible(entry.linePlotShowGridLines.toBool());
+        }
+
         if (entry.doubleNumericEditable.isValid())
         {
             tile->SetDoubleNumericEditable(entry.doubleNumericEditable.toBool());

@@ -297,12 +297,14 @@ namespace sd::direct
         publisher->PublishDouble("Test/DoubleSine/Config/SweepSeconds", configuredSweepSeconds);
         publisher->FlushNow();
 
-        const auto runDuration = std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::duration<double>(std::max(0.5, configuredSweepSeconds))
-        );
-
-        PublishForDuration(*publisher, runDuration, 20ms, [&publisher, &configMutex, &configuredAmplitudeMin, &configuredAmplitudeMax, &configuredSweepSeconds](std::chrono::milliseconds elapsed, std::chrono::milliseconds duration)
+        const auto runStart = std::chrono::steady_clock::now();
+        const auto maxCapDuration = 30s;
+        const auto step = 20ms;
+        while (true)
         {
+            const auto now = std::chrono::steady_clock::now();
+            const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - runStart);
+
             double minValue = 0.0;
             double maxValue = 0.0;
             double sweepSeconds = 0.0;
@@ -310,8 +312,12 @@ namespace sd::direct
                 std::lock_guard<std::mutex> lock(configMutex);
                 minValue = configuredAmplitudeMin;
                 maxValue = configuredAmplitudeMax;
-                sweepSeconds = configuredSweepSeconds;
+                sweepSeconds = std::max(0.5, configuredSweepSeconds);
             }
+
+            const auto targetDuration = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::duration<double>(sweepSeconds)
+            );
 
             // Republish config keys during the stream so newly opened dashboards
             // still discover all config widgets.
@@ -319,9 +325,9 @@ namespace sd::direct
             publisher->PublishDouble("Test/DoubleSine/Config/AmplitudeMax", maxValue);
             publisher->PublishDouble("Test/DoubleSine/Config/SweepSeconds", sweepSeconds);
 
-            // Sweep phase from -pi to +pi over test duration, then map to configured amplitude range.
+            // Sweep phase from -pi to +pi over current configured duration, then map to configured amplitude range.
             const double progress = std::clamp(
-                static_cast<double>(elapsed.count()) / static_cast<double>(duration.count()),
+                static_cast<double>(elapsed.count()) / std::max(1.0, static_cast<double>(targetDuration.count())),
                 0.0,
                 1.0
             );
@@ -331,7 +337,15 @@ namespace sd::direct
             const double sineValue = minValue + (normalized * amplitudeSpan);
 
             publisher->PublishDouble("Test/DoubleSine", sineValue);
-        });
+            publisher->FlushNow();
+
+            if (elapsed >= targetDuration || elapsed >= maxCapDuration)
+            {
+                break;
+            }
+
+            std::this_thread::sleep_for(step);
+        }
 
         ASSERT_TRUE(WaitUntil(
             [&observed, &observedMutex]()
