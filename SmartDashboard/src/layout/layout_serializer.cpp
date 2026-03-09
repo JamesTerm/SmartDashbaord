@@ -73,8 +73,6 @@ namespace sd::layout
             const QVariant gaugeShow = widget->property("gaugeShowTickMarks");
             const QVariant progressBarLower = widget->property("progressBarLowerLimit");
             const QVariant progressBarUpper = widget->property("progressBarUpperLimit");
-            const QVariant progressBarTick = widget->property("progressBarTickInterval");
-            const QVariant progressBarShow = widget->property("progressBarShowTickMarks");
             const QVariant sliderLower = widget->property("sliderLowerLimit");
             const QVariant sliderUpper = widget->property("sliderUpperLimit");
             const QVariant sliderTick = widget->property("sliderTickInterval");
@@ -109,14 +107,6 @@ namespace sd::layout
             if (progressBarUpper.isValid())
             {
                 entry["progressBarUpperLimit"] = progressBarUpper.toDouble();
-            }
-            if (progressBarTick.isValid())
-            {
-                entry["progressBarTickInterval"] = progressBarTick.toDouble();
-            }
-            if (progressBarShow.isValid())
-            {
-                entry["progressBarShowTickMarks"] = progressBarShow.toBool();
             }
             if (sliderLower.isValid())
             {
@@ -251,14 +241,6 @@ namespace sd::layout
             if (entry.contains("progressBarUpperLimit"))
             {
                 layoutEntry.progressBarUpperLimit = entry.value("progressBarUpperLimit").toDouble();
-            }
-            if (entry.contains("progressBarTickInterval"))
-            {
-                layoutEntry.progressBarTickInterval = entry.value("progressBarTickInterval").toDouble();
-            }
-            if (entry.contains("progressBarShowTickMarks"))
-            {
-                layoutEntry.progressBarShowTickMarks = entry.value("progressBarShowTickMarks").toBool();
             }
             if (entry.contains("sliderLowerLimit"))
             {

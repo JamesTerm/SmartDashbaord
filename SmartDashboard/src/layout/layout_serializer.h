@@ -21,8 +21,6 @@ namespace sd::layout
         QVariant gaugeShowTickMarks;
         QVariant progressBarLowerLimit;
         QVariant progressBarUpperLimit;
-        QVariant progressBarTickInterval;
-        QVariant progressBarShowTickMarks;
         QVariant sliderLowerLimit;
         QVariant sliderUpperLimit;
         QVariant sliderTickInterval;

@@ -17,12 +17,11 @@ Curated milestone history for this repository.
 - Added layout save/load coverage for new properties:
   - `progressBarLowerLimit`
   - `progressBarUpperLimit`
-  - `progressBarTickInterval`
-  - `progressBarShowTickMarks`
   - `sliderLowerLimit`
   - `sliderUpperLimit`
   - `sliderTickInterval`
   - `sliderShowTickMarks`
+- Clarified `double.progress` capabilities: Qt `QProgressBar` does not support rendered tick marks, so progress-bar properties are now limited to upper/lower range bounds.
 
 - Refined `double.lineplot` behavior and readability:
   - manual Y-axis bounds now clip out-of-range sample rendering

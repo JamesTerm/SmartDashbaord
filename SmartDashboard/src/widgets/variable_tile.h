@@ -53,7 +53,7 @@ namespace sd::widgets
         void SetEditInteractionMode(EditInteractionMode mode);
         void SetDefaultSize(const QSize& size);
         void SetGaugeProperties(double lowerLimit, double upperLimit, double tickInterval, bool showTickMarks);
-        void SetProgressBarProperties(double lowerLimit, double upperLimit, double tickInterval, bool showTickMarks);
+        void SetProgressBarProperties(double lowerLimit, double upperLimit);
         void SetSliderProperties(double lowerLimit, double upperLimit, double tickInterval, bool showTickMarks);
         void SetLinePlotProperties(int bufferSizeSamples, bool autoYAxis, double yLowerLimit, double yUpperLimit);
         void SetLinePlotNumberLinesVisible(bool visible);
@@ -145,8 +145,6 @@ namespace sd::widgets
         bool m_gaugeShowTickMarks = true;
         double m_progressBarLowerLimit = 0.0;
         double m_progressBarUpperLimit = 1.0;
-        double m_progressBarTickInterval = 0.2;
-        bool m_progressBarShowTickMarks = false;
         double m_sliderLowerLimit = -1.0;
         double m_sliderUpperLimit = 1.0;
         double m_sliderTickInterval = 0.2;

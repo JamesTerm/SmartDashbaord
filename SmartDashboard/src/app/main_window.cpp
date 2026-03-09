@@ -78,9 +78,7 @@ namespace
         {
             tile->SetProgressBarProperties(
                 entry.progressBarLowerLimit.toDouble(),
-                entry.progressBarUpperLimit.isValid() ? entry.progressBarUpperLimit.toDouble() : 1.0,
-                entry.progressBarTickInterval.isValid() ? entry.progressBarTickInterval.toDouble() : 0.2,
-                entry.progressBarShowTickMarks.isValid() ? entry.progressBarShowTickMarks.toBool() : false
+                entry.progressBarUpperLimit.isValid() ? entry.progressBarUpperLimit.toDouble() : 1.0
             );
         }
 
