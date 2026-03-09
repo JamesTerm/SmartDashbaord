@@ -14,6 +14,8 @@
 #include <unordered_map>
 
 class QAction;
+class QCloseEvent;
+class QEvent;
 class QLabel;
 class QWidget;
 
@@ -45,10 +47,18 @@ private:
     using TileMap = std::unordered_map<std::string, sd::widgets::VariableTile*>;
     using LayoutMap = std::unordered_map<std::string, sd::layout::WidgetLayoutEntry>;
 
+    bool eventFilter(QObject* watched, QEvent* event) override;
+    void closeEvent(QCloseEvent* event) override;
+
     sd::widgets::VariableTile* GetOrCreateTile(const QString& key, sd::widgets::VariableType type);
     void UpdateWindowConnectionText(int state);
     void LoadWindowGeometry();
     void SaveWindowGeometry() const;
+    bool SaveLayoutToPath(const QString& path);
+    bool LoadLayoutFromPath(const QString& path, bool applyToExistingTiles);
+    QString GetInitialLayoutPath() const;
+    void PersistLastLayoutPath(const QString& path) const;
+    void MarkLayoutDirty();
 
     QWidget* m_canvas = nullptr;
     QLabel* m_statusLabel = nullptr;
@@ -62,6 +72,9 @@ private:
     sd::widgets::EditInteractionMode m_editInteractionMode = sd::widgets::EditInteractionMode::MoveAndResize;
     int m_nextTileOffset = 0;
     std::uint64_t m_lastTransportSeq = 0;
+    bool m_layoutDirty = false;
+    bool m_suppressLayoutDirty = false;
+    QString m_layoutFilePath;
     TileMap m_tiles;
     LayoutMap m_savedLayoutByKey;
     sd::model::VariableStore m_variableStore;

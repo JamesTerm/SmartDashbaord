@@ -1,5 +1,6 @@
 #include "sd_direct_publisher.h"
 #include "sd_direct_subscriber.h"
+#include "sd_smartdashboard_client.h"
 
 #include <gtest/gtest.h>
 
@@ -100,6 +101,7 @@ namespace sd::direct
                 std::this_thread::sleep_for(step);
             }
         }
+
     }
 
     TEST(DirectPublisherTests, StreamsCreativeBoolPattern)
@@ -194,40 +196,141 @@ namespace sd::direct
         pubConfig.heartbeatEventName = channels.heartbeatEventName;
         pubConfig.autoFlushThread = false;
 
-        auto subscriber = CreateDirectSubscriber(subConfig);
         auto publisher = CreateDirectPublisher(pubConfig);
 
         std::vector<double> observed;
         std::mutex observedMutex;
 
-        ASSERT_TRUE(subscriber->Start(
-            [&observed, &observedMutex](const VariableUpdate& update)
-            {
-                if (update.key != "Test/DoubleSine" || update.type != ValueType::Double)
-                {
-                    return;
-                }
-
-                std::lock_guard<std::mutex> lock(observedMutex);
-                observed.push_back(update.value.doubleValue);
-            },
-            [](ConnectionState)
-            {
-            }
-        ));
-
         ASSERT_TRUE(publisher->Start());
 
-        PublishForDuration(*publisher, 3s, 20ms, [&publisher](std::chrono::milliseconds elapsed, std::chrono::milliseconds duration)
+        SmartDashboardClientConfig dashboardConfig;
+        dashboardConfig.publisher = pubConfig;
+        dashboardConfig.subscriber = subConfig;
+        dashboardConfig.enableSubscriber = true;
+        dashboardConfig.enableCommandSubscriber = true;
+
+        SmartDashboardClient dashboard(dashboardConfig);
+        ASSERT_TRUE(dashboard.Start());
+
+        auto streamToken = dashboard.SubscribeDouble("Test/DoubleSine", [&observed, &observedMutex](double value)
         {
-            // Sweep phase from -pi to +pi over the test duration, then publish sin(phase).
+            std::lock_guard<std::mutex> lock(observedMutex);
+            observed.push_back(value);
+        });
+        ASSERT_TRUE(static_cast<bool>(streamToken));
+
+        const double defaultAmplitudeMin = -1.0;
+        const double defaultAmplitudeMax = 1.0;
+        const double defaultSweepSeconds = 3.0;
+        double configuredAmplitudeMin = defaultAmplitudeMin;
+        double configuredAmplitudeMax = defaultAmplitudeMax;
+        double configuredSweepSeconds = defaultSweepSeconds;
+        std::mutex configMutex;
+
+        // Give subscriber cache a moment to receive any existing config values.
+        WaitUntil([&dashboard]()
+        {
+            double ignored = 0.0;
+            return dashboard.TryGetDouble("Test/DoubleSine/Config/AmplitudeMin", ignored)
+                || dashboard.TryGetDouble("Test/DoubleSine/Config/AmplitudeMax", ignored)
+                || dashboard.TryGetDouble("Test/DoubleSine/Config/SweepSeconds", ignored);
+        }, 150ms);
+
+        auto readOrSeedDouble = [&dashboard](std::string_view key, double defaultValue, bool& seededDefault)
+        {
+            double value = 0.0;
+            if (dashboard.TryGetDouble(key, value))
+            {
+                seededDefault = false;
+                return value;
+            }
+
+            dashboard.PutDouble(key, defaultValue);
+            dashboard.FlushNow();
+            seededDefault = true;
+            return defaultValue;
+        };
+
+        bool seededAmplitudeMin = false;
+        bool seededAmplitudeMax = false;
+        bool seededSweepSeconds = false;
+        configuredAmplitudeMin = readOrSeedDouble("Test/DoubleSine/Config/AmplitudeMin", defaultAmplitudeMin, seededAmplitudeMin);
+        configuredAmplitudeMax = readOrSeedDouble("Test/DoubleSine/Config/AmplitudeMax", defaultAmplitudeMax, seededAmplitudeMax);
+        configuredSweepSeconds = readOrSeedDouble("Test/DoubleSine/Config/SweepSeconds", defaultSweepSeconds, seededSweepSeconds);
+
+        auto minCommandToken = dashboard.SubscribeDoubleCommand("Test/DoubleSine/Config/AmplitudeMin", [&configMutex, &configuredAmplitudeMin](double value)
+        {
+            std::lock_guard<std::mutex> lock(configMutex);
+            configuredAmplitudeMin = value;
+        });
+        auto maxCommandToken = dashboard.SubscribeDoubleCommand("Test/DoubleSine/Config/AmplitudeMax", [&configMutex, &configuredAmplitudeMax](double value)
+        {
+            std::lock_guard<std::mutex> lock(configMutex);
+            configuredAmplitudeMax = value;
+        });
+        auto sweepCommandToken = dashboard.SubscribeDoubleCommand("Test/DoubleSine/Config/SweepSeconds", [&configMutex, &configuredSweepSeconds](double value)
+        {
+            std::lock_guard<std::mutex> lock(configMutex);
+            configuredSweepSeconds = value;
+        });
+        ASSERT_TRUE(static_cast<bool>(minCommandToken));
+        ASSERT_TRUE(static_cast<bool>(maxCommandToken));
+        ASSERT_TRUE(static_cast<bool>(sweepCommandToken));
+
+        if (seededAmplitudeMin)
+        {
+            EXPECT_DOUBLE_EQ(configuredAmplitudeMin, defaultAmplitudeMin);
+        }
+        if (seededAmplitudeMax)
+        {
+            EXPECT_DOUBLE_EQ(configuredAmplitudeMax, defaultAmplitudeMax);
+        }
+        if (seededSweepSeconds)
+        {
+            EXPECT_DOUBLE_EQ(configuredSweepSeconds, defaultSweepSeconds);
+        }
+
+        // Always publish config values at test start so a fresh dashboard session
+        // sees all three config keys and can auto-create their widgets.
+        publisher->PublishDouble("Test/DoubleSine/Config/AmplitudeMin", configuredAmplitudeMin);
+        publisher->PublishDouble("Test/DoubleSine/Config/AmplitudeMax", configuredAmplitudeMax);
+        publisher->PublishDouble("Test/DoubleSine/Config/SweepSeconds", configuredSweepSeconds);
+        publisher->FlushNow();
+
+        const auto runDuration = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::duration<double>(std::max(0.5, configuredSweepSeconds))
+        );
+
+        PublishForDuration(*publisher, runDuration, 20ms, [&publisher, &configMutex, &configuredAmplitudeMin, &configuredAmplitudeMax, &configuredSweepSeconds](std::chrono::milliseconds elapsed, std::chrono::milliseconds duration)
+        {
+            double minValue = 0.0;
+            double maxValue = 0.0;
+            double sweepSeconds = 0.0;
+            {
+                std::lock_guard<std::mutex> lock(configMutex);
+                minValue = configuredAmplitudeMin;
+                maxValue = configuredAmplitudeMax;
+                sweepSeconds = configuredSweepSeconds;
+            }
+
+            // Republish config keys during the stream so newly opened dashboards
+            // still discover all config widgets.
+            publisher->PublishDouble("Test/DoubleSine/Config/AmplitudeMin", minValue);
+            publisher->PublishDouble("Test/DoubleSine/Config/AmplitudeMax", maxValue);
+            publisher->PublishDouble("Test/DoubleSine/Config/SweepSeconds", sweepSeconds);
+
+            // Sweep phase from -pi to +pi over test duration, then map to configured amplitude range.
             const double progress = std::clamp(
                 static_cast<double>(elapsed.count()) / static_cast<double>(duration.count()),
                 0.0,
                 1.0
             );
             const double phase = -std::numbers::pi + (2.0 * std::numbers::pi * progress);
-            publisher->PublishDouble("Test/DoubleSine", std::sin(phase));
+            const double normalized = (std::sin(phase) + 1.0) * 0.5;
+            const double amplitudeSpan = maxValue - minValue;
+            const double sineValue = minValue + (normalized * amplitudeSpan);
+
+            publisher->PublishDouble("Test/DoubleSine", sineValue);
         });
 
         ASSERT_TRUE(WaitUntil(
@@ -240,7 +343,7 @@ namespace sd::direct
         ));
 
         publisher->Stop();
-        subscriber->Stop();
+        dashboard.Stop();
 
         double minValue = std::numeric_limits<double>::max();
         double maxValue = std::numeric_limits<double>::lowest();

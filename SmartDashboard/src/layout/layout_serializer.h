@@ -19,6 +19,14 @@ namespace sd::layout
         QVariant gaugeUpperLimit;
         QVariant gaugeTickInterval;
         QVariant gaugeShowTickMarks;
+        QVariant linePlotBufferSizeSamples;
+        QVariant linePlotAutoYAxis;
+        QVariant linePlotYLowerLimit;
+        QVariant linePlotYUpperLimit;
+        QVariant doubleNumericEditable;
+        QVariant boolValue;
+        QVariant doubleValue;
+        QVariant stringValue;
     };
 
     bool SaveLayout(const QWidget* canvas, const QString& filePath);

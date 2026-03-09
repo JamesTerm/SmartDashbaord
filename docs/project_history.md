@@ -7,6 +7,30 @@ Curated milestone history for this repository.
 
 ## 2026-03-09 - Gauge editing workflow and layout persistence
 
+- Added new `double.lineplot` widget type with custom Qt paint rendering and rolling sample buffer.
+- Implemented line-plot behavior for telemetry visualization:
+  - starts with normalized `[0..1]` style axis baseline
+  - x-axis head tracks elapsed time and slides once sample buffer is full
+  - y-axis auto-expands to observed min/max including negatives
+- Added line-plot properties and persistence:
+  - `linePlotBufferSizeSamples` (default `5000`)
+  - `linePlotAutoYAxis`
+  - `linePlotYLowerLimit`
+  - `linePlotYUpperLimit`
+- Added line-plot non-edit mode context menu action: `Reset Graph`.
+- Added numeric double widget property `Editable` with direct text-entry command publishing.
+- Added value persistence for bool/double/string tile values in layout JSON.
+- Expanded layout save/load UX and lifecycle behavior:
+  - save/load now uses file chooser dialogs (`.json`)
+  - remembers last-used layout path in app settings
+  - tracks dirty layout changes and prompts on close (`Yes/No/Cancel`)
+  - load now applies to existing tiles and creates missing saved tiles at startup/load
+  - load behavior was adjusted to merge/apply (clear remains explicit action via menu)
+- Updated `StreamsSineWaveDouble` test flow for iterative UI tuning:
+  - publishes config keys for amplitude min/max and sweep seconds
+  - supports command-path updates while streaming
+  - keeps stress/repopulate workflow stable under repeated runs
+
 - Expanded editable tile context menu behavior (editable-only):
   - `Change to...`
   - `Properties...`

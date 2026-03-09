@@ -5,8 +5,13 @@
 
 #include <QAction>
 #include <QApplication>
+#include <QCloseEvent>
 #include <QCoreApplication>
+#include <QEvent>
+#include <QFileDialog>
+#include <QFileInfo>
 #include <QLabel>
+#include <QMessageBox>
 #include <QMenu>
 #include <QMenuBar>
 #include <QPalette>
@@ -29,6 +34,72 @@ namespace
                 return sd::widgets::VariableType::String;
             default:
                 return sd::widgets::VariableType::String;
+        }
+    }
+
+    sd::widgets::VariableType ToVariableTypeFromWidgetType(const QString& widgetType)
+    {
+        if (widgetType.startsWith("bool."))
+        {
+            return sd::widgets::VariableType::Bool;
+        }
+        if (widgetType.startsWith("double."))
+        {
+            return sd::widgets::VariableType::Double;
+        }
+
+        return sd::widgets::VariableType::String;
+    }
+
+    void ApplyLayoutEntryToTile(sd::widgets::VariableTile* tile, const sd::layout::WidgetLayoutEntry& entry)
+    {
+        if (tile == nullptr)
+        {
+            return;
+        }
+
+        tile->setGeometry(entry.geometry);
+        if (!entry.widgetType.isEmpty())
+        {
+            tile->SetWidgetType(entry.widgetType);
+        }
+
+        if (entry.gaugeLowerLimit.isValid())
+        {
+            tile->SetGaugeProperties(
+                entry.gaugeLowerLimit.toDouble(),
+                entry.gaugeUpperLimit.isValid() ? entry.gaugeUpperLimit.toDouble() : 1.0,
+                entry.gaugeTickInterval.isValid() ? entry.gaugeTickInterval.toDouble() : 0.2,
+                entry.gaugeShowTickMarks.isValid() ? entry.gaugeShowTickMarks.toBool() : true
+            );
+        }
+
+        if (entry.linePlotBufferSizeSamples.isValid())
+        {
+            tile->SetLinePlotProperties(
+                entry.linePlotBufferSizeSamples.toInt(),
+                entry.linePlotAutoYAxis.isValid() ? entry.linePlotAutoYAxis.toBool() : true,
+                entry.linePlotYLowerLimit.isValid() ? entry.linePlotYLowerLimit.toDouble() : 0.0,
+                entry.linePlotYUpperLimit.isValid() ? entry.linePlotYUpperLimit.toDouble() : 1.0
+            );
+        }
+
+        if (entry.doubleNumericEditable.isValid())
+        {
+            tile->SetDoubleNumericEditable(entry.doubleNumericEditable.toBool());
+        }
+
+        if (entry.boolValue.isValid())
+        {
+            tile->SetBoolValue(entry.boolValue.toBool());
+        }
+        if (entry.doubleValue.isValid())
+        {
+            tile->SetDoubleValue(entry.doubleValue.toDouble());
+        }
+        if (entry.stringValue.isValid())
+        {
+            tile->SetStringValue(entry.stringValue.toString());
         }
     }
 }
@@ -105,13 +176,14 @@ MainWindow::MainWindow(QWidget* parent)
         this,
         [this]()
         {
-            // Persist both tile layout and top-level window geometry on shutdown.
-            OnSaveLayout();
+            // Persist top-level window geometry on shutdown.
+            // Layout saving is handled by closeEvent() with unsaved-change prompt.
             SaveWindowGeometry();
         }
     );
 
-    OnLoadLayout();
+    m_layoutFilePath = GetInitialLayoutPath();
+    LoadLayoutFromPath(m_layoutFilePath, true);
     LoadWindowGeometry();
     m_subscriberAdapter.Start();
 }
@@ -234,23 +306,44 @@ void MainWindow::OnConnectionStateChanged(int state)
 
 void MainWindow::OnSaveLayout()
 {
-    const QString path = sd::layout::GetDefaultLayoutPath();
-    sd::layout::SaveLayout(m_canvas, path);
-}
-
-void MainWindow::OnLoadLayout()
-{
-    const QString path = sd::layout::GetDefaultLayoutPath();
-    std::vector<sd::layout::WidgetLayoutEntry> entries;
-    if (!sd::layout::LoadLayoutEntries(path, entries))
+    QString selected = QFileDialog::getSaveFileName(
+        this,
+        "Save Layout",
+        GetInitialLayoutPath(),
+        "Layout Files (*.json);;All Files (*)"
+    );
+    if (selected.isEmpty())
     {
         return;
     }
 
-    m_savedLayoutByKey.clear();
-    for (const sd::layout::WidgetLayoutEntry& entry : entries)
+    if (QFileInfo(selected).suffix().isEmpty())
     {
-        m_savedLayoutByKey[entry.variableKey.toStdString()] = entry;
+        selected += ".json";
+    }
+
+    if (!SaveLayoutToPath(selected))
+    {
+        QMessageBox::warning(this, "Save Layout", "Failed to save layout.");
+    }
+}
+
+void MainWindow::OnLoadLayout()
+{
+    const QString selected = QFileDialog::getOpenFileName(
+        this,
+        "Load Layout",
+        GetInitialLayoutPath(),
+        "Layout Files (*.json);;All Files (*)"
+    );
+    if (selected.isEmpty())
+    {
+        return;
+    }
+
+    if (!LoadLayoutFromPath(selected, true))
+    {
+        QMessageBox::warning(this, "Load Layout", "Failed to load layout.");
     }
 }
 
@@ -271,6 +364,7 @@ void MainWindow::OnClearWidgets()
     m_variableStore.Clear();
     m_nextTileOffset = 0;
     m_lastTransportSeq = 0;
+    MarkLayoutDirty();
 }
 
 sd::widgets::VariableTile* MainWindow::GetOrCreateTile(const QString& key, sd::widgets::VariableType type)
@@ -287,9 +381,10 @@ sd::widgets::VariableTile* MainWindow::GetOrCreateTile(const QString& key, sd::w
         tile,
         &sd::widgets::VariableTile::ChangeWidgetRequested,
         this,
-        [tile](const QString&, const QString& widgetType)
+        [this, tile](const QString&, const QString& widgetType)
         {
             tile->setProperty("widgetType", widgetType);
+            MarkLayoutDirty();
         }
     );
     connect(tile, &sd::widgets::VariableTile::ControlBoolEdited, this, &MainWindow::OnControlBoolEdited);
@@ -307,21 +402,7 @@ sd::widgets::VariableTile* MainWindow::GetOrCreateTile(const QString& key, sd::w
     if (savedIt != m_savedLayoutByKey.end())
     {
         const sd::layout::WidgetLayoutEntry& entry = savedIt->second;
-        tile->setGeometry(entry.geometry);
-        if (!entry.widgetType.isEmpty())
-        {
-            tile->SetWidgetType(entry.widgetType);
-        }
-
-        if (entry.gaugeLowerLimit.isValid())
-        {
-            tile->SetGaugeProperties(
-                entry.gaugeLowerLimit.toDouble(),
-                entry.gaugeUpperLimit.isValid() ? entry.gaugeUpperLimit.toDouble() : 1.0,
-                entry.gaugeTickInterval.isValid() ? entry.gaugeTickInterval.toDouble() : 0.2,
-                entry.gaugeShowTickMarks.isValid() ? entry.gaugeShowTickMarks.toBool() : true
-            );
-        }
+        ApplyLayoutEntryToTile(tile, entry);
     }
     else
     {
@@ -331,9 +412,16 @@ sd::widgets::VariableTile* MainWindow::GetOrCreateTile(const QString& key, sd::w
 
     tile->setProperty("variableKey", key);
     tile->setProperty("widgetType", tile->GetWidgetType());
+    tile->installEventFilter(this);
     tile->show();
 
     m_tiles.emplace(keyStd, tile);
+
+    if (!m_suppressLayoutDirty)
+    {
+        MarkLayoutDirty();
+    }
+
     return tile;
 }
 
@@ -408,6 +496,7 @@ void MainWindow::OnRemoveWidgetRequested(const QString& key)
 
     m_tiles.erase(it);
     m_savedLayoutByKey.erase(keyStd);
+    MarkLayoutDirty();
 }
 
 void MainWindow::OnControlDoubleEdited(const QString& key, double value)
@@ -424,4 +513,151 @@ void MainWindow::OnControlStringEdited(const QString& key, const QString& value)
     {
         m_commandPublisher->PublishString(key, value);
     }
+}
+
+bool MainWindow::eventFilter(QObject* watched, QEvent* event)
+{
+    if (watched != nullptr && event != nullptr && !m_suppressLayoutDirty)
+    {
+        auto* tile = qobject_cast<sd::widgets::VariableTile*>(watched);
+        if (tile != nullptr)
+        {
+            if (event->type() == QEvent::Move || event->type() == QEvent::Resize)
+            {
+                MarkLayoutDirty();
+            }
+            else if (event->type() == QEvent::DynamicPropertyChange)
+            {
+                MarkLayoutDirty();
+            }
+        }
+    }
+
+    return QMainWindow::eventFilter(watched, event);
+}
+
+void MainWindow::closeEvent(QCloseEvent* event)
+{
+    if (!m_layoutDirty)
+    {
+        event->accept();
+        return;
+    }
+
+    QMessageBox prompt(this);
+    prompt.setIcon(QMessageBox::Question);
+    prompt.setWindowTitle("Save Layout");
+    prompt.setText("Do you wish to save this layout?");
+    prompt.setStandardButtons(QMessageBox::Yes | QMessageBox::No | QMessageBox::Cancel);
+    prompt.setDefaultButton(QMessageBox::Yes);
+
+    const int choice = prompt.exec();
+    if (choice == QMessageBox::Cancel)
+    {
+        event->ignore();
+        return;
+    }
+
+    if (choice == QMessageBox::Yes)
+    {
+        QString selected = QFileDialog::getSaveFileName(
+            this,
+            "Save Layout",
+            GetInitialLayoutPath(),
+            "Layout Files (*.json);;All Files (*)"
+        );
+        if (selected.isEmpty())
+        {
+            event->ignore();
+            return;
+        }
+
+        if (QFileInfo(selected).suffix().isEmpty())
+        {
+            selected += ".json";
+        }
+
+        if (!SaveLayoutToPath(selected))
+        {
+            QMessageBox::warning(this, "Save Layout", "Failed to save layout.");
+            event->ignore();
+            return;
+        }
+    }
+
+    event->accept();
+}
+
+bool MainWindow::SaveLayoutToPath(const QString& path)
+{
+    const bool saved = sd::layout::SaveLayout(m_canvas, path);
+    if (saved)
+    {
+        m_layoutFilePath = path;
+        PersistLastLayoutPath(path);
+        m_layoutDirty = false;
+    }
+
+    return saved;
+}
+
+bool MainWindow::LoadLayoutFromPath(const QString& path, bool applyToExistingTiles)
+{
+    std::vector<sd::layout::WidgetLayoutEntry> entries;
+    if (!sd::layout::LoadLayoutEntries(path, entries))
+    {
+        return false;
+    }
+
+    m_suppressLayoutDirty = true;
+
+    m_savedLayoutByKey.clear();
+    for (const sd::layout::WidgetLayoutEntry& entry : entries)
+    {
+        m_savedLayoutByKey[entry.variableKey.toStdString()] = entry;
+    }
+
+    if (applyToExistingTiles)
+    {
+        for (const sd::layout::WidgetLayoutEntry& entry : entries)
+        {
+            const sd::widgets::VariableType inferredType = ToVariableTypeFromWidgetType(entry.widgetType);
+            sd::widgets::VariableTile* tile = GetOrCreateTile(entry.variableKey, inferredType);
+            ApplyLayoutEntryToTile(tile, entry);
+        }
+    }
+
+    m_layoutFilePath = path;
+    PersistLastLayoutPath(path);
+    m_layoutDirty = false;
+    m_suppressLayoutDirty = false;
+    return true;
+}
+
+QString MainWindow::GetInitialLayoutPath() const
+{
+    if (!m_layoutFilePath.isEmpty())
+    {
+        return m_layoutFilePath;
+    }
+
+    QSettings settings("SmartDashboard", "SmartDashboardApp");
+    const QString persisted = settings.value("layout/lastPath").toString();
+    if (!persisted.isEmpty())
+    {
+        return persisted;
+    }
+
+    return sd::layout::GetDefaultLayoutPath();
+}
+
+void MainWindow::PersistLastLayoutPath(const QString& path) const
+{
+    QSettings settings("SmartDashboard", "SmartDashboardApp");
+    settings.setValue("layout/lastPath", path);
+}
+
+void MainWindow::MarkLayoutDirty()
+{
+    m_layoutDirty = true;
 }

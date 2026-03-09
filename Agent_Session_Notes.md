@@ -27,6 +27,11 @@
 - Two-way bool/double/string command/telemetry path is implemented and unit tested.
 - Editable mode supports move/resize workflows and intentionally blocks value writes.
 - Non-editable mode restores writable controls (including interactive gauge command writes).
+- Added `double.lineplot` widget type with rolling sample buffer and dynamic axis behavior.
+- Non-edit mode line plot now has right-click `Reset Graph` for deterministic repro/testing.
+- Numeric double widget now supports properties toggle for `Editable` input mode.
+- Layout save/load now uses file dialogs, tracks dirty state, and prompts on close with `Yes/No/Cancel`.
+- Layout load applies entries to existing session widgets and can instantiate saved widgets immediately at startup.
 
 ## Known constraints / active considerations
 
@@ -34,6 +39,7 @@
 - Deployment remains vcpkg/Qt-DLL based; static Qt distribution is not a current goal.
 - Event-bus decoupling (topic subscriptions + rate limiting + coalescing) is documented as future work, not implemented.
 - Possible future NetworkTables adapter is a design consideration, not current implementation.
+- Direct client in-memory cache is session-local; cross-run shared-state semantics still need explicit transport/model design.
 
 ## Next-session checklist
 

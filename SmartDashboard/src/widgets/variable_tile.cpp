@@ -1,5 +1,6 @@
 #include "widgets/variable_tile.h"
 
+#include "widgets/line_plot_widget.h"
 #include "widgets/tile_control_widget.h"
 
 #include <QAction>
@@ -13,11 +14,13 @@
 #include <QFormLayout>
 #include <QGridLayout>
 #include <QHBoxLayout>
+#include <QLineEdit>
 #include <QLabel>
 #include <QKeyEvent>
 #include <QMenu>
 #include <QMouseEvent>
 #include <QPainter>
+#include <QSpinBox>
 #include <QProgressBar>
 #include <QCheckBox>
 
@@ -103,11 +106,40 @@ namespace sd::widgets
             emit ControlDoubleEdited(m_key, mapped);
         });
 
+        m_linePlot = new LinePlotWidget(this);
+        m_linePlot->setVisible(false);
+
+        m_doubleEdit = new QLineEdit(this);
+        m_doubleEdit->setVisible(false);
+        connect(m_doubleEdit, &QLineEdit::editingFinished, this, [this]()
+        {
+            if (m_settingDoubleEditProgrammatically || m_editable)
+            {
+                return;
+            }
+
+            bool ok = false;
+            const double parsed = m_doubleEdit->text().toDouble(&ok);
+            if (ok)
+            {
+                SetDoubleValue(parsed);
+                emit ControlDoubleEdited(m_key, parsed);
+            }
+            else
+            {
+                m_settingDoubleEditProgrammatically = true;
+                m_doubleEdit->setText(QString::number(m_doubleValue, 'f', 4));
+                m_settingDoubleEditProgrammatically = false;
+            }
+        });
+
         m_layout->addWidget(m_titleLabel, 0, 0, 1, 1, Qt::AlignLeft | Qt::AlignVCenter);
         m_layout->addWidget(m_valueLabel, 0, 1, 1, 1);
         m_layout->addWidget(m_boolLed, 0, 1, 1, 1, Qt::AlignLeft | Qt::AlignVCenter);
         m_layout->addWidget(m_progressBar, 0, 1, 1, 1);
         m_layout->addWidget(m_gauge, 0, 1, 1, 1);
+        m_layout->addWidget(m_linePlot, 0, 1, 1, 1);
+        m_layout->addWidget(m_doubleEdit, 0, 1, 1, 1);
 
         m_controlWidget = new TileControlWidget(m_type, this);
         m_controlWidget->setVisible(false);
@@ -135,6 +167,13 @@ namespace sd::widgets
         setMinimumSize(40, 30);
         m_defaultSize = QSize(220, 84);
         SetGaugeProperties(m_gaugeLowerLimit, m_gaugeUpperLimit, m_gaugeTickInterval, m_gaugeShowTickMarks);
+        SetLinePlotProperties(
+            m_linePlotBufferSizeSamples,
+            m_linePlotAutoYAxis,
+            m_linePlotYLowerLimit,
+            m_linePlotYUpperLimit
+        );
+        SetDoubleNumericEditable(m_doubleNumericEditable);
         UpdateWidgetPresentation();
         UpdateValueDisplay();
     }
@@ -147,6 +186,8 @@ namespace sd::widgets
         // Edit mode is layout-only: never allow widget controls to send commands while moving/resizing.
         m_controlWidget->setEnabled(!m_editable);
         m_controlWidget->setAttribute(Qt::WA_TransparentForMouseEvents, m_editable);
+        m_doubleEdit->setEnabled(!m_editable);
+        m_doubleEdit->setAttribute(Qt::WA_TransparentForMouseEvents, m_editable);
         // Keep gauge visually consistent in editable mode; block interaction via mouse transparency.
         m_gauge->setEnabled(true);
         m_gauge->setAttribute(Qt::WA_TransparentForMouseEvents, m_editable);
@@ -223,6 +264,58 @@ namespace sd::widgets
         UpdateValueDisplay();
     }
 
+    void VariableTile::SetLinePlotProperties(int bufferSizeSamples, bool autoYAxis, double yLowerLimit, double yUpperLimit)
+    {
+        int bufferSize = bufferSizeSamples;
+        if (bufferSize < 2)
+        {
+            bufferSize = 2;
+        }
+
+        double lower = yLowerLimit;
+        double upper = yUpperLimit;
+        if (upper <= lower)
+        {
+            upper = lower + 0.001;
+        }
+
+        m_linePlotBufferSizeSamples = bufferSize;
+        m_linePlotAutoYAxis = autoYAxis;
+        m_linePlotYLowerLimit = lower;
+        m_linePlotYUpperLimit = upper;
+
+        setProperty("linePlotBufferSizeSamples", m_linePlotBufferSizeSamples);
+        setProperty("linePlotAutoYAxis", m_linePlotAutoYAxis);
+        setProperty("linePlotYLowerLimit", m_linePlotYLowerLimit);
+        setProperty("linePlotYUpperLimit", m_linePlotYUpperLimit);
+
+        ApplyLinePlotSettings();
+    }
+
+    void VariableTile::SetDoubleNumericEditable(bool editable)
+    {
+        m_doubleNumericEditable = editable;
+        setProperty("doubleNumericEditable", m_doubleNumericEditable);
+
+        if (m_doubleEdit != nullptr)
+        {
+            m_settingDoubleEditProgrammatically = true;
+            m_doubleEdit->setText(QString::number(m_doubleValue, 'f', 4));
+            m_settingDoubleEditProgrammatically = false;
+        }
+
+        UpdateWidgetPresentation();
+        UpdateValueDisplay();
+    }
+
+    void VariableTile::ResetLinePlotGraph()
+    {
+        if (m_linePlot != nullptr)
+        {
+            m_linePlot->ResetGraph();
+        }
+    }
+
     void VariableTile::paintEvent(QPaintEvent* event)
     {
         QFrame::paintEvent(event);
@@ -276,10 +369,35 @@ namespace sd::widgets
         return m_widgetType;
     }
 
+    bool VariableTile::GetBoolValue() const
+    {
+        return m_boolValue;
+    }
+
+    double VariableTile::GetDoubleValue() const
+    {
+        return m_doubleValue;
+    }
+
+    QString VariableTile::GetStringValue() const
+    {
+        return m_stringValue;
+    }
+
     void VariableTile::SetWidgetType(const QString& widgetType)
     {
         m_widgetType = widgetType;
         setProperty("widgetType", m_widgetType);
+
+        if (m_widgetType == "double.lineplot")
+        {
+            const int recommendedHeight = 140;
+            if (height() < recommendedHeight)
+            {
+                resize(width(), recommendedHeight);
+            }
+        }
+
         UpdateWidgetPresentation();
         UpdateValueDisplay();
     }
@@ -560,7 +678,23 @@ namespace sd::widgets
     {
         if (!m_editable)
         {
-            event->ignore();
+            QMenu menu(this);
+            if (IsLinePlotWidget())
+            {
+                QAction* resetPlotAction = menu.addAction("Reset Graph");
+                connect(resetPlotAction, &QAction::triggered, this, [this]()
+                {
+                    ResetLinePlotGraph();
+                });
+            }
+
+            if (menu.actions().isEmpty())
+            {
+                event->ignore();
+                return;
+            }
+
+            menu.exec(event->globalPos());
             return;
         }
 
@@ -596,6 +730,7 @@ namespace sd::widgets
                 addWidgetAction("Numeric text", "double.numeric");
                 addWidgetAction("Progress bar", "double.progress");
                 addWidgetAction("Gauge", "double.gauge");
+                addWidgetAction("Line Plot", "double.lineplot");
                 addWidgetAction("Slider control", "double.slider");
                 break;
             case VariableType::String:
@@ -660,6 +795,7 @@ namespace sd::widgets
         const bool isDoubleNumeric = (m_widgetType == "double.numeric");
         const bool isDoubleProgress = (m_widgetType == "double.progress");
         const bool isDoubleGauge = (m_widgetType == "double.gauge");
+        const bool isDoubleLinePlot = (m_widgetType == "double.lineplot");
         const bool isDoubleSlider = (m_widgetType == "double.slider");
         const bool isStringText = (m_widgetType == "string.text");
         const bool isStringMultiline = (m_widgetType == "string.multiline");
@@ -671,6 +807,7 @@ namespace sd::widgets
         const bool showDoubleNumeric = (m_type == VariableType::Double && isDoubleNumeric);
         const bool showDoubleProgress = (m_type == VariableType::Double && isDoubleProgress);
         const bool showDoubleGauge = (m_type == VariableType::Double && isDoubleGauge);
+        const bool showDoubleLinePlot = (m_type == VariableType::Double && isDoubleLinePlot);
         const bool showDoubleSlider = (m_type == VariableType::Double && isDoubleSlider);
         const bool showStringText = (m_type == VariableType::String && isStringText);
         const bool showStringMultiline = (m_type == VariableType::String && isStringMultiline);
@@ -679,6 +816,7 @@ namespace sd::widgets
         m_boolLed->setVisible(showBoolLed);
         m_progressBar->setVisible(showDoubleProgress);
         m_gauge->setVisible(showDoubleGauge);
+        m_linePlot->setVisible(showDoubleLinePlot);
         m_gauge->setCursor((showDoubleGauge && !m_editable) ? Qt::SizeHorCursor : Qt::ArrowCursor);
 
         if (!m_editable)
@@ -686,8 +824,16 @@ namespace sd::widgets
             setCursor(showDoubleGauge ? Qt::SizeHorCursor : Qt::ArrowCursor);
         }
 
-        const bool showValueLabel = showBoolText || showDoubleNumeric || showStringText || showStringMultiline;
+        const bool showValueLabel = showBoolText || (showDoubleNumeric && !m_doubleNumericEditable) || showStringText || showStringMultiline;
         m_valueLabel->setVisible(showValueLabel);
+        const bool showDoubleEdit = (showDoubleNumeric && m_doubleNumericEditable);
+        m_doubleEdit->setVisible(showDoubleEdit);
+        if (showDoubleEdit)
+        {
+            m_settingDoubleEditProgrammatically = true;
+            m_doubleEdit->setText(QString::number(m_doubleValue, 'f', 4));
+            m_settingDoubleEditProgrammatically = false;
+        }
         m_titleLabel->setVisible(!showDoubleGauge);
 
         const bool showControl = showBoolCheckbox || showDoubleSlider || showStringEdit;
@@ -711,24 +857,41 @@ namespace sd::widgets
         if (!showControl && showDoubleGauge)
         {
             m_layout->addWidget(m_gauge, 1, 0, 1, 2, Qt::AlignHCenter | Qt::AlignVCenter);
+            m_layout->setRowStretch(0, 0);
+            m_layout->setRowStretch(1, 1);
+        }
+        else if (!showControl && showDoubleLinePlot)
+        {
+            m_layout->addWidget(m_titleLabel, 0, 0, 1, 2, Qt::AlignHCenter | Qt::AlignVCenter);
+            m_layout->addWidget(m_linePlot, 1, 0, 1, 2);
+            m_layout->setRowStretch(0, 0);
+            m_layout->setRowStretch(1, 1);
         }
         else if (!showControl && showDoubleProgress)
         {
             m_layout->addWidget(m_titleLabel, 0, 0, 1, 2, Qt::AlignLeft | Qt::AlignTop);
             m_layout->addWidget(m_progressBar, 1, 0, 1, 2);
+            m_layout->setRowStretch(0, 0);
+            m_layout->setRowStretch(1, 0);
         }
         else if (!showControl && showStringMultiline)
         {
             m_layout->addWidget(m_titleLabel, 0, 0, 1, 1, Qt::AlignLeft | Qt::AlignTop);
             m_layout->addWidget(m_valueLabel, 1, 0, 1, 2);
+            m_layout->setRowStretch(0, 0);
+            m_layout->setRowStretch(1, 0);
         }
         else if (!showControl)
         {
             m_layout->addWidget(m_titleLabel, 0, 0, 1, 1, Qt::AlignLeft | Qt::AlignVCenter);
             m_layout->addWidget(m_valueLabel, 0, 1, 1, 1);
+            m_layout->addWidget(m_doubleEdit, 0, 1, 1, 1);
             m_layout->addWidget(m_boolLed, 0, 1, 1, 1, Qt::AlignLeft | Qt::AlignVCenter);
             m_layout->addWidget(m_progressBar, 0, 1, 1, 1);
             m_layout->addWidget(m_gauge, 0, 1, 1, 1);
+            m_layout->addWidget(m_linePlot, 0, 1, 1, 1);
+            m_layout->setRowStretch(0, 0);
+            m_layout->setRowStretch(1, 0);
         }
 
         if (showStringMultiline)
@@ -762,6 +925,14 @@ namespace sd::widgets
             return;
         }
 
+        if (m_doubleEdit->isVisible())
+        {
+            m_settingDoubleEditProgrammatically = true;
+            m_doubleEdit->setText(QString::number(m_doubleValue, 'f', 4));
+            m_settingDoubleEditProgrammatically = false;
+            return;
+        }
+
         if (m_progressBar->isVisible())
         {
             m_progressBar->setValue(DoubleToPercent(m_doubleValue));
@@ -773,6 +944,12 @@ namespace sd::widgets
             m_settingGaugeProgrammatically = true;
             m_gauge->setValue(DoubleToPercent(m_doubleValue));
             m_settingGaugeProgrammatically = false;
+            return;
+        }
+
+        if (m_linePlot->isVisible())
+        {
+            m_linePlot->AddSample(m_doubleValue);
             return;
         }
 
@@ -821,45 +998,138 @@ namespace sd::widgets
         return (m_type == VariableType::Double && m_widgetType == "double.gauge");
     }
 
+    bool VariableTile::IsLinePlotWidget() const
+    {
+        return (m_type == VariableType::Double && m_widgetType == "double.lineplot");
+    }
+
+    bool VariableTile::IsDoubleNumericWidget() const
+    {
+        return (m_type == VariableType::Double && m_widgetType == "double.numeric");
+    }
+
     bool VariableTile::IsPropertiesSupported() const
     {
-        return IsGaugeWidget();
+        return IsGaugeWidget() || IsLinePlotWidget() || IsDoubleNumericWidget();
     }
 
     void VariableTile::OpenPropertiesDialog()
     {
-        if (!IsGaugeWidget())
+        if (IsGaugeWidget())
+        {
+            QDialog dialog(this);
+            dialog.setWindowTitle("Gauge Properties");
+
+            auto* form = new QFormLayout(&dialog);
+
+            auto* upperLimitSpin = new QDoubleSpinBox(&dialog);
+            upperLimitSpin->setDecimals(3);
+            upperLimitSpin->setRange(-1e6, 1e6);
+            upperLimitSpin->setValue(m_gaugeUpperLimit);
+
+            auto* lowerLimitSpin = new QDoubleSpinBox(&dialog);
+            lowerLimitSpin->setDecimals(3);
+            lowerLimitSpin->setRange(-1e6, 1e6);
+            lowerLimitSpin->setValue(m_gaugeLowerLimit);
+
+            auto* tickIntervalSpin = new QDoubleSpinBox(&dialog);
+            tickIntervalSpin->setDecimals(3);
+            tickIntervalSpin->setRange(0.001, 1e6);
+            tickIntervalSpin->setValue(m_gaugeTickInterval);
+
+            auto* showTickMarksCheck = new QCheckBox(&dialog);
+            showTickMarksCheck->setChecked(m_gaugeShowTickMarks);
+
+            form->addRow("Upper Limit", upperLimitSpin);
+            form->addRow("Lower Limit", lowerLimitSpin);
+            form->addRow("Tick Interval", tickIntervalSpin);
+            form->addRow("Show Tick Marks", showTickMarksCheck);
+
+            auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+            form->addRow(buttons);
+
+            connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+            connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+
+            if (dialog.exec() != QDialog::Accepted)
+            {
+                return;
+            }
+
+            SetGaugeProperties(
+                lowerLimitSpin->value(),
+                upperLimitSpin->value(),
+                tickIntervalSpin->value(),
+                showTickMarksCheck->isChecked()
+            );
+            return;
+        }
+
+        if (IsDoubleNumericWidget())
+        {
+            QDialog dialog(this);
+            dialog.setWindowTitle("Numeric Text Properties");
+
+            auto* form = new QFormLayout(&dialog);
+            auto* editableCheck = new QCheckBox(&dialog);
+            editableCheck->setChecked(m_doubleNumericEditable);
+            form->addRow("Editable", editableCheck);
+
+            auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+            form->addRow(buttons);
+
+            connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+            connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+
+            if (dialog.exec() != QDialog::Accepted)
+            {
+                return;
+            }
+
+            SetDoubleNumericEditable(editableCheck->isChecked());
+            return;
+        }
+
+        if (!IsLinePlotWidget())
         {
             return;
         }
 
         QDialog dialog(this);
-        dialog.setWindowTitle("Gauge Properties");
+        dialog.setWindowTitle("Line Plot Properties");
 
         auto* form = new QFormLayout(&dialog);
+
+        auto* bufferSizeSpin = new QSpinBox(&dialog);
+        bufferSizeSpin->setRange(2, 500000);
+        bufferSizeSpin->setValue(m_linePlotBufferSizeSamples);
+
+        auto* autoYAxisCheck = new QCheckBox(&dialog);
+        autoYAxisCheck->setChecked(m_linePlotAutoYAxis);
 
         auto* upperLimitSpin = new QDoubleSpinBox(&dialog);
         upperLimitSpin->setDecimals(3);
         upperLimitSpin->setRange(-1e6, 1e6);
-        upperLimitSpin->setValue(m_gaugeUpperLimit);
+        upperLimitSpin->setValue(m_linePlotYUpperLimit);
 
         auto* lowerLimitSpin = new QDoubleSpinBox(&dialog);
         lowerLimitSpin->setDecimals(3);
         lowerLimitSpin->setRange(-1e6, 1e6);
-        lowerLimitSpin->setValue(m_gaugeLowerLimit);
+        lowerLimitSpin->setValue(m_linePlotYLowerLimit);
 
-        auto* tickIntervalSpin = new QDoubleSpinBox(&dialog);
-        tickIntervalSpin->setDecimals(3);
-        tickIntervalSpin->setRange(0.001, 1e6);
-        tickIntervalSpin->setValue(m_gaugeTickInterval);
+        auto updateAxisSpinState = [autoYAxisCheck, lowerLimitSpin, upperLimitSpin]()
+        {
+            const bool manualEnabled = !autoYAxisCheck->isChecked();
+            lowerLimitSpin->setEnabled(manualEnabled);
+            upperLimitSpin->setEnabled(manualEnabled);
+        };
+        updateAxisSpinState();
+        connect(autoYAxisCheck, &QCheckBox::toggled, &dialog, updateAxisSpinState);
 
-        auto* showTickMarksCheck = new QCheckBox(&dialog);
-        showTickMarksCheck->setChecked(m_gaugeShowTickMarks);
-
+        form->addRow("Buffer Size (samples)", bufferSizeSpin);
+        form->addRow("Auto Y Axis", autoYAxisCheck);
         form->addRow("Upper Limit", upperLimitSpin);
         form->addRow("Lower Limit", lowerLimitSpin);
-        form->addRow("Tick Interval", tickIntervalSpin);
-        form->addRow("Show Tick Marks", showTickMarksCheck);
 
         auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
         form->addRow(buttons);
@@ -872,11 +1142,11 @@ namespace sd::widgets
             return;
         }
 
-        SetGaugeProperties(
+        SetLinePlotProperties(
+            bufferSizeSpin->value(),
+            autoYAxisCheck->isChecked(),
             lowerLimitSpin->value(),
-            upperLimitSpin->value(),
-            tickIntervalSpin->value(),
-            showTickMarksCheck->isChecked()
+            upperLimitSpin->value()
         );
     }
 
@@ -909,6 +1179,18 @@ namespace sd::widgets
 
         m_gauge->setSingleStep(step);
         m_gauge->setPageStep(step);
+    }
+
+    void VariableTile::ApplyLinePlotSettings()
+    {
+        if (m_linePlot == nullptr)
+        {
+            return;
+        }
+
+        m_linePlot->SetBufferSizeSamples(m_linePlotBufferSizeSamples);
+        m_linePlot->SetYAxisModeAuto(m_linePlotAutoYAxis);
+        m_linePlot->SetYAxisLimits(m_linePlotYLowerLimit, m_linePlotYUpperLimit);
     }
 
     VariableTile::DragMode VariableTile::HitTestDragMode(const QPoint& localPos) const

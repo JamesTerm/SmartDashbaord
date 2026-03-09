@@ -22,6 +22,8 @@ qt_add_executable(SmartDashboardApp WIN32
     src/transport/direct_publisher_adapter.cpp
     src/widgets/variable_tile.h
     src/widgets/variable_tile.cpp
+    src/widgets/line_plot_widget.h
+    src/widgets/line_plot_widget.cpp
     src/widgets/tile_control_widget.h
     src/widgets/tile_control_widget.cpp
 )

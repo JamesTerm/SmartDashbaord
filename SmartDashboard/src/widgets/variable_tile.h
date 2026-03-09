@@ -10,6 +10,7 @@ class QDial;
 class QGridLayout;
 class QFrame;
 class QKeyEvent;
+class QLineEdit;
 class QPaintEvent;
 class QEnterEvent;
 class QEvent;
@@ -17,6 +18,7 @@ class QEvent;
 namespace sd::widgets
 {
     class TileControlWidget;
+    class LinePlotWidget;
 }
 
 namespace sd::widgets
@@ -51,10 +53,16 @@ namespace sd::widgets
         void SetEditInteractionMode(EditInteractionMode mode);
         void SetDefaultSize(const QSize& size);
         void SetGaugeProperties(double lowerLimit, double upperLimit, double tickInterval, bool showTickMarks);
+        void SetLinePlotProperties(int bufferSizeSamples, bool autoYAxis, double yLowerLimit, double yUpperLimit);
+        void SetDoubleNumericEditable(bool editable);
+        void ResetLinePlotGraph();
 
         QString GetKey() const;
         VariableType GetType() const;
         QString GetWidgetType() const;
+        bool GetBoolValue() const;
+        double GetDoubleValue() const;
+        QString GetStringValue() const;
         void SetWidgetType(const QString& widgetType);
 
     signals:
@@ -96,9 +104,12 @@ namespace sd::widgets
         int DoubleToPercent(double value) const;
         void UpdateBoolLedAppearance();
         bool IsGaugeWidget() const;
+        bool IsLinePlotWidget() const;
+        bool IsDoubleNumericWidget() const;
         bool IsPropertiesSupported() const;
         void OpenPropertiesDialog();
         void ApplyGaugeSettings();
+        void ApplyLinePlotSettings();
         DragMode HitTestDragMode(const QPoint& localPos) const;
         void UpdateCursorForPosition(const QPoint& localPos);
 
@@ -118,17 +129,25 @@ namespace sd::widgets
         bool m_boolValue = false;
         double m_doubleValue = 0.0;
         bool m_settingGaugeProgrammatically = false;
+        bool m_settingDoubleEditProgrammatically = false;
         QSize m_defaultSize;
+        bool m_doubleNumericEditable = false;
         double m_gaugeLowerLimit = -1.0;
         double m_gaugeUpperLimit = 1.0;
         double m_gaugeTickInterval = 0.2;
         bool m_gaugeShowTickMarks = true;
+        int m_linePlotBufferSizeSamples = 5000;
+        bool m_linePlotAutoYAxis = true;
+        double m_linePlotYLowerLimit = 0.0;
+        double m_linePlotYUpperLimit = 1.0;
         QString m_stringValue;
 
         QLabel* m_titleLabel = nullptr;
         QLabel* m_valueLabel = nullptr;
+        QLineEdit* m_doubleEdit = nullptr;
         QProgressBar* m_progressBar = nullptr;
         QDial* m_gauge = nullptr;
+        LinePlotWidget* m_linePlot = nullptr;
         QFrame* m_boolLed = nullptr;
         QGridLayout* m_layout = nullptr;
         TileControlWidget* m_controlWidget = nullptr;
