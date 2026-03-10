@@ -42,6 +42,34 @@ Curated milestone history for this repository.
   - `boolCheckboxShowLabel`
   - `textFontPointSize`
 
+## 2026-03-10 - Progress startup fix, test hardening, and Windows icon
+
+- Fixed `double.progress` startup/render ordering issue where initial chunk fill could be missing when value updates arrived before widget visibility settled; value display routing now uses configured `widgetType` semantics.
+- Added SmartDashboard widget regression test coverage:
+  - new `SmartDashboard_tests` target
+  - `tests/variable_tile_tests.cpp`
+  - `VariableTileTests.ProgressBarZeroCentersBeforeWidgetIsShown` guards centered-zero startup behavior.
+- Hardened direct client test isolation for retained/cache edge cases:
+  - `SmartDashboardClientTests.AssertiveGetPublishesDefaultAndCallbackReceivesUpdates` now uses unique per-test direct channel names
+  - retained-store fallback is disabled in that test to guarantee empty-start assertive-get semantics.
+- Added embedded Windows app icon resources for `SmartDashboardApp.exe`:
+  - `SmartDashboard/dist/win/smartdashboard_app.ico`
+  - `SmartDashboard/dist/win/app_icon.rc`
+
+## 2026-03-10 - Layout title/save UX and load-mode options
+
+- Added current-layout awareness to window title for JSON layouts:
+  - title now includes loaded layout name without extension
+  - unsaved edits are indicated with `*`.
+- Refined layout save UX into explicit actions:
+  - `Save / Update Layout` saves directly to the active JSON layout path when available
+  - `Save Layout As...` always prompts for a destination.
+- Updated close-save prompt wording to reflect current-layout semantics (`Save changes to current layout?`).
+- Fixed startup false-dirty behavior by limiting layout-dirty marks from tile move/resize/property events to editable mode only.
+- Added load-mode menu split without changing core load behavior:
+  - `Load Layout (Merge)` keeps existing merge semantics
+  - `Load Layout (Replace)` clears widgets first, then loads selected layout.
+
 ## 2026-03-09 - Gauge editing workflow and layout persistence
 
 - Finalized line-plot axis behavior updates:

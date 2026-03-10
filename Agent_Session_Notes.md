@@ -2,6 +2,7 @@
 
 - Edit this file for short, high-signal context that helps the next session start quickly.
 - Keep this file lean; move long milestone history to `docs/project_history.md`.
+- Commit-note convention: when the user says "update notes", keep this file to handoff-critical context only; put durable feature/change history in `docs/project_history.md`.
 
 ## Workflow note
 
@@ -27,25 +28,14 @@
 - Two-way bool/double/string command/telemetry path is implemented and unit tested.
 - Editable mode supports move/resize workflows and intentionally blocks value writes.
 - Non-editable mode restores writable controls (including interactive gauge command writes).
-- Added `double.lineplot` widget type with rolling sample buffer and dynamic axis behavior.
-- Non-edit mode line plot now has right-click `Reset Graph` for deterministic repro/testing.
-- Numeric double widget now supports properties toggle for `Editable` input mode.
 - Layout save/load now uses file dialogs, tracks dirty state, and prompts on close with `Yes/No/Cancel`.
 - Layout load applies entries to existing session widgets and can instantiate saved widgets immediately at startup.
 - Direct client now includes a retained key-value store (shared-memory + mutex + optional file persistence) to provide authoritative direct-table semantics.
 - `TryGet/Get` now fall back to retained store on cache miss; this addresses cross-run config retrieval for iterative tuning tests.
-- Line plot now supports optional `Show Number Lines` and `Show Grid Lines` with persisted layout properties.
-- Line plot rendering refinements: manual Y-limit clipping, endpoint-inclusive tick labels, adaptive decimal precision, and faster Y auto-range response for smaller buffers.
-- `StreamsSineWaveDouble` now applies `SweepSeconds` changes on the active run (no extra run required).
-- Line plot x-axis ticks now use fixed time anchors and scroll naturally with the time window; reset state keeps default `0..1` axes visible so number/grid lines do not disappear.
-- Added gauge-style properties for `double.slider` (`Upper/Lower Limit`, `Tick Interval`, `Show Tick Marks`) with layout persistence and load/apply support.
-- Added progress-bar range properties for `double.progress` (`Upper/Lower Limit`) with layout persistence and load/apply support.
-- Slider control mapping now honors configured lower/upper bounds for both display updates and command writes.
-- Follow-up: progress bar tick settings were removed because Qt `QProgressBar` cannot render true tick marks; progress bar now exposes only upper/lower limits.
-- Fixed startup/load ordering issue for `double.progress`: value routing now keys off configured `widgetType` instead of widget visibility, preventing initial chunk-fill misses when tiles are not yet shown.
-- Added `SmartDashboard_tests` target and `tests/variable_tile_tests.cpp` regression test (`ProgressBarZeroCentersBeforeWidgetIsShown`) to lock in centered-zero startup behavior.
-- Added Windows app icon resource wiring for `SmartDashboardApp.exe` (`dist/win/smartdashboard_app.ico` + `dist/win/app_icon.rc`).
-- Stabilized `SmartDashboardClientTests.AssertiveGetPublishesDefaultAndCallbackReceivesUpdates` by using unique per-test direct channels and disabling retained-store fallback in that test.
+- Progress-bar startup behavior is stabilized by routing value updates via configured `widgetType` (not transient visibility state).
+- `SmartDashboard_tests` target exists with `tests/variable_tile_tests.cpp` regression coverage for centered-zero progress-bar startup behavior.
+- App icon is now wired for Windows builds via `dist/win/app_icon.rc` and `dist/win/smartdashboard_app.ico`.
+- `AssertiveGetPublishesDefaultAndCallbackReceivesUpdates` test isolation uses unique per-test direct channels and disables retained fallback for that case.
 
 ## Known constraints / active considerations
 
@@ -54,6 +44,7 @@
 - Event-bus decoupling (topic subscriptions + rate limiting + coalescing) is documented as future work, not implemented.
 - Possible future NetworkTables adapter is a design consideration, not current implementation.
 - Direct ring payload path is still single-consumer; retained store introduces shared latest-value ownership but does not yet change stream fan-out semantics.
+- If startup false-dirty (`*`) behavior regresses, add a focused startup regression test that validates initial title/dirty state before any editable interaction.
 
 ## Next-session checklist
 

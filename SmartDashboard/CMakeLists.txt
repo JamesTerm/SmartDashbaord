@@ -142,6 +142,13 @@ if(WIN32)
         set(WINDEPLOYQT_EXECUTABLE "")
     endif()
 
+    set(_vs_debug_path_entries "")
+    set(_vs_debug_plugin_path "")
+
+    if(_qt_tools_bin)
+        list(APPEND _vs_debug_path_entries "${_qt_tools_bin}" "${_qt_tools_bin}/debug")
+    endif()
+
     if(WINDEPLOYQT_EXECUTABLE)
         add_custom_command(TARGET SmartDashboardApp POST_BUILD
             COMMAND "${WINDEPLOYQT_EXECUTABLE}" "$<TARGET_FILE:SmartDashboardApp>"
@@ -188,6 +195,9 @@ if(WIN32)
             set(_vcpkg_bin "${_vcpkg_installed}/${_vcpkg_triplet}/$<IF:$<CONFIG:Debug>,debug/bin,bin>")
             set(_vcpkg_plugins "${_vcpkg_installed}/${_vcpkg_triplet}/$<IF:$<CONFIG:Debug>,debug/Qt6/plugins,Qt6/plugins>")
 
+            list(APPEND _vs_debug_path_entries "${_vcpkg_bin}")
+            set(_vs_debug_plugin_path "${_vcpkg_plugins}")
+
             add_custom_command(TARGET SmartDashboardApp POST_BUILD
                 COMMAND "${CMAKE_COMMAND}" -DSOURCE_BIN="${_vcpkg_bin}" -DSOURCE_PLUGINS="${_vcpkg_plugins}"
                         -DDEST_DIR="$<TARGET_FILE_DIR:SmartDashboardApp>" -DQT_CONF="${_qt_conf}" -DQT_TOOLS_BIN="${_qt_tools_bin}" -DEXTRA_DLL_DIRS="${SMARTDASHBOARD_QT_EXTRA_DLL_DIRS}" -DQT_DEPLOY_VERBOSE=${SMARTDASHBOARD_VERBOSE_QT_DEPLOY}
@@ -203,5 +213,15 @@ if(WIN32)
         else()
             message(WARNING "windeployqt not found and vcpkg root could not be resolved. Qt runtime will not be copied next to SmartDashboardApp.")
         endif()
+    endif()
+
+    if(_vs_debug_path_entries)
+        list(REMOVE_DUPLICATES _vs_debug_path_entries)
+        list(JOIN _vs_debug_path_entries ";" _vs_debug_path)
+        set(_vs_debug_env "PATH=${_vs_debug_path};%PATH%")
+        if(_vs_debug_plugin_path)
+            string(APPEND _vs_debug_env "\nQT_PLUGIN_PATH=${_vs_debug_plugin_path}")
+        endif()
+        set_property(TARGET SmartDashboardApp PROPERTY VS_DEBUGGER_ENVIRONMENT "${_vs_debug_env}")
     endif()
 endif()

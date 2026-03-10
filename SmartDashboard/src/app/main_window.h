@@ -36,7 +36,9 @@ private slots:
     void OnVariableUpdateReceived(const QString& key, int valueType, const QVariant& value, quint64 seq);
     void OnConnectionStateChanged(int state);
     void OnSaveLayout();
+    void OnSaveLayoutAs();
     void OnLoadLayout();
+    void OnLoadLayoutReplace();
     void OnImportLegacyXmlLayout();
     void OnClearWidgets();
     void OnRemoveWidgetRequested(const QString& key);
@@ -56,9 +58,13 @@ private:
     void LoadWindowGeometry();
     void SaveWindowGeometry() const;
     bool SaveLayoutToPath(const QString& path);
+    bool SaveLayoutUsingCurrentOrPrompt();
     bool LoadLayoutFromPath(const QString& path, bool applyToExistingTiles, bool persistAsCurrentPath = true);
     QString GetInitialLayoutPath() const;
     void PersistLastLayoutPath(const QString& path) const;
+    bool HasActiveJsonLayoutPath() const;
+    QString GetLayoutTitleSegment() const;
+    void RefreshWindowTitle();
     void MarkLayoutDirty();
 
     QWidget* m_canvas = nullptr;
@@ -73,6 +79,7 @@ private:
     sd::widgets::EditInteractionMode m_editInteractionMode = sd::widgets::EditInteractionMode::MoveAndResize;
     int m_nextTileOffset = 0;
     std::uint64_t m_lastTransportSeq = 0;
+    int m_connectionState = static_cast<int>(sd::direct::ConnectionState::Disconnected);
     bool m_layoutDirty = false;
     bool m_suppressLayoutDirty = false;
     QString m_layoutFilePath;

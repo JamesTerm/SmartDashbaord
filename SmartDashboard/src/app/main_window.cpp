@@ -158,7 +158,7 @@ MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent)
     , m_subscriberAdapter(this)
 {
-    setWindowTitle("SmartDashboard - Disconnected");
+    RefreshWindowTitle();
     resize(1200, 800);
 
     m_canvas = new QWidget(this);
@@ -168,12 +168,16 @@ MainWindow::MainWindow(QWidget* parent)
     setCentralWidget(m_canvas);
 
     QMenu* fileMenu = menuBar()->addMenu("&File");
-    QAction* saveLayoutAction = fileMenu->addAction("Save Layout");
-    QAction* loadLayoutAction = fileMenu->addAction("Load Layout");
+    QAction* saveLayoutAction = fileMenu->addAction("Save / Update Layout");
+    QAction* saveLayoutAsAction = fileMenu->addAction("Save Layout As...");
+    QAction* loadLayoutAction = fileMenu->addAction("Load Layout (Merge)");
+    QAction* loadLayoutReplaceAction = fileMenu->addAction("Load Layout (Replace)");
     QAction* importLegacyXmlAction = fileMenu->addAction("Import Legacy XML...");
     QAction* clearWidgetsAction = fileMenu->addAction("Clear Widgets");
     connect(saveLayoutAction, &QAction::triggered, this, &MainWindow::OnSaveLayout);
+    connect(saveLayoutAsAction, &QAction::triggered, this, &MainWindow::OnSaveLayoutAs);
     connect(loadLayoutAction, &QAction::triggered, this, &MainWindow::OnLoadLayout);
+    connect(loadLayoutReplaceAction, &QAction::triggered, this, &MainWindow::OnLoadLayoutReplace);
     connect(importLegacyXmlAction, &QAction::triggered, this, &MainWindow::OnImportLegacyXmlLayout);
     connect(clearWidgetsAction, &QAction::triggered, this, &MainWindow::OnClearWidgets);
 
@@ -346,6 +350,8 @@ void MainWindow::OnVariableUpdateReceived(const QString& key, int valueType, con
 
 void MainWindow::OnConnectionStateChanged(int state)
 {
+    m_connectionState = state;
+
     const int connected = static_cast<int>(sd::direct::ConnectionState::Connected);
     if (state == connected)
     {
@@ -358,9 +364,17 @@ void MainWindow::OnConnectionStateChanged(int state)
 
 void MainWindow::OnSaveLayout()
 {
+    if (!SaveLayoutUsingCurrentOrPrompt())
+    {
+        QMessageBox::warning(this, "Save Layout", "Failed to save layout.");
+    }
+}
+
+void MainWindow::OnSaveLayoutAs()
+{
     QString selected = QFileDialog::getSaveFileName(
         this,
-        "Save Layout",
+        "Save Layout As",
         GetInitialLayoutPath(),
         "Layout Files (*.json);;All Files (*)"
     );
@@ -376,7 +390,7 @@ void MainWindow::OnSaveLayout()
 
     if (!SaveLayoutToPath(selected))
     {
-        QMessageBox::warning(this, "Save Layout", "Failed to save layout.");
+        QMessageBox::warning(this, "Save Layout As", "Failed to save layout.");
     }
 }
 
@@ -396,6 +410,26 @@ void MainWindow::OnLoadLayout()
     if (!LoadLayoutFromPath(selected, true))
     {
         QMessageBox::warning(this, "Load Layout", "Failed to load layout.");
+    }
+}
+
+void MainWindow::OnLoadLayoutReplace()
+{
+    const QString selected = QFileDialog::getOpenFileName(
+        this,
+        "Load Layout (Replace)",
+        GetInitialLayoutPath(),
+        "Layout Files (*.json);;All Files (*)"
+    );
+    if (selected.isEmpty())
+    {
+        return;
+    }
+
+    OnClearWidgets();
+    if (!LoadLayoutFromPath(selected, true))
+    {
+        QMessageBox::warning(this, "Load Layout (Replace)", "Failed to load layout.");
     }
 }
 
@@ -528,7 +562,9 @@ sd::widgets::VariableTile* MainWindow::GetOrCreateTile(const QString& key, sd::w
 
 void MainWindow::UpdateWindowConnectionText(int state)
 {
-    // Finite-state mapping from transport enum -> UI status text.
+    m_connectionState = state;
+    RefreshWindowTitle();
+
     QString stateText = "Disconnected";
     if (state == static_cast<int>(sd::direct::ConnectionState::Connecting))
     {
@@ -543,7 +579,6 @@ void MainWindow::UpdateWindowConnectionText(int state)
         stateText = "Stale";
     }
 
-    setWindowTitle(QString("SmartDashboard - %1").arg(stateText));
     m_statusLabel->setText(QString("State: %1").arg(stateText));
 }
 
@@ -621,7 +656,7 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event)
     if (watched != nullptr && event != nullptr && !m_suppressLayoutDirty)
     {
         auto* tile = qobject_cast<sd::widgets::VariableTile*>(watched);
-        if (tile != nullptr)
+        if (tile != nullptr && m_isEditable)
         {
             if (event->type() == QEvent::Move || event->type() == QEvent::Resize)
             {
@@ -648,7 +683,7 @@ void MainWindow::closeEvent(QCloseEvent* event)
     QMessageBox prompt(this);
     prompt.setIcon(QMessageBox::Question);
     prompt.setWindowTitle("Save Layout");
-    prompt.setText("Do you wish to save this layout?");
+    prompt.setText("Save changes to current layout?");
     prompt.setStandardButtons(QMessageBox::Yes | QMessageBox::No | QMessageBox::Cancel);
     prompt.setDefaultButton(QMessageBox::Yes);
 
@@ -661,26 +696,8 @@ void MainWindow::closeEvent(QCloseEvent* event)
 
     if (choice == QMessageBox::Yes)
     {
-        QString selected = QFileDialog::getSaveFileName(
-            this,
-            "Save Layout",
-            GetInitialLayoutPath(),
-            "Layout Files (*.json);;All Files (*)"
-        );
-        if (selected.isEmpty())
+        if (!SaveLayoutUsingCurrentOrPrompt())
         {
-            event->ignore();
-            return;
-        }
-
-        if (QFileInfo(selected).suffix().isEmpty())
-        {
-            selected += ".json";
-        }
-
-        if (!SaveLayoutToPath(selected))
-        {
-            QMessageBox::warning(this, "Save Layout", "Failed to save layout.");
             event->ignore();
             return;
         }
@@ -697,9 +714,36 @@ bool MainWindow::SaveLayoutToPath(const QString& path)
         m_layoutFilePath = path;
         PersistLastLayoutPath(path);
         m_layoutDirty = false;
+        RefreshWindowTitle();
     }
 
     return saved;
+}
+
+bool MainWindow::SaveLayoutUsingCurrentOrPrompt()
+{
+    if (HasActiveJsonLayoutPath())
+    {
+        return SaveLayoutToPath(m_layoutFilePath);
+    }
+
+    QString selected = QFileDialog::getSaveFileName(
+        this,
+        "Save Layout",
+        GetInitialLayoutPath(),
+        "Layout Files (*.json);;All Files (*)"
+    );
+    if (selected.isEmpty())
+    {
+        return false;
+    }
+
+    if (QFileInfo(selected).suffix().isEmpty())
+    {
+        selected += ".json";
+    }
+
+    return SaveLayoutToPath(selected);
 }
 
 bool MainWindow::LoadLayoutFromPath(const QString& path, bool applyToExistingTiles, bool persistAsCurrentPath)
@@ -735,6 +779,7 @@ bool MainWindow::LoadLayoutFromPath(const QString& path, bool applyToExistingTil
     }
     m_layoutDirty = !persistAsCurrentPath;
     m_suppressLayoutDirty = false;
+    RefreshWindowTitle();
     return true;
 }
 
@@ -764,4 +809,52 @@ void MainWindow::PersistLastLayoutPath(const QString& path) const
 void MainWindow::MarkLayoutDirty()
 {
     m_layoutDirty = true;
+    RefreshWindowTitle();
+}
+
+bool MainWindow::HasActiveJsonLayoutPath() const
+{
+    if (m_layoutFilePath.isEmpty())
+    {
+        return false;
+    }
+
+    return QFileInfo(m_layoutFilePath).suffix().compare("json", Qt::CaseInsensitive) == 0;
+}
+
+QString MainWindow::GetLayoutTitleSegment() const
+{
+    if (!HasActiveJsonLayoutPath())
+    {
+        return "";
+    }
+
+    return QFileInfo(m_layoutFilePath).completeBaseName();
+}
+
+void MainWindow::RefreshWindowTitle()
+{
+    QString stateText = "Disconnected";
+    if (m_connectionState == static_cast<int>(sd::direct::ConnectionState::Connecting))
+    {
+        stateText = "Connecting";
+    }
+    else if (m_connectionState == static_cast<int>(sd::direct::ConnectionState::Connected))
+    {
+        stateText = "Connected";
+    }
+    else if (m_connectionState == static_cast<int>(sd::direct::ConnectionState::Stale))
+    {
+        stateText = "Stale";
+    }
+
+    const QString layoutName = GetLayoutTitleSegment();
+    const QString dirtySuffix = m_layoutDirty ? " *" : "";
+    if (!layoutName.isEmpty())
+    {
+        setWindowTitle(QString("SmartDashboard - %1 [%2]%3").arg(stateText, layoutName, dirtySuffix));
+        return;
+    }
+
+    setWindowTitle(QString("SmartDashboard - %1%2").arg(stateText, dirtySuffix));
 }
