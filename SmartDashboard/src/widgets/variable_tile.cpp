@@ -5,6 +5,8 @@
 
 #include <QAction>
 #include <QContextMenuEvent>
+#include <QColor>
+#include <QColorDialog>
 #include <QDialog>
 #include <QDial>
 #include <QDialogButtonBox>
@@ -14,6 +16,7 @@
 #include <QFormLayout>
 #include <QGridLayout>
 #include <QHBoxLayout>
+#include <QFont>
 #include <QLineEdit>
 #include <QLabel>
 #include <QKeyEvent>
@@ -23,6 +26,7 @@
 #include <QSpinBox>
 #include <QProgressBar>
 #include <QCheckBox>
+#include <QPushButton>
 
 namespace sd::widgets
 {
@@ -85,9 +89,12 @@ namespace sd::widgets
         m_boolLed = new QFrame(this);
         m_boolLed->setFixedSize(14, 14);
         m_boolLed->setVisible(false);
+        m_boolLed->setStyleSheet("background-color: #7f8c8d; border-radius: 7px; border: 1px solid #4b4b4b;");
 
         m_progressBar = new QProgressBar(this);
         m_progressBar->setRange(0, 100);
+        m_progressBar->setMinimumHeight(8);
+        m_progressBar->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
         m_progressBar->setVisible(false);
 
         m_gauge = new QDial(this);
@@ -170,6 +177,8 @@ namespace sd::widgets
         m_defaultSize = QSize(220, 84);
         SetGaugeProperties(m_gaugeLowerLimit, m_gaugeUpperLimit, m_gaugeTickInterval, m_gaugeShowTickMarks);
         SetProgressBarProperties(m_progressBarLowerLimit, m_progressBarUpperLimit);
+        SetProgressBarShowPercentage(m_progressBarShowPercentage);
+        SetProgressBarColors(m_progressBarForegroundColor, m_progressBarBackgroundColor);
         SetSliderProperties(m_sliderLowerLimit, m_sliderUpperLimit, m_sliderTickInterval, m_sliderShowTickMarks);
         SetLinePlotProperties(
             m_linePlotBufferSizeSamples,
@@ -179,7 +188,9 @@ namespace sd::widgets
         );
         SetLinePlotNumberLinesVisible(m_linePlotShowNumberLines);
         SetLinePlotGridLinesVisible(m_linePlotShowGridLines);
+        SetTextFontPointSize(m_textFontPointSize);
         SetDoubleNumericEditable(m_doubleNumericEditable);
+        SetBoolCheckboxShowLabel(m_boolCheckboxShowLabel);
         UpdateWidgetPresentation();
         UpdateValueDisplay();
     }
@@ -288,6 +299,33 @@ namespace sd::widgets
         UpdateValueDisplay();
     }
 
+    void VariableTile::SetProgressBarShowPercentage(bool showPercentage)
+    {
+        m_progressBarShowPercentage = showPercentage;
+        setProperty("progressBarShowPercentage", m_progressBarShowPercentage);
+        ApplyProgressBarSettings();
+        UpdateWidgetPresentation();
+    }
+
+    void VariableTile::SetProgressBarColors(const QString& foregroundColor, const QString& backgroundColor)
+    {
+        const QColor foreground(foregroundColor);
+        if (foreground.isValid())
+        {
+            m_progressBarForegroundColor = foreground.name(QColor::HexRgb);
+            setProperty("progressBarForegroundColor", m_progressBarForegroundColor);
+        }
+
+        const QColor background(backgroundColor);
+        if (background.isValid())
+        {
+            m_progressBarBackgroundColor = background.name(QColor::HexRgb);
+            setProperty("progressBarBackgroundColor", m_progressBarBackgroundColor);
+        }
+
+        ApplyProgressBarSettings();
+    }
+
     void VariableTile::SetSliderProperties(double lowerLimit, double upperLimit, double tickInterval, bool showTickMarks)
     {
         double lower = lowerLimit;
@@ -371,6 +409,50 @@ namespace sd::widgets
 
         UpdateWidgetPresentation();
         UpdateValueDisplay();
+    }
+
+    void VariableTile::SetTextFontPointSize(int pointSize)
+    {
+        m_textFontPointSize = (pointSize > 0) ? pointSize : 0;
+
+        if (m_textFontPointSize > 0)
+        {
+            setProperty("textFontPointSize", m_textFontPointSize);
+        }
+        else
+        {
+            setProperty("textFontPointSize", QVariant());
+        }
+
+        QFont valueFont = font();
+        if (m_textFontPointSize > 0)
+        {
+            valueFont.setPointSize(m_textFontPointSize);
+        }
+
+        if (m_valueLabel != nullptr)
+        {
+            m_valueLabel->setFont(valueFont);
+        }
+        if (m_doubleEdit != nullptr)
+        {
+            m_doubleEdit->setFont(valueFont);
+        }
+
+        if (m_controlWidget != nullptr)
+        {
+            m_controlWidget->SetTextFontPointSize(m_textFontPointSize);
+        }
+
+        UpdateWidgetPresentation();
+        UpdateValueDisplay();
+    }
+
+    void VariableTile::SetBoolCheckboxShowLabel(bool showLabel)
+    {
+        m_boolCheckboxShowLabel = showLabel;
+        setProperty("boolCheckboxShowLabel", m_boolCheckboxShowLabel);
+        UpdateWidgetPresentation();
     }
 
     void VariableTile::ResetLinePlotGraph()
@@ -852,6 +934,8 @@ namespace sd::widgets
 
     void VariableTile::UpdateWidgetPresentation()
     {
+        m_layout->setVerticalSpacing(4);
+
         // Widget strategy selection:
         // map persisted widgetType id to one concrete visual presentation.
         const bool isBoolLed = (m_widgetType == "bool.led");
@@ -879,6 +963,10 @@ namespace sd::widgets
         const bool showStringEdit = (m_type == VariableType::String && isStringEdit);
 
         m_boolLed->setVisible(showBoolLed);
+        if (showBoolLed)
+        {
+            UpdateBoolLedAppearance();
+        }
         m_progressBar->setVisible(showDoubleProgress);
         m_gauge->setVisible(showDoubleGauge);
         m_linePlot->setVisible(showDoubleLinePlot);
@@ -906,16 +994,38 @@ namespace sd::widgets
 
         if (showBoolCheckbox)
         {
+            m_titleLabel->setVisible(m_boolCheckboxShowLabel);
             m_layout->addWidget(m_titleLabel, 0, 0, 1, 1, Qt::AlignLeft | Qt::AlignVCenter);
             m_layout->addWidget(m_controlWidget, 0, 1, 1, 1, Qt::AlignRight | Qt::AlignVCenter);
+
+            if (!m_boolCheckboxShowLabel)
+            {
+                m_layout->setColumnMinimumWidth(0, 0);
+                const QMargins margins = m_layout->contentsMargins();
+                const int compactWidth = m_controlWidget->sizeHint().width() + margins.left() + margins.right() + 8;
+                if (width() > compactWidth)
+                {
+                    resize(compactWidth, height());
+                }
+            }
+            else
+            {
+                m_layout->setColumnMinimumWidth(0, 90);
+                if (width() < 140)
+                {
+                    resize(140, height());
+                }
+            }
         }
         else if (showControl)
         {
+            m_layout->setColumnMinimumWidth(0, 90);
             m_layout->addWidget(m_titleLabel, 0, 0, 1, 2, Qt::AlignLeft | Qt::AlignTop);
             m_layout->addWidget(m_controlWidget, 1, 0, 1, 2);
         }
         else
         {
+            m_layout->setColumnMinimumWidth(0, 90);
             m_layout->addWidget(m_controlWidget, 1, 0, 1, 2);
         }
 
@@ -936,8 +1046,19 @@ namespace sd::widgets
         {
             m_layout->addWidget(m_titleLabel, 0, 0, 1, 2, Qt::AlignLeft | Qt::AlignTop);
             m_layout->addWidget(m_progressBar, 1, 0, 1, 2);
+            m_layout->setVerticalSpacing(0);
             m_layout->setRowStretch(0, 0);
-            m_layout->setRowStretch(1, 0);
+            m_layout->setRowStretch(1, 1);
+
+            if (!m_progressBarShowPercentage)
+            {
+                const QMargins margins = m_layout->contentsMargins();
+                const int compactWidth = 120 + margins.left() + margins.right();
+                if (width() > compactWidth)
+                {
+                    resize(compactWidth, height());
+                }
+            }
         }
         else if (!showControl && showStringMultiline)
         {
@@ -1099,7 +1220,13 @@ namespace sd::widgets
     {
         const bool isProgressBar = (m_widgetType == "double.progress");
         const bool isSlider = (m_widgetType == "double.slider");
-        return IsGaugeWidget() || IsLinePlotWidget() || IsDoubleNumericWidget() || isProgressBar || isSlider;
+        const bool isBoolCheckbox = (m_widgetType == "bool.checkbox");
+        const bool isTextDisplay =
+            (m_widgetType == "bool.text") ||
+            (m_widgetType == "string.text") ||
+            (m_widgetType == "string.multiline") ||
+            (m_widgetType == "string.edit");
+        return IsGaugeWidget() || IsLinePlotWidget() || IsDoubleNumericWidget() || isProgressBar || isSlider || isBoolCheckbox || isTextDisplay;
     }
 
     void VariableTile::OpenPropertiesDialog()
@@ -1174,6 +1301,46 @@ namespace sd::widgets
             form->addRow("Upper Limit", upperLimitSpin);
             form->addRow("Lower Limit", lowerLimitSpin);
 
+            auto* showPercentCheck = new QCheckBox(&dialog);
+            showPercentCheck->setChecked(m_progressBarShowPercentage);
+            form->addRow("Show Percentage", showPercentCheck);
+
+            auto* foregroundButton = new QPushButton(m_progressBarForegroundColor, &dialog);
+            foregroundButton->setStyleSheet(QString("background:%1;").arg(m_progressBarForegroundColor));
+            auto* backgroundButton = new QPushButton(m_progressBarBackgroundColor, &dialog);
+            backgroundButton->setStyleSheet(QString("background:%1;").arg(m_progressBarBackgroundColor));
+            form->addRow("Foreground", foregroundButton);
+            form->addRow("Background", backgroundButton);
+
+            QString selectedForeground = m_progressBarForegroundColor;
+            QString selectedBackground = m_progressBarBackgroundColor;
+
+            connect(foregroundButton, &QPushButton::clicked, &dialog, [foregroundButton, &selectedForeground, this]()
+            {
+                const QColor picked = QColorDialog::getColor(QColor(selectedForeground), this, "Choose Progress Foreground");
+                if (!picked.isValid())
+                {
+                    return;
+                }
+
+                selectedForeground = picked.name(QColor::HexRgb);
+                foregroundButton->setText(selectedForeground);
+                foregroundButton->setStyleSheet(QString("background:%1;").arg(selectedForeground));
+            });
+
+            connect(backgroundButton, &QPushButton::clicked, &dialog, [backgroundButton, &selectedBackground, this]()
+            {
+                const QColor picked = QColorDialog::getColor(QColor(selectedBackground), this, "Choose Progress Background");
+                if (!picked.isValid())
+                {
+                    return;
+                }
+
+                selectedBackground = picked.name(QColor::HexRgb);
+                backgroundButton->setText(selectedBackground);
+                backgroundButton->setStyleSheet(QString("background:%1;").arg(selectedBackground));
+            });
+
             auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
             form->addRow(buttons);
 
@@ -1189,6 +1356,8 @@ namespace sd::widgets
                 lowerLimitSpin->value(),
                 upperLimitSpin->value()
             );
+            SetProgressBarShowPercentage(showPercentCheck->isChecked());
+            SetProgressBarColors(selectedForeground, selectedBackground);
             return;
         }
 
@@ -1252,6 +1421,12 @@ namespace sd::widgets
             editableCheck->setChecked(m_doubleNumericEditable);
             form->addRow("Editable", editableCheck);
 
+            auto* fontSizeSpin = new QSpinBox(&dialog);
+            fontSizeSpin->setRange(0, 96);
+            fontSizeSpin->setSpecialValueText("Default");
+            fontSizeSpin->setValue(m_textFontPointSize);
+            form->addRow("Font Size", fontSizeSpin);
+
             auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
             form->addRow(buttons);
 
@@ -1264,6 +1439,86 @@ namespace sd::widgets
             }
 
             SetDoubleNumericEditable(editableCheck->isChecked());
+            SetTextFontPointSize(fontSizeSpin->value());
+            return;
+        }
+
+        if (m_widgetType == "bool.text" || m_widgetType == "string.text" || m_widgetType == "string.multiline")
+        {
+            QDialog dialog(this);
+            dialog.setWindowTitle("Text Properties");
+
+            auto* form = new QFormLayout(&dialog);
+            auto* fontSizeSpin = new QSpinBox(&dialog);
+            fontSizeSpin->setRange(0, 96);
+            fontSizeSpin->setSpecialValueText("Default");
+            fontSizeSpin->setValue(m_textFontPointSize);
+            form->addRow("Font Size", fontSizeSpin);
+
+            auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+            form->addRow(buttons);
+
+            connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+            connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+
+            if (dialog.exec() != QDialog::Accepted)
+            {
+                return;
+            }
+
+            SetTextFontPointSize(fontSizeSpin->value());
+            return;
+        }
+
+        if (m_widgetType == "string.edit")
+        {
+            QDialog dialog(this);
+            dialog.setWindowTitle("Text Edit Properties");
+
+            auto* form = new QFormLayout(&dialog);
+            auto* fontSizeSpin = new QSpinBox(&dialog);
+            fontSizeSpin->setRange(0, 96);
+            fontSizeSpin->setSpecialValueText("Default");
+            fontSizeSpin->setValue(m_textFontPointSize);
+            form->addRow("Font Size", fontSizeSpin);
+
+            auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+            form->addRow(buttons);
+
+            connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+            connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+
+            if (dialog.exec() != QDialog::Accepted)
+            {
+                return;
+            }
+
+            SetTextFontPointSize(fontSizeSpin->value());
+            return;
+        }
+
+        if (m_widgetType == "bool.checkbox")
+        {
+            QDialog dialog(this);
+            dialog.setWindowTitle("Checkbox Properties");
+
+            auto* form = new QFormLayout(&dialog);
+            auto* showLabelCheck = new QCheckBox(&dialog);
+            showLabelCheck->setChecked(m_boolCheckboxShowLabel);
+            form->addRow("Show Label", showLabelCheck);
+
+            auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+            form->addRow(buttons);
+
+            connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+            connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+
+            if (dialog.exec() != QDialog::Accepted)
+            {
+                return;
+            }
+
+            SetBoolCheckboxShowLabel(showLabelCheck->isChecked());
             return;
         }
 
@@ -1374,6 +1629,22 @@ namespace sd::widgets
         {
             return;
         }
+
+        m_progressBar->setTextVisible(m_progressBarShowPercentage);
+        m_progressBar->setStyleSheet(
+            "QProgressBar {"
+            " border: 1px solid #4b4b4b;"
+            " border-radius: 2px;"
+            " background: " + m_progressBarBackgroundColor + ";"
+            " padding: 0px;"
+            " margin: 0px;"
+            " min-height: 8px;"
+            "}"
+            "QProgressBar::chunk {"
+            " background-color: " + m_progressBarForegroundColor + ";"
+            " margin: 0px;"
+            "}"
+        );
     }
 
     void VariableTile::ApplySliderSettings()

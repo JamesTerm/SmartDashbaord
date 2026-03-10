@@ -2,6 +2,7 @@
 
 #include <QRect>
 #include <QString>
+#include <QStringList>
 #include <QVariant>
 
 #include <vector>
@@ -21,6 +22,9 @@ namespace sd::layout
         QVariant gaugeShowTickMarks;
         QVariant progressBarLowerLimit;
         QVariant progressBarUpperLimit;
+        QVariant progressBarShowPercentage;
+        QVariant progressBarForegroundColor;
+        QVariant progressBarBackgroundColor;
         QVariant sliderLowerLimit;
         QVariant sliderUpperLimit;
         QVariant sliderTickInterval;
@@ -31,7 +35,9 @@ namespace sd::layout
         QVariant linePlotShowGridLines;
         QVariant linePlotYLowerLimit;
         QVariant linePlotYUpperLimit;
+        QVariant textFontPointSize;
         QVariant doubleNumericEditable;
+        QVariant boolCheckboxShowLabel;
         QVariant boolValue;
         QVariant doubleValue;
         QVariant stringValue;
@@ -39,5 +45,10 @@ namespace sd::layout
 
     bool SaveLayout(const QWidget* canvas, const QString& filePath);
     bool LoadLayoutEntries(const QString& filePath, std::vector<WidgetLayoutEntry>& outEntries);
+    bool LoadLegacyXmlLayoutEntries(
+        const QString& filePath,
+        std::vector<WidgetLayoutEntry>& outEntries,
+        QStringList* outIssues = nullptr
+    );
     QString GetDefaultLayoutPath();
 }

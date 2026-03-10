@@ -82,6 +82,19 @@ namespace
             );
         }
 
+        if (entry.progressBarShowPercentage.isValid())
+        {
+            tile->SetProgressBarShowPercentage(entry.progressBarShowPercentage.toBool());
+        }
+
+        if (entry.progressBarForegroundColor.isValid() || entry.progressBarBackgroundColor.isValid())
+        {
+            tile->SetProgressBarColors(
+                entry.progressBarForegroundColor.isValid() ? entry.progressBarForegroundColor.toString() : "",
+                entry.progressBarBackgroundColor.isValid() ? entry.progressBarBackgroundColor.toString() : ""
+            );
+        }
+
         if (entry.sliderLowerLimit.isValid())
         {
             tile->SetSliderProperties(
@@ -116,6 +129,16 @@ namespace
             tile->SetDoubleNumericEditable(entry.doubleNumericEditable.toBool());
         }
 
+        if (entry.textFontPointSize.isValid())
+        {
+            tile->SetTextFontPointSize(entry.textFontPointSize.toInt());
+        }
+
+        if (entry.boolCheckboxShowLabel.isValid())
+        {
+            tile->SetBoolCheckboxShowLabel(entry.boolCheckboxShowLabel.toBool());
+        }
+
         if (entry.boolValue.isValid())
         {
             tile->SetBoolValue(entry.boolValue.toBool());
@@ -147,9 +170,11 @@ MainWindow::MainWindow(QWidget* parent)
     QMenu* fileMenu = menuBar()->addMenu("&File");
     QAction* saveLayoutAction = fileMenu->addAction("Save Layout");
     QAction* loadLayoutAction = fileMenu->addAction("Load Layout");
+    QAction* importLegacyXmlAction = fileMenu->addAction("Import Legacy XML...");
     QAction* clearWidgetsAction = fileMenu->addAction("Clear Widgets");
     connect(saveLayoutAction, &QAction::triggered, this, &MainWindow::OnSaveLayout);
     connect(loadLayoutAction, &QAction::triggered, this, &MainWindow::OnLoadLayout);
+    connect(importLegacyXmlAction, &QAction::triggered, this, &MainWindow::OnImportLegacyXmlLayout);
     connect(clearWidgetsAction, &QAction::triggered, this, &MainWindow::OnClearWidgets);
 
     QMenu* viewMenu = menuBar()->addMenu("&View");
@@ -371,6 +396,55 @@ void MainWindow::OnLoadLayout()
     if (!LoadLayoutFromPath(selected, true))
     {
         QMessageBox::warning(this, "Load Layout", "Failed to load layout.");
+    }
+}
+
+void MainWindow::OnImportLegacyXmlLayout()
+{
+    const QString selected = QFileDialog::getOpenFileName(
+        this,
+        "Import Legacy XML Layout",
+        GetInitialLayoutPath(),
+        "Legacy SmartDashboard XML (*.xml);;All Files (*)"
+    );
+    if (selected.isEmpty())
+    {
+        return;
+    }
+
+    std::vector<sd::layout::WidgetLayoutEntry> entries;
+    QStringList importIssues;
+    if (!sd::layout::LoadLegacyXmlLayoutEntries(selected, entries, &importIssues))
+    {
+        QMessageBox::warning(this, "Import Legacy XML Layout", "Failed to import XML layout.");
+        return;
+    }
+
+    m_suppressLayoutDirty = true;
+    m_savedLayoutByKey.clear();
+    for (const sd::layout::WidgetLayoutEntry& entry : entries)
+    {
+        m_savedLayoutByKey[entry.variableKey.toStdString()] = entry;
+    }
+
+    for (const sd::layout::WidgetLayoutEntry& entry : entries)
+    {
+        const sd::widgets::VariableType inferredType = ToVariableTypeFromWidgetType(entry.widgetType);
+        sd::widgets::VariableTile* tile = GetOrCreateTile(entry.variableKey, inferredType);
+        ApplyLayoutEntryToTile(tile, entry);
+    }
+
+    m_suppressLayoutDirty = false;
+    m_layoutDirty = true;
+
+    if (!importIssues.isEmpty())
+    {
+        QMessageBox issuePrompt(this);
+        issuePrompt.setIcon(QMessageBox::Warning);
+        issuePrompt.setWindowTitle("Import Legacy XML Layout");
+        issuePrompt.setText("Layout imported with some unsupported legacy features.");
+        issuePrompt.setDetailedText(importIssues.join("\n"));
+        issuePrompt.exec();
     }
 }
 
@@ -628,7 +702,7 @@ bool MainWindow::SaveLayoutToPath(const QString& path)
     return saved;
 }
 
-bool MainWindow::LoadLayoutFromPath(const QString& path, bool applyToExistingTiles)
+bool MainWindow::LoadLayoutFromPath(const QString& path, bool applyToExistingTiles, bool persistAsCurrentPath)
 {
     std::vector<sd::layout::WidgetLayoutEntry> entries;
     if (!sd::layout::LoadLayoutEntries(path, entries))
@@ -654,9 +728,12 @@ bool MainWindow::LoadLayoutFromPath(const QString& path, bool applyToExistingTil
         }
     }
 
-    m_layoutFilePath = path;
-    PersistLastLayoutPath(path);
-    m_layoutDirty = false;
+    if (persistAsCurrentPath)
+    {
+        m_layoutFilePath = path;
+        PersistLastLayoutPath(path);
+    }
+    m_layoutDirty = !persistAsCurrentPath;
     m_suppressLayoutDirty = false;
     return true;
 }

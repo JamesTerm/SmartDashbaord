@@ -54,11 +54,15 @@ namespace sd::widgets
         void SetDefaultSize(const QSize& size);
         void SetGaugeProperties(double lowerLimit, double upperLimit, double tickInterval, bool showTickMarks);
         void SetProgressBarProperties(double lowerLimit, double upperLimit);
+        void SetProgressBarShowPercentage(bool showPercentage);
+        void SetProgressBarColors(const QString& foregroundColor, const QString& backgroundColor);
         void SetSliderProperties(double lowerLimit, double upperLimit, double tickInterval, bool showTickMarks);
         void SetLinePlotProperties(int bufferSizeSamples, bool autoYAxis, double yLowerLimit, double yUpperLimit);
         void SetLinePlotNumberLinesVisible(bool visible);
         void SetLinePlotGridLinesVisible(bool visible);
+        void SetTextFontPointSize(int pointSize);
         void SetDoubleNumericEditable(bool editable);
+        void SetBoolCheckboxShowLabel(bool showLabel);
         void ResetLinePlotGraph();
 
         QString GetKey() const;
@@ -139,12 +143,17 @@ namespace sd::widgets
         bool m_settingDoubleEditProgrammatically = false;
         QSize m_defaultSize;
         bool m_doubleNumericEditable = false;
+        int m_textFontPointSize = 0;
+        bool m_boolCheckboxShowLabel = false;
         double m_gaugeLowerLimit = -1.0;
         double m_gaugeUpperLimit = 1.0;
         double m_gaugeTickInterval = 0.2;
         bool m_gaugeShowTickMarks = true;
         double m_progressBarLowerLimit = 0.0;
         double m_progressBarUpperLimit = 1.0;
+        bool m_progressBarShowPercentage = false;
+        QString m_progressBarForegroundColor = "#2e86de";
+        QString m_progressBarBackgroundColor = "#1f1f1f";
         double m_sliderLowerLimit = -1.0;
         double m_sliderUpperLimit = 1.0;
         double m_sliderTickInterval = 0.2;

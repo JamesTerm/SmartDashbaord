@@ -1,6 +1,7 @@
 #include "widgets/tile_control_widget.h"
 
 #include <QCheckBox>
+#include <QFont>
 #include <QHBoxLayout>
 #include <QLineEdit>
 #include <QSlider>
@@ -144,5 +145,24 @@ namespace sd::widgets
         m_settingProgrammatically = true;
         m_lineEdit->setText(value);
         m_settingProgrammatically = false;
+    }
+
+    void TileControlWidget::SetTextFontPointSize(int pointSize)
+    {
+        QFont font = this->font();
+        if (pointSize > 0)
+        {
+            font.setPointSize(pointSize);
+        }
+
+        if (m_lineEdit != nullptr)
+        {
+            m_lineEdit->setFont(font);
+        }
+
+        if (m_checkBox != nullptr)
+        {
+            m_checkBox->setFont(font);
+        }
     }
 }

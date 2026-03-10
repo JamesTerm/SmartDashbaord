@@ -21,6 +21,7 @@ namespace sd::widgets
         void SetDoubleValue(double value);
         void SetDoubleRange(double lowerLimit, double upperLimit);
         void SetDoubleTickSettings(double tickInterval, bool showTickMarks);
+        void SetTextFontPointSize(int pointSize);
         void SetStringValue(const QString& value);
 
     signals:

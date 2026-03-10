@@ -8,11 +8,115 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QSet>
 #include <QStandardPaths>
 #include <QWidget>
+#include <QXmlStreamReader>
+
+#include <unordered_map>
 
 namespace sd::layout
 {
+    namespace
+    {
+        sd::widgets::VariableType LegacyTypeToVariableType(const QString& legacyType)
+        {
+            if (legacyType.compare("Boolean", Qt::CaseInsensitive) == 0)
+            {
+                return sd::widgets::VariableType::Bool;
+            }
+            if (legacyType.compare("Number", Qt::CaseInsensitive) == 0)
+            {
+                return sd::widgets::VariableType::Double;
+            }
+
+            return sd::widgets::VariableType::String;
+        }
+
+        QString LegacyClassToWidgetType(const QString& legacyClass, sd::widgets::VariableType variableType)
+        {
+            if (legacyClass.endsWith("SimpleDial"))
+            {
+                return "double.gauge";
+            }
+            if (legacyClass.endsWith("ProgressBar"))
+            {
+                return "double.progress";
+            }
+            if (legacyClass.endsWith("CheckBox"))
+            {
+                return "bool.checkbox";
+            }
+            if (legacyClass.endsWith("BooleanBox"))
+            {
+                return "bool.led";
+            }
+            if (legacyClass.endsWith("TextBox") || legacyClass.endsWith("FormattedField"))
+            {
+                if (variableType == sd::widgets::VariableType::Double)
+                {
+                    return "double.numeric";
+                }
+                if (variableType == sd::widgets::VariableType::Bool)
+                {
+                    return "bool.text";
+                }
+
+                return "string.text";
+            }
+
+            if (variableType == sd::widgets::VariableType::Bool)
+            {
+                return "bool.text";
+            }
+            if (variableType == sd::widgets::VariableType::Double)
+            {
+                return "double.numeric";
+            }
+
+            return "string.text";
+        }
+
+        QRect LegacyDefaultGeometry(const QString& widgetType, int x, int y)
+        {
+            if (widgetType == "double.gauge")
+            {
+                return QRect(x, y, 120, 90);
+            }
+            if (widgetType == "double.progress")
+            {
+                return QRect(x, y, 120, 30);
+            }
+            if (widgetType == "bool.checkbox")
+            {
+                return QRect(x, y, 160, 30);
+            }
+            if (widgetType == "bool.led")
+            {
+                return QRect(x, y, 130, 30);
+            }
+            if (widgetType == "double.numeric")
+            {
+                return QRect(x, y, 110, 30);
+            }
+
+            return QRect(x, y, 220, 84);
+        }
+
+        bool TryParseDouble(const QString& text, double& outValue)
+        {
+            bool ok = false;
+            const double value = text.toDouble(&ok);
+            if (!ok)
+            {
+                return false;
+            }
+
+            outValue = value;
+            return true;
+        }
+    }
+
     QString GetDefaultLayoutPath()
     {
         const QString base = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
@@ -73,6 +177,9 @@ namespace sd::layout
             const QVariant gaugeShow = widget->property("gaugeShowTickMarks");
             const QVariant progressBarLower = widget->property("progressBarLowerLimit");
             const QVariant progressBarUpper = widget->property("progressBarUpperLimit");
+            const QVariant progressBarShowPercentage = widget->property("progressBarShowPercentage");
+            const QVariant progressBarForegroundColor = widget->property("progressBarForegroundColor");
+            const QVariant progressBarBackgroundColor = widget->property("progressBarBackgroundColor");
             const QVariant sliderLower = widget->property("sliderLowerLimit");
             const QVariant sliderUpper = widget->property("sliderUpperLimit");
             const QVariant sliderTick = widget->property("sliderTickInterval");
@@ -83,7 +190,9 @@ namespace sd::layout
             const QVariant linePlotShowGridLines = widget->property("linePlotShowGridLines");
             const QVariant linePlotYLower = widget->property("linePlotYLowerLimit");
             const QVariant linePlotYUpper = widget->property("linePlotYUpperLimit");
+            const QVariant textFontPointSize = widget->property("textFontPointSize");
             const QVariant doubleNumericEditable = widget->property("doubleNumericEditable");
+            const QVariant boolCheckboxShowLabel = widget->property("boolCheckboxShowLabel");
             if (gaugeLower.isValid())
             {
                 entry["gaugeLowerLimit"] = gaugeLower.toDouble();
@@ -107,6 +216,18 @@ namespace sd::layout
             if (progressBarUpper.isValid())
             {
                 entry["progressBarUpperLimit"] = progressBarUpper.toDouble();
+            }
+            if (progressBarShowPercentage.isValid())
+            {
+                entry["progressBarShowPercentage"] = progressBarShowPercentage.toBool();
+            }
+            if (progressBarForegroundColor.isValid())
+            {
+                entry["progressBarForegroundColor"] = progressBarForegroundColor.toString();
+            }
+            if (progressBarBackgroundColor.isValid())
+            {
+                entry["progressBarBackgroundColor"] = progressBarBackgroundColor.toString();
             }
             if (sliderLower.isValid())
             {
@@ -148,9 +269,17 @@ namespace sd::layout
             {
                 entry["linePlotYUpperLimit"] = linePlotYUpper.toDouble();
             }
+            if (textFontPointSize.isValid())
+            {
+                entry["textFontPointSize"] = textFontPointSize.toInt();
+            }
             if (doubleNumericEditable.isValid())
             {
                 entry["doubleNumericEditable"] = doubleNumericEditable.toBool();
+            }
+            if (boolCheckboxShowLabel.isValid())
+            {
+                entry["boolCheckboxShowLabel"] = boolCheckboxShowLabel.toBool();
             }
 
             QJsonObject geo;
@@ -242,6 +371,18 @@ namespace sd::layout
             {
                 layoutEntry.progressBarUpperLimit = entry.value("progressBarUpperLimit").toDouble();
             }
+            if (entry.contains("progressBarShowPercentage"))
+            {
+                layoutEntry.progressBarShowPercentage = entry.value("progressBarShowPercentage").toBool();
+            }
+            if (entry.contains("progressBarForegroundColor"))
+            {
+                layoutEntry.progressBarForegroundColor = entry.value("progressBarForegroundColor").toString();
+            }
+            if (entry.contains("progressBarBackgroundColor"))
+            {
+                layoutEntry.progressBarBackgroundColor = entry.value("progressBarBackgroundColor").toString();
+            }
             if (entry.contains("sliderLowerLimit"))
             {
                 layoutEntry.sliderLowerLimit = entry.value("sliderLowerLimit").toDouble();
@@ -282,9 +423,17 @@ namespace sd::layout
             {
                 layoutEntry.linePlotYUpperLimit = entry.value("linePlotYUpperLimit").toDouble();
             }
+            if (entry.contains("textFontPointSize"))
+            {
+                layoutEntry.textFontPointSize = entry.value("textFontPointSize").toInt();
+            }
             if (entry.contains("doubleNumericEditable"))
             {
                 layoutEntry.doubleNumericEditable = entry.value("doubleNumericEditable").toBool();
+            }
+            if (entry.contains("boolCheckboxShowLabel"))
+            {
+                layoutEntry.boolCheckboxShowLabel = entry.value("boolCheckboxShowLabel").toBool();
             }
             if (entry.contains("boolValue"))
             {
@@ -302,5 +451,230 @@ namespace sd::layout
         }
 
         return true;
+    }
+
+    bool LoadLegacyXmlLayoutEntries(const QString& filePath, std::vector<WidgetLayoutEntry>& outEntries, QStringList* outIssues)
+    {
+        QFile file(filePath);
+        if (!file.exists())
+        {
+            return false;
+        }
+
+        if (!file.open(QIODevice::ReadOnly | QIODevice::Text))
+        {
+            return false;
+        }
+
+        QXmlStreamReader xml(&file);
+        outEntries.clear();
+        QSet<QString> uniqueIssues;
+
+        while (!xml.atEnd())
+        {
+            xml.readNext();
+            if (!xml.isStartElement() || xml.name() != "widget")
+            {
+                continue;
+            }
+
+            const QXmlStreamAttributes attrs = xml.attributes();
+            const QString variableKey = attrs.value("field").toString().trimmed();
+            const QString legacyType = attrs.value("type").toString().trimmed();
+            const QString legacyClass = attrs.value("class").toString().trimmed();
+            if (variableKey.isEmpty())
+            {
+                xml.skipCurrentElement();
+                continue;
+            }
+
+            int x = 0;
+            int y = 0;
+            int width = 0;
+            int height = 0;
+            std::unordered_map<std::string, QString> properties;
+
+            while (!(xml.isEndElement() && xml.name() == "widget") && !xml.atEnd())
+            {
+                xml.readNext();
+                if (!xml.isStartElement())
+                {
+                    continue;
+                }
+
+                if (xml.name() == "location")
+                {
+                    const QXmlStreamAttributes locAttrs = xml.attributes();
+                    x = locAttrs.value("x").toInt();
+                    y = locAttrs.value("y").toInt();
+                    xml.skipCurrentElement();
+                    continue;
+                }
+
+                if (xml.name() == "width")
+                {
+                    width = xml.readElementText().toInt();
+                    continue;
+                }
+
+                if (xml.name() == "height")
+                {
+                    height = xml.readElementText().toInt();
+                    continue;
+                }
+
+                if (xml.name() == "property")
+                {
+                    const QXmlStreamAttributes propertyAttrs = xml.attributes();
+                    const QString propertyName = propertyAttrs.value("name").toString().trimmed();
+                    if (!propertyName.isEmpty())
+                    {
+                        properties[propertyName.toStdString()] = propertyAttrs.value("value").toString().trimmed();
+                    }
+                    xml.skipCurrentElement();
+                    continue;
+                }
+
+                xml.skipCurrentElement();
+            }
+
+            const sd::widgets::VariableType variableType = LegacyTypeToVariableType(legacyType);
+            const QString widgetType = LegacyClassToWidgetType(legacyClass, variableType);
+
+            const bool isKnownClass =
+                legacyClass.endsWith("SimpleDial") ||
+                legacyClass.endsWith("ProgressBar") ||
+                legacyClass.endsWith("CheckBox") ||
+                legacyClass.endsWith("BooleanBox") ||
+                legacyClass.endsWith("TextBox") ||
+                legacyClass.endsWith("FormattedField");
+            if (!isKnownClass)
+            {
+                uniqueIssues.insert(
+                    QString("Widget '%1': unsupported class '%2' mapped to '%3'.")
+                        .arg(variableKey)
+                        .arg(legacyClass)
+                        .arg(widgetType)
+                );
+            }
+
+            WidgetLayoutEntry entry;
+            entry.variableKey = variableKey;
+            entry.widgetType = widgetType;
+
+            const QRect defaultGeometry = LegacyDefaultGeometry(widgetType, x, y);
+            entry.geometry = QRect(
+                x,
+                y,
+                (width > 0) ? width : defaultGeometry.width(),
+                (height > 0) ? height : defaultGeometry.height()
+            );
+
+            double parsed = 0.0;
+            auto setIfPresent = [&properties, &parsed](const char* name, QVariant& target)
+            {
+                auto it = properties.find(name);
+                if (it != properties.end() && TryParseDouble(it->second, parsed))
+                {
+                    target = parsed;
+                }
+            };
+
+            setIfPresent("Lower Limit", entry.gaugeLowerLimit);
+            setIfPresent("Upper Limit", entry.gaugeUpperLimit);
+            setIfPresent("Tick Interval", entry.gaugeTickInterval);
+
+            setIfPresent("Minimum", entry.progressBarLowerLimit);
+            setIfPresent("Maximum", entry.progressBarUpperLimit);
+
+            auto parseLegacyColor = [&properties](const char* name, QVariant& target)
+            {
+                auto it = properties.find(name);
+                if (it == properties.end())
+                {
+                    return;
+                }
+
+                const QStringList parts = it->second.split('.');
+                if (parts.size() < 3)
+                {
+                    return;
+                }
+
+                bool okR = false;
+                bool okG = false;
+                bool okB = false;
+                const int r = parts.at(0).toInt(&okR);
+                const int g = parts.at(1).toInt(&okG);
+                const int b = parts.at(2).toInt(&okB);
+                if (!(okR && okG && okB))
+                {
+                    return;
+                }
+
+                target = QString("#%1%2%3")
+                    .arg(r, 2, 16, QLatin1Char('0'))
+                    .arg(g, 2, 16, QLatin1Char('0'))
+                    .arg(b, 2, 16, QLatin1Char('0'))
+                    .toUpper();
+            };
+
+            if (widgetType == "double.progress")
+            {
+                parseLegacyColor("Foreground", entry.progressBarForegroundColor);
+                parseLegacyColor("Background", entry.progressBarBackgroundColor);
+            }
+
+            if (widgetType == "double.numeric" && legacyClass.endsWith("TextBox"))
+            {
+                entry.doubleNumericEditable = true;
+            }
+
+            auto textFontIt = properties.find("Font Size");
+            if (textFontIt != properties.end())
+            {
+                bool ok = false;
+                const int parsedFontSize = textFontIt->second.toInt(&ok);
+                if (ok && parsedFontSize > 0)
+                {
+                    entry.textFontPointSize = parsedFontSize;
+                }
+            }
+
+            if (widgetType == "bool.checkbox")
+            {
+                entry.boolCheckboxShowLabel = false;
+            }
+
+            for (const auto& [name, _] : properties)
+            {
+                const bool supportedProperty =
+                    name == "Lower Limit" ||
+                    name == "Upper Limit" ||
+                    name == "Tick Interval" ||
+                    name == "Minimum" ||
+                    name == "Maximum" ||
+                    name == "Font Size" ||
+                    (widgetType == "double.progress" && (name == "Foreground" || name == "Background"));
+                if (!supportedProperty)
+                {
+                    uniqueIssues.insert(
+                        QString("Widget '%1': ignored legacy property '%2'.")
+                            .arg(variableKey)
+                            .arg(QString::fromStdString(name))
+                    );
+                }
+            }
+
+            outEntries.push_back(entry);
+        }
+
+        if (outIssues != nullptr)
+        {
+            *outIssues = uniqueIssues.values();
+            outIssues->sort();
+        }
+
+        return !xml.hasError();
     }
 }

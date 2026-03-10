@@ -5,6 +5,43 @@ Curated milestone history for this repository.
 - Edit this file for durable project milestones and outcomes.
 - Keep lean handoff context in `Agent_Session_Notes.md`.
 
+## 2026-03-10 - Legacy XML import parity and widget property refinements
+
+- Added File menu action `Import Legacy XML...` to load legacy SmartDashboard `.xml` layouts directly into the current dashboard session.
+- Implemented legacy XML parser and widget mapping for common classes:
+  - `SimpleDial` -> `double.gauge`
+  - `ProgressBar` -> `double.progress`
+  - `CheckBox` -> `bool.checkbox`
+  - `BooleanBox` -> `bool.led`
+  - `TextBox` / `FormattedField` -> text/numeric mappings based on type
+- Added import issue reporting that appears only when unsupported classes/properties are encountered.
+- Extended legacy-property handling and parity:
+  - progress bar `Foreground` / `Background` color import support
+  - `Font Size` import support for text-oriented widgets
+  - removed false-positive import warnings for now-supported progress bar colors and font size
+- Refined bool checkbox presentation:
+  - default hide label behavior
+  - added checkbox `Show Label` property toggle
+  - compact checkbox tile width when label is hidden
+- Refined bool LED behavior:
+  - default off-state now renders visibly (no blank appearance before first update)
+- Expanded progress bar behavior and properties:
+  - default hide percentage text
+  - added `Show Percentage` property toggle
+  - added `Foreground` and `Background` color properties with color picker dialogs
+  - applied custom `QProgressBar` styling so fill/chunk renders with configured colors and visible minimum thickness
+  - reduced label-to-bar vertical spacing to match legacy compact look and allow bar area to expand with tile height
+- Added text font-size configurability in properties for:
+  - numeric text widgets (`double.numeric`, including editable mode)
+  - non-edit text widgets (`bool.text`, `string.text`, `string.multiline`)
+  - editable text widget (`string.edit`)
+- Extended layout persistence/load-apply for new properties:
+  - `progressBarShowPercentage`
+  - `progressBarForegroundColor`
+  - `progressBarBackgroundColor`
+  - `boolCheckboxShowLabel`
+  - `textFontPointSize`
+
 ## 2026-03-09 - Gauge editing workflow and layout persistence
 
 - Finalized line-plot axis behavior updates:

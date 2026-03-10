@@ -37,6 +37,7 @@ private slots:
     void OnConnectionStateChanged(int state);
     void OnSaveLayout();
     void OnLoadLayout();
+    void OnImportLegacyXmlLayout();
     void OnClearWidgets();
     void OnRemoveWidgetRequested(const QString& key);
     void OnControlBoolEdited(const QString& key, bool value);
@@ -55,7 +56,7 @@ private:
     void LoadWindowGeometry();
     void SaveWindowGeometry() const;
     bool SaveLayoutToPath(const QString& path);
-    bool LoadLayoutFromPath(const QString& path, bool applyToExistingTiles);
+    bool LoadLayoutFromPath(const QString& path, bool applyToExistingTiles, bool persistAsCurrentPath = true);
     QString GetInitialLayoutPath() const;
     void PersistLastLayoutPath(const QString& path) const;
     void MarkLayoutDirty();
