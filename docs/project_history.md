@@ -36,6 +36,12 @@ Curated milestone history for this repository.
   - `README.md`
   - `Agent_Session_Notes.md`
 
+### Follow-up refinement (same session)
+
+- Removed external build dependency on Robot_Simulation SmartDashboard sources.
+- Replaced dependency-based NT path with an in-tree NT2-compatible client transport implementation in `dashboard_transport.cpp`.
+- Kept Robot_Simulation as runtime interoperability test target to validate protocol compatibility on a second machine with no shared source path assumptions.
+
 ## 2026-03-10 - Legacy XML import parity and widget property refinements
 
 - Added File menu action `Import Legacy XML...` to load legacy SmartDashboard `.xml` layouts directly into the current dashboard session.

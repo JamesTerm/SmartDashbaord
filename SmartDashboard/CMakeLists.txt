@@ -8,38 +8,6 @@ set(CMAKE_AUTORCC ON)
 
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Test)
 
-option(SMARTDASHBOARD_ENABLE_LEGACY_NT2 "Enable legacy NT2 adapter using Robot_Simulation SmartDashboard sources" ON)
-set(SMARTDASHBOARD_LEGACY_NT2_DIR "D:/code/Robot_Simulation/Source/Libraries/SmartDashboard" CACHE PATH "Path to legacy NT2 source root")
-
-set(SMARTDASHBOARD_HAS_LEGACY_NT2 OFF)
-if(SMARTDASHBOARD_ENABLE_LEGACY_NT2 AND EXISTS "${SMARTDASHBOARD_LEGACY_NT2_DIR}")
-    file(GLOB LEGACY_NT2_SOURCES
-        "${SMARTDASHBOARD_LEGACY_NT2_DIR}/networktables2/*.cpp"
-        "${SMARTDASHBOARD_LEGACY_NT2_DIR}/networktables2/client/*.cpp"
-        "${SMARTDASHBOARD_LEGACY_NT2_DIR}/networktables2/connection/*.cpp"
-        "${SMARTDASHBOARD_LEGACY_NT2_DIR}/networktables2/server/*.cpp"
-        "${SMARTDASHBOARD_LEGACY_NT2_DIR}/networktables2/stream/*.cpp"
-        "${SMARTDASHBOARD_LEGACY_NT2_DIR}/networktables2/thread/*.cpp"
-        "${SMARTDASHBOARD_LEGACY_NT2_DIR}/networktables2/type/*.cpp"
-        "${SMARTDASHBOARD_LEGACY_NT2_DIR}/networktables2/util/*.cpp"
-        "${SMARTDASHBOARD_LEGACY_NT2_DIR}/networktables/*.cpp"
-        "${SMARTDASHBOARD_LEGACY_NT2_DIR}/OSAL/*.cpp"
-        "${SMARTDASHBOARD_LEGACY_NT2_DIR}/tables/TableKeyNotDefinedException.cpp"
-    )
-
-    list(FILTER LEGACY_NT2_SOURCES EXCLUDE REGEX "/networktables2/util/System\\.cpp$")
-
-    add_library(SmartDashboard_LegacyNT2 STATIC ${LEGACY_NT2_SOURCES})
-    target_include_directories(SmartDashboard_LegacyNT2
-        PUBLIC
-            "${SMARTDASHBOARD_LEGACY_NT2_DIR}"
-    )
-    target_compile_features(SmartDashboard_LegacyNT2 PUBLIC cxx_std_20)
-    target_link_libraries(SmartDashboard_LegacyNT2 PUBLIC ws2_32 wininet)
-    target_compile_definitions(SmartDashboard_LegacyNT2 PUBLIC _WINSOCK_DEPRECATED_NO_WARNINGS)
-    set(SMARTDASHBOARD_HAS_LEGACY_NT2 ON)
-endif()
-
 qt_add_executable(SmartDashboardApp WIN32
     src/main.cpp
     dist/win/app_icon.rc
@@ -73,14 +41,8 @@ target_link_libraries(SmartDashboardApp
         Qt6::Widgets
         SmartDashboard_Interface_direct
         ClientInterface_direct
+        ws2_32
 )
-
-if(SMARTDASHBOARD_HAS_LEGACY_NT2)
-    target_link_libraries(SmartDashboardApp PRIVATE SmartDashboard_LegacyNT2)
-    target_compile_definitions(SmartDashboardApp PRIVATE SD_HAS_LEGACY_NT2=1)
-else()
-    target_compile_definitions(SmartDashboardApp PRIVATE SD_HAS_LEGACY_NT2=0)
-endif()
 
 target_compile_features(SmartDashboardApp PRIVATE cxx_std_20)
 

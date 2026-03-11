@@ -3,16 +3,23 @@
 #include "sd_direct_publisher.h"
 #include "sd_direct_subscriber.h"
 
-#if SD_HAS_LEGACY_NT2
-#include "networktables/NetworkTable.h"
-#include "tables/ITableListener.h"
-#include "tables/IRemoteConnectionListener.h"
-#endif
+#include <algorithm>
+#include <array>
+#include <bit>
+#include <chrono>
+#include <cstdint>
+#include <functional>
+#include <map>
+#include <memory>
+#include <mutex>
+#include <string>
+#include <thread>
+#include <vector>
 
-#include <atomic>
+#include <winsock2.h>
+#include <ws2tcpip.h>
 
-#include <QByteArray>
-#include <QMetaObject>
+#pragma comment(lib, "Ws2_32.lib")
 
 namespace sd::transport
 {
@@ -164,120 +171,6 @@ namespace sd::transport
             ConnectionStateCallback m_onConnectionState;
         };
 
-        class NetworkTablesDashboardTransportStub final : public IDashboardTransport
-        {
-        public:
-            explicit NetworkTablesDashboardTransportStub(ConnectionConfig config)
-                : m_config(std::move(config))
-            {
-            }
-
-            bool Start(VariableUpdateCallback, ConnectionStateCallback onConnectionState) override
-            {
-                if (onConnectionState)
-                {
-                    onConnectionState(ConnectionState::Connecting);
-                    onConnectionState(ConnectionState::Disconnected);
-                }
-                return false;
-            }
-
-            void Stop() override
-            {
-            }
-
-            bool PublishBool(const QString&, bool) override
-            {
-                return false;
-            }
-
-            bool PublishDouble(const QString&, double) override
-            {
-                return false;
-            }
-
-            bool PublishString(const QString&, const QString&) override
-            {
-                return false;
-            }
-
-        private:
-            ConnectionConfig m_config;
-        };
-
-#if SD_HAS_LEGACY_NT2
-        class LegacyNt2TableListener final : public ITableListener
-        {
-        public:
-            explicit LegacyNt2TableListener(VariableUpdateCallback callback)
-                : m_callback(std::move(callback))
-            {
-            }
-
-            void ValueChanged(ITable*, const std::string& key, EntryValue value, bool) override
-            {
-                if (!m_callback)
-                {
-                    return;
-                }
-
-                VariableUpdate update;
-                update.key = QString::fromStdString(key);
-                update.seq = 0;
-
-                bool treated = false;
-                if (value.ptr != nullptr)
-                {
-                    const std::string* asString = static_cast<std::string*>(value.ptr);
-                    if (asString != nullptr)
-                    {
-                        update.valueType = static_cast<int>(sd::direct::ValueType::String);
-                        update.value = QString::fromStdString(*asString);
-                        treated = true;
-                    }
-                }
-
-                if (!treated)
-                {
-                    update.valueType = static_cast<int>(sd::direct::ValueType::Double);
-                    update.value = value.f;
-                }
-
-                m_callback(update);
-            }
-
-        private:
-            VariableUpdateCallback m_callback;
-        };
-
-        class LegacyNt2ConnectionListener final : public IRemoteConnectionListener
-        {
-        public:
-            explicit LegacyNt2ConnectionListener(ConnectionStateCallback callback)
-                : m_callback(std::move(callback))
-            {
-            }
-
-            void Connected(IRemote*) override
-            {
-                if (m_callback)
-                {
-                    m_callback(ConnectionState::Connected);
-                }
-            }
-
-            void Disconnected(IRemote*) override
-            {
-                if (m_callback)
-                {
-                    m_callback(ConnectionState::Disconnected);
-                }
-            }
-
-        private:
-            ConnectionStateCallback m_callback;
-        };
-
         class NetworkTablesDashboardTransport final : public IDashboardTransport
         {
         public:
@@ -286,136 +179,571 @@ namespace sd::transport
             {
             }
 
+            ~NetworkTablesDashboardTransport() override
+            {
+                Stop();
+            }
+
             bool Start(VariableUpdateCallback onVariableUpdate, ConnectionStateCallback onConnectionState) override
             {
+                std::lock_guard<std::mutex> lock(m_mutex);
                 m_onVariableUpdate = std::move(onVariableUpdate);
                 m_onConnectionState = std::move(onConnectionState);
 
-                if (m_started.exchange(true))
+                if (m_running)
                 {
                     return true;
                 }
 
-                try
+                if (!EnsureWinsockLocked())
                 {
-                    if (m_onConnectionState)
-                    {
-                        m_onConnectionState(ConnectionState::Connecting);
-                    }
-
-                    NetworkTable::SetClientMode();
-                    if (m_config.ntUseTeam && m_config.ntTeam > 0)
-                    {
-                        NetworkTable::SetTeam(m_config.ntTeam);
-                    }
-                    else
-                    {
-                        const QByteArray hostBytes = m_config.ntHost.toUtf8();
-                        NetworkTable::SetIPAddress(hostBytes.constData());
-                    }
-
-                    m_table = NetworkTable::GetTable("SmartDashboard");
-                    if (m_table == nullptr)
-                    {
-                        if (m_onConnectionState)
-                        {
-                            m_onConnectionState(ConnectionState::Disconnected);
-                        }
-                        return false;
-                    }
-
-                    m_tableListener = std::make_unique<LegacyNt2TableListener>(m_onVariableUpdate);
-                    m_connectionListener = std::make_unique<LegacyNt2ConnectionListener>(m_onConnectionState);
-                    m_table->AddTableListener(m_tableListener.get(), true);
-                    m_table->AddConnectionListener(m_connectionListener.get(), true);
-
-                    if (m_onConnectionState)
-                    {
-                        m_onConnectionState(m_table->IsConnected() ? ConnectionState::Connected : ConnectionState::Disconnected);
-                    }
-                }
-                catch (...)
-                {
-                    m_started.store(false);
-                    if (m_onConnectionState)
-                    {
-                        m_onConnectionState(ConnectionState::Disconnected);
-                    }
+                    PublishStateUnlocked(ConnectionState::Disconnected);
                     return false;
                 }
 
+                m_running = true;
+                PublishStateUnlocked(ConnectionState::Connecting);
+                m_worker = std::thread([this]() { RunClientLoop(); });
                 return true;
             }
 
             void Stop() override
             {
-                if (!m_started.exchange(false))
                 {
-                    return;
-                }
-
-                if (m_table != nullptr)
-                {
-                    if (m_tableListener)
+                    std::lock_guard<std::mutex> lock(m_mutex);
+                    if (!m_running)
                     {
-                        m_table->RemoveTableListener(m_tableListener.get());
+                        return;
                     }
-                    if (m_connectionListener)
-                    {
-                        m_table->RemoveConnectionListener(m_connectionListener.get());
-                    }
+                    m_running = false;
                 }
 
-                m_tableListener.reset();
-                m_connectionListener.reset();
-                m_table = nullptr;
+                CloseSocket();
 
-                if (m_onConnectionState)
+                if (m_worker.joinable())
                 {
-                    m_onConnectionState(ConnectionState::Disconnected);
+                    m_worker.join();
                 }
+
+                std::lock_guard<std::mutex> lock(m_mutex);
+                PublishStateUnlocked(ConnectionState::Disconnected);
             }
 
             bool PublishBool(const QString& key, bool value) override
             {
-                if (m_table == nullptr)
+                return SendEntryAssignment(key.toStdString(), 0x00, [value](std::vector<std::uint8_t>& payload)
                 {
-                    return false;
-                }
-                m_table->PutBoolean(key.toStdString(), value);
-                return true;
+                    payload.push_back(value ? 1u : 0u);
+                });
             }
 
             bool PublishDouble(const QString& key, double value) override
             {
-                if (m_table == nullptr)
+                return SendEntryAssignment(key.toStdString(), 0x01, [value](std::vector<std::uint8_t>& payload)
                 {
-                    return false;
-                }
-                m_table->PutNumber(key.toStdString(), value);
-                return true;
+                    const std::uint64_t raw = std::bit_cast<std::uint64_t>(value);
+                    for (int shift = 56; shift >= 0; shift -= 8)
+                    {
+                        payload.push_back(static_cast<std::uint8_t>((raw >> shift) & 0xFFu));
+                    }
+                });
             }
 
             bool PublishString(const QString& key, const QString& value) override
             {
-                if (m_table == nullptr)
+                return SendEntryAssignment(key.toStdString(), 0x02, [value](std::vector<std::uint8_t>& payload)
                 {
-                    return false;
-                }
-                m_table->PutString(key.toStdString(), value.toStdString());
-                return true;
+                    const std::string bytes = value.toStdString();
+                    const std::size_t bounded = std::min<std::size_t>(bytes.size(), 65535u);
+                    WriteU16(payload, static_cast<std::uint16_t>(bounded));
+                    payload.insert(payload.end(), bytes.begin(), bytes.begin() + static_cast<std::ptrdiff_t>(bounded));
+                });
             }
 
         private:
+            struct EntryMeta
+            {
+                std::uint16_t id = 0;
+                std::uint16_t seq = 0;
+                std::uint8_t typeId = 0;
+            };
+
+            static void WriteU16(std::vector<std::uint8_t>& out, std::uint16_t value)
+            {
+                out.push_back(static_cast<std::uint8_t>((value >> 8) & 0xFFu));
+                out.push_back(static_cast<std::uint8_t>(value & 0xFFu));
+            }
+
+            static bool ReadU16(const std::vector<std::uint8_t>& in, std::size_t& offset, std::uint16_t& out)
+            {
+                if (offset + 2 > in.size())
+                {
+                    return false;
+                }
+                out = static_cast<std::uint16_t>((static_cast<std::uint16_t>(in[offset]) << 8) | in[offset + 1]);
+                offset += 2;
+                return true;
+            }
+
+            static bool ReadExact(SOCKET socket, std::uint8_t* data, std::size_t size)
+            {
+                std::size_t total = 0;
+                while (total < size)
+                {
+                    const int count = recv(socket, reinterpret_cast<char*>(data + total), static_cast<int>(size - total), 0);
+                    if (count <= 0)
+                    {
+                        return false;
+                    }
+                    total += static_cast<std::size_t>(count);
+                }
+                return true;
+            }
+
+            static bool SendExact(SOCKET socket, const std::uint8_t* data, std::size_t size)
+            {
+                std::size_t total = 0;
+                while (total < size)
+                {
+                    const int sent = send(socket, reinterpret_cast<const char*>(data + total), static_cast<int>(size - total), 0);
+                    if (sent <= 0)
+                    {
+                        return false;
+                    }
+                    total += static_cast<std::size_t>(sent);
+                }
+                return true;
+            }
+
+            static bool ReadU16FromSocket(SOCKET socket, std::uint16_t& out)
+            {
+                std::array<std::uint8_t, 2> raw {};
+                if (!ReadExact(socket, raw.data(), raw.size()))
+                {
+                    return false;
+                }
+
+                std::size_t offset = 0;
+                const std::vector<std::uint8_t> temp(raw.begin(), raw.end());
+                return ReadU16(temp, offset, out);
+            }
+
+            void RunClientLoop()
+            {
+                while (IsRunning())
+                {
+                    if (!ConnectAndHandshake())
+                    {
+                        PublishState(ConnectionState::Disconnected);
+                        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+                        continue;
+                    }
+
+                    PublishState(ConnectionState::Connected);
+
+                    while (IsRunning())
+                    {
+                        if (!ProcessOneMessage())
+                        {
+                            break;
+                        }
+                    }
+
+                    CloseSocket();
+                    PublishState(ConnectionState::Disconnected);
+                    if (IsRunning())
+                    {
+                        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+                    }
+                }
+            }
+
+            bool ConnectAndHandshake()
+            {
+                std::string host;
+                {
+                    std::lock_guard<std::mutex> lock(m_mutex);
+                    host = ResolveHostLocked();
+                }
+
+                addrinfo hints {};
+                hints.ai_family = AF_INET;
+                hints.ai_socktype = SOCK_STREAM;
+
+                addrinfo* result = nullptr;
+                if (getaddrinfo(host.c_str(), "1735", &hints, &result) != 0 || result == nullptr)
+                {
+                    return false;
+                }
+
+                SOCKET socket = ::socket(result->ai_family, result->ai_socktype, result->ai_protocol);
+                if (socket == INVALID_SOCKET)
+                {
+                    freeaddrinfo(result);
+                    return false;
+                }
+
+                const int connected = ::connect(socket, result->ai_addr, static_cast<int>(result->ai_addrlen));
+                freeaddrinfo(result);
+                if (connected != 0)
+                {
+                    closesocket(socket);
+                    return false;
+                }
+
+                {
+                    std::lock_guard<std::mutex> lock(m_mutex);
+                    m_socket = socket;
+                    m_keyToEntry.clear();
+                    m_idToKey.clear();
+                    m_nextEntryId = 30000;
+                }
+
+                std::vector<std::uint8_t> hello;
+                hello.push_back(0x01);
+                WriteU16(hello, 0x0200);
+                return SendExact(socket, hello.data(), hello.size());
+            }
+
+            bool ProcessOneMessage()
+            {
+                SOCKET socket = INVALID_SOCKET;
+                {
+                    std::lock_guard<std::mutex> lock(m_mutex);
+                    socket = m_socket;
+                }
+
+                if (socket == INVALID_SOCKET)
+                {
+                    return false;
+                }
+
+                std::uint8_t type = 0;
+                if (!ReadExact(socket, &type, 1))
+                {
+                    return false;
+                }
+
+                switch (type)
+                {
+                    case 0x00:
+                        return true;
+                    case 0x03:
+                        return true;
+                    case 0x02:
+                    {
+                        std::array<std::uint8_t, 2> protocol {};
+                        return ReadExact(socket, protocol.data(), protocol.size());
+                    }
+                    case 0x10:
+                        return HandleEntryAssignment(socket);
+                    case 0x11:
+                        return HandleFieldUpdate(socket);
+                    default:
+                        return false;
+                }
+            }
+
+            bool HandleEntryAssignment(SOCKET socket)
+            {
+                std::uint16_t keyLen = 0;
+                if (!ReadU16FromSocket(socket, keyLen))
+                {
+                    return false;
+                }
+
+                std::vector<std::uint8_t> keyBytes(keyLen);
+                if (keyLen > 0 && !ReadExact(socket, keyBytes.data(), keyBytes.size()))
+                {
+                    return false;
+                }
+
+                std::uint8_t valueType = 0;
+                if (!ReadExact(socket, &valueType, 1))
+                {
+                    return false;
+                }
+
+                std::uint16_t entryId = 0;
+                std::uint16_t seq = 0;
+                if (!ReadU16FromSocket(socket, entryId) || !ReadU16FromSocket(socket, seq))
+                {
+                    return false;
+                }
+
+                const std::string key(keyBytes.begin(), keyBytes.end());
+                VariableUpdate update;
+                update.key = QString::fromStdString(key);
+                update.seq = seq;
+                update.valueType = static_cast<int>(ToDirectValueType(valueType));
+
+                if (!ReadTypedValue(socket, valueType, update.value))
+                {
+                    return false;
+                }
+
+                {
+                    std::lock_guard<std::mutex> lock(m_mutex);
+                    EntryMeta meta;
+                    meta.id = entryId;
+                    meta.seq = seq;
+                    meta.typeId = valueType;
+                    m_keyToEntry[key] = meta;
+                    m_idToKey[entryId] = key;
+                }
+
+                PublishUpdate(update);
+                return true;
+            }
+
+            bool HandleFieldUpdate(SOCKET socket)
+            {
+                std::uint16_t entryId = 0;
+                std::uint16_t seq = 0;
+                if (!ReadU16FromSocket(socket, entryId) || !ReadU16FromSocket(socket, seq))
+                {
+                    return false;
+                }
+
+                std::uint8_t valueType = 0;
+                std::string key;
+                {
+                    std::lock_guard<std::mutex> lock(m_mutex);
+                    const auto idIt = m_idToKey.find(entryId);
+                    if (idIt == m_idToKey.end())
+                    {
+                        return false;
+                    }
+
+                    key = idIt->second;
+                    const auto keyIt = m_keyToEntry.find(key);
+                    if (keyIt == m_keyToEntry.end())
+                    {
+                        return false;
+                    }
+
+                    keyIt->second.seq = seq;
+                    valueType = keyIt->second.typeId;
+                }
+
+                VariableUpdate update;
+                update.key = QString::fromStdString(key);
+                update.seq = seq;
+                update.valueType = static_cast<int>(ToDirectValueType(valueType));
+
+                if (!ReadTypedValue(socket, valueType, update.value))
+                {
+                    return false;
+                }
+
+                PublishUpdate(update);
+                return true;
+            }
+
+            bool ReadTypedValue(SOCKET socket, std::uint8_t typeId, QVariant& outValue)
+            {
+                if (typeId == 0x00)
+                {
+                    std::uint8_t b = 0;
+                    if (!ReadExact(socket, &b, 1))
+                    {
+                        return false;
+                    }
+                    outValue = (b != 0);
+                    return true;
+                }
+
+                if (typeId == 0x01)
+                {
+                    std::array<std::uint8_t, 8> raw {};
+                    if (!ReadExact(socket, raw.data(), raw.size()))
+                    {
+                        return false;
+                    }
+
+                    std::uint64_t bits = 0;
+                    for (const std::uint8_t byte : raw)
+                    {
+                        bits = (bits << 8) | byte;
+                    }
+
+                    outValue = std::bit_cast<double>(bits);
+                    return true;
+                }
+
+                if (typeId == 0x02)
+                {
+                    std::uint16_t len = 0;
+                    if (!ReadU16FromSocket(socket, len))
+                    {
+                        return false;
+                    }
+
+                    std::vector<std::uint8_t> bytes(len);
+                    if (len > 0 && !ReadExact(socket, bytes.data(), bytes.size()))
+                    {
+                        return false;
+                    }
+
+                    outValue = QString::fromStdString(std::string(bytes.begin(), bytes.end()));
+                    return true;
+                }
+
+                return false;
+            }
+
+            sd::direct::ValueType ToDirectValueType(std::uint8_t ntType) const
+            {
+                switch (ntType)
+                {
+                    case 0x00:
+                        return sd::direct::ValueType::Bool;
+                    case 0x01:
+                        return sd::direct::ValueType::Double;
+                    case 0x02:
+                    default:
+                        return sd::direct::ValueType::String;
+                }
+            }
+
+            bool SendEntryAssignment(const std::string& key, std::uint8_t typeId, const std::function<void(std::vector<std::uint8_t>&)>& appendValue)
+            {
+                std::lock_guard<std::mutex> lock(m_mutex);
+                if (!m_running || m_socket == INVALID_SOCKET)
+                {
+                    return false;
+                }
+
+                EntryMeta meta;
+                auto it = m_keyToEntry.find(key);
+                if (it == m_keyToEntry.end())
+                {
+                    meta.id = m_nextEntryId++;
+                    meta.seq = 0;
+                    meta.typeId = typeId;
+                }
+                else
+                {
+                    meta = it->second;
+                    meta.typeId = typeId;
+                }
+
+                meta.seq = static_cast<std::uint16_t>(meta.seq + 1);
+                m_keyToEntry[key] = meta;
+                m_idToKey[meta.id] = key;
+
+                std::vector<std::uint8_t> packet;
+                packet.push_back(0x10);
+                const std::size_t bounded = std::min<std::size_t>(key.size(), 65535u);
+                WriteU16(packet, static_cast<std::uint16_t>(bounded));
+                packet.insert(packet.end(), key.begin(), key.begin() + static_cast<std::ptrdiff_t>(bounded));
+                packet.push_back(typeId);
+                WriteU16(packet, meta.id);
+                WriteU16(packet, meta.seq);
+                appendValue(packet);
+
+                return SendExact(m_socket, packet.data(), packet.size());
+            }
+
+            std::string ResolveHostLocked() const
+            {
+                if (m_config.ntUseTeam && m_config.ntTeam > 0)
+                {
+                    const int team = m_config.ntTeam;
+                    const int hi = team / 100;
+                    const int lo = team % 100;
+                    return "10." + std::to_string(hi) + "." + std::to_string(lo) + ".2";
+                }
+
+                const QString host = m_config.ntHost.trimmed();
+                if (!host.isEmpty())
+                {
+                    return host.toStdString();
+                }
+
+                return "127.0.0.1";
+            }
+
+            bool EnsureWinsockLocked()
+            {
+                if (m_winsockReady)
+                {
+                    return true;
+                }
+
+                WSADATA data {};
+                const int result = WSAStartup(MAKEWORD(2, 2), &data);
+                if (result != 0)
+                {
+                    return false;
+                }
+
+                m_winsockReady = true;
+                return true;
+            }
+
+            bool IsRunning()
+            {
+                std::lock_guard<std::mutex> lock(m_mutex);
+                return m_running;
+            }
+
+            void CloseSocket()
+            {
+                SOCKET socket = INVALID_SOCKET;
+                {
+                    std::lock_guard<std::mutex> lock(m_mutex);
+                    socket = m_socket;
+                    m_socket = INVALID_SOCKET;
+                }
+
+                if (socket != INVALID_SOCKET)
+                {
+                    shutdown(socket, SD_BOTH);
+                    closesocket(socket);
+                }
+            }
+
+            void PublishState(ConnectionState state)
+            {
+                std::lock_guard<std::mutex> lock(m_mutex);
+                PublishStateUnlocked(state);
+            }
+
+            void PublishStateUnlocked(ConnectionState state)
+            {
+                if (m_onConnectionState)
+                {
+                    m_onConnectionState(state);
+                }
+            }
+
+            void PublishUpdate(const VariableUpdate& update)
+            {
+                VariableUpdateCallback callback;
+                {
+                    std::lock_guard<std::mutex> lock(m_mutex);
+                    callback = m_onVariableUpdate;
+                }
+
+                if (callback)
+                {
+                    callback(update);
+                }
+            }
+
             ConnectionConfig m_config;
+            std::mutex m_mutex;
+            bool m_running = false;
+            bool m_winsockReady = false;
+            SOCKET m_socket = INVALID_SOCKET;
+            std::thread m_worker;
             VariableUpdateCallback m_onVariableUpdate;
             ConnectionStateCallback m_onConnectionState;
-            std::atomic<bool> m_started {false};
-            NetworkTable* m_table = nullptr;
-            std::unique_ptr<LegacyNt2TableListener> m_tableListener;
-            std::unique_ptr<LegacyNt2ConnectionListener> m_connectionListener;
+            std::uint16_t m_nextEntryId = 30000;
+            std::map<std::string, EntryMeta> m_keyToEntry;
+            std::map<std::uint16_t, std::string> m_idToKey;
         };
-#endif
     }
 
     QString ToDisplayString(TransportKind kind)
@@ -434,11 +762,7 @@ namespace sd::transport
     {
         if (config.kind == TransportKind::NetworkTables)
         {
-#if SD_HAS_LEGACY_NT2
             return std::make_unique<NetworkTablesDashboardTransport>(config);
-#else
-            return std::make_unique<NetworkTablesDashboardTransportStub>(config);
-#endif
         }
 
         return std::make_unique<DirectDashboardTransport>();

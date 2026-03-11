@@ -670,11 +670,8 @@ Validation baseline for this slice:
 
 Current implementation note:
 
-- A legacy NT2 compatibility adapter path is now integrated for simulator validation using sources under `D:/code/Robot_Simulation/Source/Libraries/SmartDashboard` when available at build time.
-- Build-time control:
-  - `SMARTDASHBOARD_ENABLE_LEGACY_NT2` (default ON)
-  - `SMARTDASHBOARD_LEGACY_NT2_DIR` (defaults to Robot_Simulation clone path)
-- If the legacy source path is unavailable, the NetworkTables selection remains available in UI but uses a disconnected stub adapter.
+- A legacy NT2-compatible client transport is now implemented in-tree (inside this repository), removing build dependency on external Robot_Simulation sources.
+- Robot_Simulation remains the validation target/reference server for behavioral parity checks.
 
 ## NetworkTables Source References
 

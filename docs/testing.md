@@ -94,9 +94,8 @@ Use this check when validating NetworkTables transport against the cloned legacy
 
 Prerequisites:
 
-- `SMARTDASHBOARD_ENABLE_LEGACY_NT2=ON` at CMake configure time (default ON)
-- legacy source root available at:
-  - `D:/code/Robot_Simulation/Source/Libraries/SmartDashboard`
+- no external NT source dependency is required for dashboard build
+- robot simulation/server should expose legacy NT2 endpoint on expected host/team settings
 
 Suggested loop:
 

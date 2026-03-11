@@ -34,7 +34,7 @@ Qt UI Rendering (tiles/widgets)
 Notes:
 - The dashboard now routes telemetry/commands through a transport-agnostic interface in the UI layer.
 - Direct transport is implemented and fully test-backed.
-- NetworkTables transport now supports legacy NT2 simulator integration when legacy sources are present at build time; otherwise it falls back to a disconnected stub.
+- NetworkTables transport now includes an in-tree NT2-compatible client implementation (no external source dependency required).
 
 Future consideration (not implemented yet):
 - introduce a decoupled telemetry event bus between ingestion and UI rendering
