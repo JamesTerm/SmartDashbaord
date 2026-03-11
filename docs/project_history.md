@@ -22,6 +22,15 @@ Curated milestone history for this repository.
   - full variable keys remain unchanged for publish/subscribe, command routing, and layout persistence identity.
 - Updated manual testing notes in `docs/testing.md` to include the new `SampleRateMs` tuning key.
 
+### Follow-up refinement (same session)
+
+- Reworked line-plot x-axis semantics to match legacy sample-anchored expectations:
+  - right boundary is always the newest sample
+  - left boundary is always the oldest retained sample (or first sample before buffer fill)
+  - once buffer is full (e.g. 250 samples), the sample 250-back is pinned to the left margin
+- Updated sample ingest x-positioning to advance by EMA-estimated sample period per sample rather than raw wall-clock elapsed time, so pause/resume or irregular arrival gaps do not cause violent boundary shifts.
+- Added/updated line-plot regression assertions in `SmartDashboard/tests/line_plot_widget_tests.cpp` to verify x-range exactly matches oldest/newest retained sample times.
+
 ## 2026-03-10 - Transport abstraction, parity contracts, and legacy NT2 integration
 
 - Added transport-parity contract coverage for direct adapter semantics in:

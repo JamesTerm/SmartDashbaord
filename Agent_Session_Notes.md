@@ -37,7 +37,9 @@
 - App icon is now wired for Windows builds via `dist/win/app_icon.rc` and `dist/win/smartdashboard_app.ico`.
 - Runtime Qt icon is also set via `src/resources/resources.qrc` + `QApplication::setWindowIcon`, so titlebar/taskbar icon paths match the EXE icon.
 - `AssertiveGetPublishesDefaultAndCallbackReceivesUpdates` test isolation uses unique per-test direct channels and disables retained fallback for that case.
-- Line plot smoothing pass implemented: repaint is timer-driven (~16 ms) instead of per-sample, x-range uses a fixed-width window derived from buffer-size and EMA-estimated sample period, and number-line x ticks now use stable "nice step" spacing.
+- Line plot x-axis model refined to sample-anchored behavior: right edge is newest sample, left edge is oldest retained sample (up to configured buffer size), so the 250th sample back stays pinned to the left margin once buffer is full.
+- Line plot ingest now advances x-position by EMA-estimated sample period per sample (instead of raw wall-clock gaps), preserving smooth left/right anchoring through pause/resume and irregular transport timing.
+- Number-line/gridline stability work remains centered on x-axis spacing and anchoring; rendering path itself is stable.
 - Added `SmartDashboard/tests/line_plot_widget_tests.cpp` stress-oriented regression coverage for varying buffer/rate scenarios; `SmartDashboard_tests` now includes both line-plot and variable-tile tests.
 - `DirectPublisherTests.StreamsSineWaveDouble` now exposes live-tunable `Test/DoubleSine/Config/SampleRateMs` (default 16 ms) so publish cadence can be adjusted without editing code.
 - Direct transport UI label compaction: tile title text now shows only the last key segment in Direct mode (for example `.../Config/SampleRateMs` -> `SampleRateMs`) while preserving full underlying keys for publish/subscribe and layout identity.

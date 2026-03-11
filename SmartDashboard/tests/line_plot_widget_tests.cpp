@@ -5,7 +5,9 @@
 
 #include <gtest/gtest.h>
 
+#include <cmath>
 #include <memory>
+#include <vector>
 
 namespace
 {
@@ -51,11 +53,13 @@ namespace
 
         const auto xRange = plot.GetXRangeForTesting();
         const double span = xRange.second - xRange.first;
-        const double estimatedPeriod = plot.GetEstimatedSamplePeriodSecondsForTesting();
-        const double expectedWindow = std::max(1.0, estimatedPeriod * static_cast<double>(bufferSize));
+        const double oldest = plot.GetOldestSampleTimeForTesting();
+        const double latest = plot.GetLatestSampleTimeForTesting();
 
+        EXPECT_NEAR(xRange.first, oldest, 1e-9);
+        EXPECT_NEAR(xRange.second, latest, 1e-9);
         EXPECT_GT(span, 0.0);
-        EXPECT_NEAR(span, expectedWindow, expectedWindow * 0.03 + 0.02);
+        EXPECT_NEAR(span, latest - oldest, 1e-9);
     }
 }
 
@@ -69,4 +73,37 @@ TEST(LinePlotWidgetTests, BufferSizeSetterMaintainsStabilityAcrossRates)
     VerifyStableWindowForScenario(plot, 250, 500, 1, 1000.0);
     VerifyStableWindowForScenario(plot, 1000, 1000, 0, 2000.0);
     VerifyStableWindowForScenario(plot, 120, 360, 2, 3000.0);
+}
+
+TEST(LinePlotWidgetTests, XTickIntervalRemainsStableUnderJitteredCadence)
+{
+    ASSERT_NE(EnsureApp(), nullptr);
+
+    sd::widgets::LinePlotWidget plot;
+    plot.SetBufferSizeSamples(250);
+    plot.SetShowNumberLines(true);
+
+    constexpr int drawWidth = 900;
+    std::vector<double> observedIntervals;
+    observedIntervals.reserve(180);
+
+    const int cadencePatternMs[] = { 16, 17, 15, 16, 18, 14, 16, 16 };
+    for (int i = 0; i < 180; ++i)
+    {
+        const double value = std::sin(static_cast<double>(i) * 0.08);
+        plot.AddSample(value);
+        observedIntervals.push_back(plot.GetXTickIntervalForTesting(drawWidth));
+        QThread::msleep(static_cast<unsigned long>(cadencePatternMs[i % 8]));
+    }
+
+    int tickSwitches = 0;
+    for (size_t i = 1; i < observedIntervals.size(); ++i)
+    {
+        if (std::abs(observedIntervals[i] - observedIntervals[i - 1]) > 1e-9)
+        {
+            ++tickSwitches;
+        }
+    }
+
+    EXPECT_LE(tickSwitches, 12);
 }

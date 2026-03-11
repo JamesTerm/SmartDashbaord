@@ -36,6 +36,7 @@ namespace sd::widgets
             m_hasStarted = true;
             m_lastSampleTime = now;
             m_hasLastSampleTime = true;
+            m_samples.push_back(SamplePoint{ 0.0, value });
         }
         else if (m_hasLastSampleTime)
         {
@@ -46,10 +47,12 @@ namespace sd::widgets
             m_estimatedSamplePeriodSeconds =
                 (0.1 * deltaSeconds) + (0.9 * m_estimatedSamplePeriodSeconds);
             m_lastSampleTime = now;
-        }
 
-        const std::chrono::duration<double> elapsed = now - m_startTime;
-        m_samples.push_back(SamplePoint{ elapsed.count(), value });
+            const double nextX = m_samples.empty()
+                ? 0.0
+                : (m_samples.back().xSeconds + m_estimatedSamplePeriodSeconds);
+            m_samples.push_back(SamplePoint{ nextX, value });
+        }
 
         if (!m_renderTimer.isActive())
         {
@@ -135,6 +138,21 @@ namespace sd::widgets
         return { range.min, range.max };
     }
 
+    double LinePlotWidget::GetOldestSampleTimeForTesting() const
+    {
+        return m_samples.empty() ? 0.0 : m_samples.front().xSeconds;
+    }
+
+    double LinePlotWidget::GetLatestSampleTimeForTesting() const
+    {
+        return m_samples.empty() ? 0.0 : m_samples.back().xSeconds;
+    }
+
+    double LinePlotWidget::GetXTickIntervalForTesting(int drawWidth) const
+    {
+        return ComputeXTickInterval(drawWidth);
+    }
+
     void LinePlotWidget::paintEvent(QPaintEvent* event)
     {
         QWidget::paintEvent(event);
@@ -164,38 +182,6 @@ namespace sd::widgets
             return;
         }
 
-        auto chooseTickStep = [](double span, int targetTicks)
-        {
-            if (span <= 0.0 || targetTicks <= 0)
-            {
-                return 1.0;
-            }
-
-            const double rough = span / static_cast<double>(targetTicks);
-            const double power = std::pow(10.0, std::floor(std::log10(rough)));
-            const double normalized = rough / power;
-
-            double step = power;
-            if (normalized <= 1.0)
-            {
-                step = 1.0 * power;
-            }
-            else if (normalized <= 2.0)
-            {
-                step = 2.0 * power;
-            }
-            else if (normalized <= 5.0)
-            {
-                step = 5.0 * power;
-            }
-            else
-            {
-                step = 10.0 * power;
-            }
-
-            return step;
-        };
-
         auto formatTick = [](double value)
         {
             const double absValue = std::abs(value);
@@ -210,19 +196,11 @@ namespace sd::widgets
             return QString::number(value, 'f', 2);
         };
 
-        const double yStep = chooseTickStep(ySpan, std::max(2, drawRect.height() / 60));
+        const double yStep = ChooseNiceTickStep(ySpan, std::max(2, drawRect.height() / 60));
 
         // X-axis ticks: generate at fixed time intervals, render only visible ones
         std::vector<double> xTickValues;
-        double xTickInterval;
-        if (m_showNumberLines)
-        {
-            xTickInterval = chooseTickStep(xSpan, std::max(4, drawRect.width() / 80));
-        }
-        else
-        {
-            xTickInterval = chooseTickStep(xSpan, std::max(2, drawRect.width() / 90));
-        }
+        const double xTickInterval = ComputeXTickInterval(drawRect.width());
 
         // Generate ticks at fixed time values that fall within visible range
         const double xStartTick = std::floor(xRange.min / xTickInterval) * xTickInterval;
@@ -391,16 +369,48 @@ namespace sd::widgets
             return AxisRange{ 0.0, 1.0 };
         }
 
-        const double latestSampleTime = m_samples.back().xSeconds;
-        const double samplePeriod = std::clamp(m_estimatedSamplePeriodSeconds, 0.001, 1.0);
-        const double targetWindow = std::max(1.0, samplePeriod * static_cast<double>(m_bufferSizeSamples));
+        const double start = m_samples.front().xSeconds;
+        const double end = std::max(m_samples.back().xSeconds, start + 0.001);
+        return AxisRange{ start, end };
+    }
 
-        // Smooth-scroll strategy: lock viewport to a fixed time width and anchor
-        // to the newest sample time. This avoids frame-to-frame span breathing
-        // when sample arrival has small timing jitter.
-        const double end = std::max(targetWindow, latestSampleTime);
-        const double start = end - targetWindow;
-        return AxisRange{ start, std::max(end, start + 0.001) };
+    double LinePlotWidget::ChooseNiceTickStep(double span, int targetTicks)
+    {
+        if (span <= 0.0 || targetTicks <= 0)
+        {
+            return 1.0;
+        }
+
+        const double rough = span / static_cast<double>(targetTicks);
+        const double power = std::pow(10.0, std::floor(std::log10(rough)));
+        const double normalized = rough / power;
+
+        if (normalized <= 1.0)
+        {
+            return 1.0 * power;
+        }
+        if (normalized <= 2.0)
+        {
+            return 2.0 * power;
+        }
+        if (normalized <= 5.0)
+        {
+            return 5.0 * power;
+        }
+        return 10.0 * power;
+    }
+
+    double LinePlotWidget::ComputeXTickInterval(int drawWidth) const
+    {
+        const AxisRange xRange = ComputeXRange();
+        const double xSpan = xRange.max - xRange.min;
+        if (xSpan <= 0.0)
+        {
+            return 1.0;
+        }
+
+        const int targetTicks = m_showNumberLines ? std::max(4, drawWidth / 80) : std::max(2, drawWidth / 90);
+        return ChooseNiceTickStep(xSpan, targetTicks);
     }
 
     LinePlotWidget::AxisRange LinePlotWidget::ComputeYRange() const

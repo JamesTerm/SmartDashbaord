@@ -26,6 +26,9 @@ namespace sd::widgets
         int GetSampleCountForTesting() const;
         double GetEstimatedSamplePeriodSecondsForTesting() const;
         std::pair<double, double> GetXRangeForTesting() const;
+        double GetOldestSampleTimeForTesting() const;
+        double GetLatestSampleTimeForTesting() const;
+        double GetXTickIntervalForTesting(int drawWidth) const;
 
     protected:
         void paintEvent(QPaintEvent* event) override;
@@ -52,6 +55,8 @@ namespace sd::widgets
         AxisRange ComputeXRange() const;
         AxisRange ComputeYRange() const;
         YExtents ComputeRecentYExtents() const;
+        static double ChooseNiceTickStep(double span, int targetTicks);
+        double ComputeXTickInterval(int drawWidth) const;
 
         std::deque<SamplePoint> m_samples;
         QTimer m_renderTimer;
