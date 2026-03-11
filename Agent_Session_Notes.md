@@ -42,7 +42,9 @@
 - Current direct ring transport is effectively single-consumer due to shared read cursor.
 - Deployment remains vcpkg/Qt-DLL based; static Qt distribution is not a current goal.
 - Event-bus decoupling (topic subscriptions + rate limiting + coalescing) is documented as future work, not implemented.
-- Possible future NetworkTables adapter is a design consideration, not current implementation.
+- Main window now uses a transport-agnostic adapter interface (`dashboard_transport`) with Connection menu actions (Connect/Disconnect, Direct vs NetworkTables selection, NT host/team settings persisted in QSettings).
+- NetworkTables menu path is now wired to a legacy NT2 adapter implementation when `SmartDashboard_LegacyNT2` is built from `D:/code/Robot_Simulation/Source/Libraries/SmartDashboard`.
+- If legacy NT2 sources are unavailable, build falls back to a stub NT adapter path while direct transport remains fully functional.
 - Direct ring payload path is still single-consumer; retained store introduces shared latest-value ownership but does not yet change stream fan-out semantics.
 - If startup false-dirty (`*`) behavior regresses, add a focused startup regression test that validates initial title/dirty state before any editable interaction.
 

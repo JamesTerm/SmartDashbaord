@@ -1,7 +1,7 @@
 #include "app/main_window.h"
 
 #include "layout/layout_serializer.h"
-#include "transport/direct_publisher_adapter.h"
+#include "sd_direct_types.h"
 
 #include <QAction>
 #include <QApplication>
@@ -14,6 +14,9 @@
 #include <QMessageBox>
 #include <QMenu>
 #include <QMenuBar>
+#include <QInputDialog>
+#include <QLineEdit>
+#include <QMetaObject>
 #include <QPalette>
 #include <QSettings>
 #include <QStatusBar>
@@ -156,7 +159,6 @@ namespace
 
 MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent)
-    , m_subscriberAdapter(this)
 {
     RefreshWindowTitle();
     resize(1200, 800);
@@ -210,21 +212,37 @@ MainWindow::MainWindow(QWidget* parent)
     m_statusLabel = new QLabel("State: Disconnected", this);
     statusBar()->addPermanentWidget(m_statusLabel);
 
-    connect(
-        &m_subscriberAdapter,
-        &DirectSubscriberAdapter::VariableUpdateReceived,
-        this,
-        &MainWindow::OnVariableUpdateReceived
-    );
-    connect(
-        &m_subscriberAdapter,
-        &DirectSubscriberAdapter::ConnectionStateChanged,
-        this,
-        &MainWindow::OnConnectionStateChanged
-    );
+    QMenu* connectionMenu = menuBar()->addMenu("&Connection");
+    m_connectTransportAction = connectionMenu->addAction("Connect");
+    m_disconnectTransportAction = connectionMenu->addAction("Disconnect");
+    connectionMenu->addSeparator();
+    m_useDirectTransportAction = connectionMenu->addAction("Use Direct transport");
+    m_useDirectTransportAction->setCheckable(true);
+    m_useNetworkTablesTransportAction = connectionMenu->addAction("Use NetworkTables transport");
+    m_useNetworkTablesTransportAction->setCheckable(true);
+    connectionMenu->addSeparator();
+    m_ntUseTeamAction = connectionMenu->addAction("NT: Use team number");
+    m_ntUseTeamAction->setCheckable(true);
+    QAction* ntSetHostAction = connectionMenu->addAction("NT: Set host...");
+    QAction* ntSetTeamAction = connectionMenu->addAction("NT: Set team...");
 
-    m_commandPublisher = new DirectPublisherAdapter(this);
-    m_commandPublisher->Start();
+    connect(m_connectTransportAction, &QAction::triggered, this, &MainWindow::OnConnectTransport);
+    connect(m_disconnectTransportAction, &QAction::triggered, this, &MainWindow::OnDisconnectTransport);
+    connect(m_useDirectTransportAction, &QAction::triggered, this, &MainWindow::OnUseDirectTransport);
+    connect(m_useNetworkTablesTransportAction, &QAction::triggered, this, &MainWindow::OnUseNetworkTablesTransport);
+    connect(m_ntUseTeamAction, &QAction::triggered, this, &MainWindow::OnToggleNtUseTeam);
+    connect(ntSetHostAction, &QAction::triggered, this, &MainWindow::OnSetNtHost);
+    connect(ntSetTeamAction, &QAction::triggered, this, &MainWindow::OnSetNtTeam);
+
+    QSettings settings("SmartDashboard", "SmartDashboardApp");
+    m_connectionConfig.kind = static_cast<sd::transport::TransportKind>(
+        settings.value("connection/transportKind", static_cast<int>(sd::transport::TransportKind::Direct)).toInt()
+    );
+    m_connectionConfig.ntHost = settings.value("connection/ntHost", "127.0.0.1").toString();
+    m_connectionConfig.ntTeam = settings.value("connection/ntTeam", 0).toInt();
+    m_connectionConfig.ntUseTeam = settings.value("connection/ntUseTeam", true).toBool();
+    m_connectionConfig.ntClientName = settings.value("connection/ntClientName", "SmartDashboardApp").toString();
+    ApplyTransportMenuChecks();
 
     connect(
         qApp,
@@ -241,16 +259,12 @@ MainWindow::MainWindow(QWidget* parent)
     m_layoutFilePath = GetInitialLayoutPath();
     LoadLayoutFromPath(m_layoutFilePath, true);
     LoadWindowGeometry();
-    m_subscriberAdapter.Start();
+    StartTransport();
 }
 
 MainWindow::~MainWindow()
 {
-    m_subscriberAdapter.Stop();
-    if (m_commandPublisher != nullptr)
-    {
-        m_commandPublisher->Stop();
-    }
+    StopTransport();
 }
 
 void MainWindow::OnToggleEditable()
@@ -352,7 +366,7 @@ void MainWindow::OnConnectionStateChanged(int state)
 {
     m_connectionState = state;
 
-    const int connected = static_cast<int>(sd::direct::ConnectionState::Connected);
+    const int connected = static_cast<int>(sd::transport::ConnectionState::Connected);
     if (state == connected)
     {
         // Reconnect handling: reset sequence gating when transport re-enters connected state.
@@ -566,15 +580,15 @@ void MainWindow::UpdateWindowConnectionText(int state)
     RefreshWindowTitle();
 
     QString stateText = "Disconnected";
-    if (state == static_cast<int>(sd::direct::ConnectionState::Connecting))
+    if (state == static_cast<int>(sd::transport::ConnectionState::Connecting))
     {
         stateText = "Connecting";
     }
-    else if (state == static_cast<int>(sd::direct::ConnectionState::Connected))
+    else if (state == static_cast<int>(sd::transport::ConnectionState::Connected))
     {
         stateText = "Connected";
     }
-    else if (state == static_cast<int>(sd::direct::ConnectionState::Stale))
+    else if (state == static_cast<int>(sd::transport::ConnectionState::Stale))
     {
         stateText = "Stale";
     }
@@ -610,9 +624,9 @@ void MainWindow::SaveWindowGeometry() const
 
 void MainWindow::OnControlBoolEdited(const QString& key, bool value)
 {
-    if (m_commandPublisher != nullptr)
+    if (m_transport)
     {
-        m_commandPublisher->PublishBool(key, value);
+        m_transport->PublishBool(key, value);
     }
 }
 
@@ -637,17 +651,17 @@ void MainWindow::OnRemoveWidgetRequested(const QString& key)
 
 void MainWindow::OnControlDoubleEdited(const QString& key, double value)
 {
-    if (m_commandPublisher != nullptr)
+    if (m_transport)
     {
-        m_commandPublisher->PublishDouble(key, value);
+        m_transport->PublishDouble(key, value);
     }
 }
 
 void MainWindow::OnControlStringEdited(const QString& key, const QString& value)
 {
-    if (m_commandPublisher != nullptr)
+    if (m_transport)
     {
-        m_commandPublisher->PublishString(key, value);
+        m_transport->PublishString(key, value);
     }
 }
 
@@ -835,15 +849,15 @@ QString MainWindow::GetLayoutTitleSegment() const
 void MainWindow::RefreshWindowTitle()
 {
     QString stateText = "Disconnected";
-    if (m_connectionState == static_cast<int>(sd::direct::ConnectionState::Connecting))
+    if (m_connectionState == static_cast<int>(sd::transport::ConnectionState::Connecting))
     {
         stateText = "Connecting";
     }
-    else if (m_connectionState == static_cast<int>(sd::direct::ConnectionState::Connected))
+    else if (m_connectionState == static_cast<int>(sd::transport::ConnectionState::Connected))
     {
         stateText = "Connected";
     }
-    else if (m_connectionState == static_cast<int>(sd::direct::ConnectionState::Stale))
+    else if (m_connectionState == static_cast<int>(sd::transport::ConnectionState::Stale))
     {
         stateText = "Stale";
     }
@@ -857,4 +871,151 @@ void MainWindow::RefreshWindowTitle()
     }
 
     setWindowTitle(QString("SmartDashboard - %1%2").arg(stateText, dirtySuffix));
+}
+
+void MainWindow::OnConnectTransport()
+{
+    StartTransport();
+}
+
+void MainWindow::OnDisconnectTransport()
+{
+    StopTransport();
+    UpdateWindowConnectionText(static_cast<int>(sd::transport::ConnectionState::Disconnected));
+}
+
+void MainWindow::OnUseDirectTransport()
+{
+    m_connectionConfig.kind = sd::transport::TransportKind::Direct;
+    ApplyTransportMenuChecks();
+    PersistConnectionSettings();
+}
+
+void MainWindow::OnUseNetworkTablesTransport()
+{
+    m_connectionConfig.kind = sd::transport::TransportKind::NetworkTables;
+    ApplyTransportMenuChecks();
+    PersistConnectionSettings();
+}
+
+void MainWindow::OnSetNtHost()
+{
+    bool ok = false;
+    const QString value = QInputDialog::getText(
+        this,
+        "NetworkTables Host",
+        "Enter NT host/IP:",
+        QLineEdit::Normal,
+        m_connectionConfig.ntHost,
+        &ok
+    );
+
+    if (!ok || value.trimmed().isEmpty())
+    {
+        return;
+    }
+
+    m_connectionConfig.ntHost = value.trimmed();
+    PersistConnectionSettings();
+}
+
+void MainWindow::OnSetNtTeam()
+{
+    bool ok = false;
+    const int team = QInputDialog::getInt(
+        this,
+        "NetworkTables Team",
+        "Enter team number:",
+        m_connectionConfig.ntTeam,
+        0,
+        99999,
+        1,
+        &ok
+    );
+
+    if (!ok)
+    {
+        return;
+    }
+
+    m_connectionConfig.ntTeam = team;
+    PersistConnectionSettings();
+}
+
+void MainWindow::OnToggleNtUseTeam()
+{
+    m_connectionConfig.ntUseTeam = m_ntUseTeamAction != nullptr && m_ntUseTeamAction->isChecked();
+    PersistConnectionSettings();
+}
+
+void MainWindow::ApplyTransportMenuChecks()
+{
+    if (m_useDirectTransportAction != nullptr)
+    {
+        m_useDirectTransportAction->setChecked(m_connectionConfig.kind == sd::transport::TransportKind::Direct);
+    }
+
+    if (m_useNetworkTablesTransportAction != nullptr)
+    {
+        m_useNetworkTablesTransportAction->setChecked(m_connectionConfig.kind == sd::transport::TransportKind::NetworkTables);
+    }
+
+    if (m_ntUseTeamAction != nullptr)
+    {
+        m_ntUseTeamAction->setChecked(m_connectionConfig.ntUseTeam);
+    }
+}
+
+void MainWindow::PersistConnectionSettings() const
+{
+    QSettings settings("SmartDashboard", "SmartDashboardApp");
+    settings.setValue("connection/transportKind", static_cast<int>(m_connectionConfig.kind));
+    settings.setValue("connection/ntHost", m_connectionConfig.ntHost);
+    settings.setValue("connection/ntTeam", m_connectionConfig.ntTeam);
+    settings.setValue("connection/ntUseTeam", m_connectionConfig.ntUseTeam);
+    settings.setValue("connection/ntClientName", m_connectionConfig.ntClientName);
+}
+
+void MainWindow::StartTransport()
+{
+    StopTransport();
+
+    m_transport = sd::transport::CreateDashboardTransport(m_connectionConfig);
+    if (!m_transport)
+    {
+        UpdateWindowConnectionText(static_cast<int>(sd::transport::ConnectionState::Disconnected));
+        return;
+    }
+
+    const bool started = m_transport->Start(
+        [this](const sd::transport::VariableUpdate& update)
+        {
+            QMetaObject::invokeMethod(this, [this, update]()
+            {
+                OnVariableUpdateReceived(update.key, update.valueType, update.value, static_cast<quint64>(update.seq));
+            }, Qt::QueuedConnection);
+        },
+        [this](sd::transport::ConnectionState state)
+        {
+            QMetaObject::invokeMethod(this, [this, state]()
+            {
+                OnConnectionStateChanged(static_cast<int>(state));
+            }, Qt::QueuedConnection);
+        }
+    );
+
+    if (!started)
+    {
+        m_transport.reset();
+        UpdateWindowConnectionText(static_cast<int>(sd::transport::ConnectionState::Disconnected));
+    }
+}
+
+void MainWindow::StopTransport()
+{
+    if (m_transport)
+    {
+        m_transport->Stop();
+        m_transport.reset();
+    }
 }

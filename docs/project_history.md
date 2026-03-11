@@ -5,6 +5,37 @@ Curated milestone history for this repository.
 - Edit this file for durable project milestones and outcomes.
 - Keep lean handoff context in `Agent_Session_Notes.md`.
 
+## 2026-03-10 - Transport abstraction, parity contracts, and legacy NT2 integration
+
+- Added transport-parity contract coverage for direct adapter semantics in:
+  - `ClientInterface_direct/tests/transport_parity_contract_tests.cpp`
+  - telemetry roundtrip (`bool`/`double`/`string`)
+  - command roundtrip (`bool`/`double`/`string`)
+  - retained reconnect replay behavior
+- Introduced transport-agnostic dashboard boundary:
+  - `SmartDashboard/src/transport/dashboard_transport.h`
+  - `SmartDashboard/src/transport/dashboard_transport.cpp`
+- Refactored main window to use adapter-driven transport control instead of direct-only Qt adapters.
+- Added Connection menu workflow in UI:
+  - `Connect` / `Disconnect`
+  - transport selection (`Direct`, `NetworkTables`)
+  - NT endpoint settings (team/host) persisted through `QSettings`
+- Removed superseded direct-only Qt transport wrappers:
+  - `direct_subscriber_adapter.*`
+  - `direct_publisher_adapter.*`
+- Integrated legacy NT2 compatibility path for simulator validation by optionally building a local static library from:
+  - `D:/code/Robot_Simulation/Source/Libraries/SmartDashboard`
+- Added CMake controls for legacy NT2 build wiring:
+  - `SMARTDASHBOARD_ENABLE_LEGACY_NT2`
+  - `SMARTDASHBOARD_LEGACY_NT2_DIR`
+  - compile-time switch `SD_HAS_LEGACY_NT2`
+- Preserved fallback behavior: if legacy NT2 sources are unavailable, NetworkTables UI selection remains but uses disconnected stub adapter.
+- Updated docs and planning artifacts to align with the new iteration state and interoperability direction:
+  - `design/SmartDashboard_Design.md`
+  - `docs/testing.md`
+  - `README.md`
+  - `Agent_Session_Notes.md`
+
 ## 2026-03-10 - Legacy XML import parity and widget property refinements
 
 - Added File menu action `Import Legacy XML...` to load legacy SmartDashboard `.xml` layouts directly into the current dashboard session.

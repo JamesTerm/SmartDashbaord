@@ -2,7 +2,7 @@
 
 #include "layout/layout_serializer.h"
 #include "model/variable_store.h"
-#include "transport/direct_subscriber_adapter.h"
+#include "transport/dashboard_transport.h"
 #include "widgets/variable_tile.h"
 
 #include <QMainWindow>
@@ -11,6 +11,7 @@
 #include <string>
 
 #include <cstdint>
+#include <memory>
 #include <unordered_map>
 
 class QAction;
@@ -18,6 +19,7 @@ class QCloseEvent;
 class QEvent;
 class QLabel;
 class QWidget;
+class QMenu;
 
 class MainWindow final : public QMainWindow
 {
@@ -45,6 +47,13 @@ private slots:
     void OnControlBoolEdited(const QString& key, bool value);
     void OnControlDoubleEdited(const QString& key, double value);
     void OnControlStringEdited(const QString& key, const QString& value);
+    void OnConnectTransport();
+    void OnDisconnectTransport();
+    void OnUseDirectTransport();
+    void OnUseNetworkTablesTransport();
+    void OnSetNtHost();
+    void OnSetNtTeam();
+    void OnToggleNtUseTeam();
 
 private:
     using TileMap = std::unordered_map<std::string, sd::widgets::VariableTile*>;
@@ -66,6 +75,10 @@ private:
     QString GetLayoutTitleSegment() const;
     void RefreshWindowTitle();
     void MarkLayoutDirty();
+    void ApplyTransportMenuChecks();
+    void PersistConnectionSettings() const;
+    void StartTransport();
+    void StopTransport();
 
     QWidget* m_canvas = nullptr;
     QLabel* m_statusLabel = nullptr;
@@ -74,18 +87,23 @@ private:
     QAction* m_moveModeAction = nullptr;
     QAction* m_resizeModeAction = nullptr;
     QAction* m_moveResizeModeAction = nullptr;
+    QAction* m_connectTransportAction = nullptr;
+    QAction* m_disconnectTransportAction = nullptr;
+    QAction* m_useDirectTransportAction = nullptr;
+    QAction* m_useNetworkTablesTransportAction = nullptr;
+    QAction* m_ntUseTeamAction = nullptr;
     bool m_isEditable = false;
     bool m_snapToGrid = true;
     sd::widgets::EditInteractionMode m_editInteractionMode = sd::widgets::EditInteractionMode::MoveAndResize;
     int m_nextTileOffset = 0;
     std::uint64_t m_lastTransportSeq = 0;
-    int m_connectionState = static_cast<int>(sd::direct::ConnectionState::Disconnected);
+    int m_connectionState = static_cast<int>(sd::transport::ConnectionState::Disconnected);
     bool m_layoutDirty = false;
     bool m_suppressLayoutDirty = false;
     QString m_layoutFilePath;
     TileMap m_tiles;
     LayoutMap m_savedLayoutByKey;
     sd::model::VariableStore m_variableStore;
-    DirectSubscriberAdapter m_subscriberAdapter;
-    class DirectPublisherAdapter* m_commandPublisher = nullptr;
+    sd::transport::ConnectionConfig m_connectionConfig;
+    std::unique_ptr<sd::transport::IDashboardTransport> m_transport;
 };

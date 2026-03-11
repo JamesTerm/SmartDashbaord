@@ -17,6 +17,17 @@ These tests validate core behaviors such as:
 - deterministic latest-value semantics
 - SmartDashboard client facade (`TryGet*`, `Get*(default)`, callback subscriptions)
 - command channel receive paths for bool/double/string
+- transport parity contract baseline for direct adapter behavior
+
+Additional contract test file:
+
+- `ClientInterface_direct/tests/transport_parity_contract_tests.cpp`
+
+Current parity coverage:
+
+- direct telemetry roundtrip (`bool`/`double`/`string`)
+- direct command roundtrip (`bool`/`double`/`string`)
+- direct reconnect replay from retained store
 
 ### Build and run
 
@@ -76,6 +87,30 @@ Use these checks when validating end-to-end UX behavior.
    - `Change to...` -> `Checkbox control`
    - toggle checkbox
 4. Expect sample success message.
+
+### Legacy NT2 simulator check (Robot_Simulation)
+
+Use this check when validating NetworkTables transport against the cloned legacy simulator stack.
+
+Prerequisites:
+
+- `SMARTDASHBOARD_ENABLE_LEGACY_NT2=ON` at CMake configure time (default ON)
+- legacy source root available at:
+  - `D:/code/Robot_Simulation/Source/Libraries/SmartDashboard`
+
+Suggested loop:
+
+1. Start your robot simulation in server mode (the same mode that works with official legacy SmartDashboard).
+2. Start dashboard:
+   - `build/SmartDashboard/Debug/SmartDashboardApp.exe`
+3. In dashboard menu:
+   - `Connection` -> `Use NetworkTables transport`
+   - set team/host values as needed
+   - `Connection` -> `Connect`
+4. Verify:
+   - status transitions to `Connected` when simulator is reachable
+   - bool/double/string values appear/update from simulator keys
+   - writable controls publish updates back to simulator when edited
 
 ## Validation expectations
 

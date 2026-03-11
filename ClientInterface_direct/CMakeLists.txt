@@ -59,6 +59,7 @@ if(BUILD_TESTING)
     add_executable(ClientInterface_direct_tests
         tests/direct_publisher_tests.cpp
         tests/smartdashboard_client_tests.cpp
+        tests/transport_parity_contract_tests.cpp
     )
 
     target_link_libraries(ClientInterface_direct_tests

@@ -9,7 +9,7 @@ Build a focused C++ dashboard inspired by WPILib SmartDashboard, but intentional
 - Render live variables of `bool`, `double`, and `string`
 - Let users choose/change widget type per variable
 - Let users move/arrange widgets and save/load layout
-- Use a direct transport layer (not NetworkTables)
+- Use direct transport as the baseline and preserve a clean adapter boundary for optional NetworkTables support
 
 This document defines scope, architecture, first-iteration boundaries, and implementation-ready decisions.
 
@@ -33,7 +33,7 @@ This document defines scope, architecture, first-iteration boundaries, and imple
 - Command/subsystem integrations from WPILib
 - LiveWindow/test mode parity
 - Send-to-robot controls/buttons (can be added later)
-- NetworkTables protocol support
+- Full NetworkTables feature parity (protocol details, tools integration, and long-tail topic/property options)
 
 ## Project Structure (Solution)
 
@@ -482,39 +482,42 @@ namespace sd::direct::wire
 }
 ```
 
-### SmartDashboard Adapter Sketch (`SmartDashboard/src/transport/direct_subscriber_adapter.h`)
+### SmartDashboard Adapter Sketch (`SmartDashboard/src/transport/dashboard_transport.h`)
 
 ```cpp
 #pragma once
 
-#include "sd_direct_subscriber.h"
-
-#include <QObject>
-
-class DirectSubscriberAdapter final : public QObject
+namespace sd::transport
 {
-    Q_OBJECT
+    enum class TransportKind { Direct, NetworkTables };
+    enum class ConnectionState { Disconnected, Connecting, Connected, Stale };
 
-public:
-    explicit DirectSubscriberAdapter(QObject* parent = nullptr);
-    ~DirectSubscriberAdapter() override;
+    struct ConnectionConfig
+    {
+        TransportKind kind = TransportKind::Direct;
+        QString ntHost = "127.0.0.1";
+        int ntTeam = 0;
+        bool ntUseTeam = true;
+    };
 
-    bool Start();
-    void Stop();
-
-signals:
-    void VariableUpdateReceived(const QString& key, int valueType, const QVariant& value, quint64 seq);
-    void ConnectionStateChanged(int state);
-
-private:
-    std::unique_ptr<sd::direct::IDirectSubscriber> m_subscriber;
-};
+    class IDashboardTransport
+    {
+    public:
+        virtual ~IDashboardTransport() = default;
+        virtual bool Start(VariableUpdateCallback, ConnectionStateCallback) = 0;
+        virtual void Stop() = 0;
+        virtual bool PublishBool(const QString& key, bool value) = 0;
+        virtual bool PublishDouble(const QString& key, double value) = 0;
+        virtual bool PublishString(const QString& key, const QString& value) = 0;
+    };
+}
 ```
 
 Implementation note:
 
-- `DirectSubscriberAdapter` is the only Qt-aware transport layer class.
-- All `*_direct` core headers and source remain Qt-free.
+- `dashboard_transport` is the Qt-facing transport boundary used by `MainWindow`.
+- Direct transport implementation remains Qt-free in `*_direct` and is wrapped behind the adapter interface.
+- NT transport can be added without changing widget/model flow.
 
 ## Threading Model
 
@@ -538,7 +541,7 @@ States:
 
 ## Iteration Plan
 
-## Iteration 1 (this upcoming implementation session)
+## Iteration 1 (implemented)
 
 Goal: receiving end with usable UI for `bool/double/string`.
 
@@ -559,29 +562,37 @@ Non-goals for iteration 1:
 - Advanced plotting features
 - Bidirectional command controls
 
-## Iteration 2
+## Iteration 2 (implemented)
 
 - Robust property editing dialog + per-widget schemas
 - Better layout ergonomics (snap/grid, align)
 - History buffer tuning for plots
 - Improved transport diagnostics and error handling
-- Begin bidirectional command channel (dashboard -> app) for editable widgets
+- Bidirectional command channel (dashboard -> app) for editable widgets
 
-## Iteration 3
+## Iteration 3 (next focus)
 
-- Optional alternate transport(s)
+- Optional alternate transport(s), starting with classic NetworkTables TCP/IP client mode
 - Plugin-like widget extension points
 - Import/export profiles and richer preferences
-- Full bidirectional parity for user-editable controls
+- Transport-parity tests (direct + NetworkTables adapters should pass the same retained/command semantics where applicable)
+- Connection UX: explicit transport selection + manual connect/disconnect flow
 
-## Future Bidirectional Support (Dashboard -> Application)
+### Iteration 3 Definition of Done (NetworkTables transport slice)
 
-Adding bidirectional support later is moderate effort, not a rewrite, because v1 already separates transport from UI and uses framed messages.
+- `Transport` selector exists in UI and supports `Direct` and `NetworkTables`
+- NT mode supports explicit endpoint config (team number and/or host/IP) with connect/disconnect actions
+- Dashboard connection state indicator correctly reflects NT lifecycle (`Disconnected`, `Connecting`, `Connected`, `Stale`)
+- Existing widget/layout behavior remains unchanged when switching transports
+- Automated parity tests pass for direct adapter baseline and NT adapter telemetry/command roundtrip (bool/double/string)
+- Automated reconnect test passes for NT adapter and verifies latest-value replay after reconnect
+- Localhost simulation test path is documented and runnable in CI/dev workflow
+- Design and testing docs are updated with commands and expected outcomes for NT validation
 
-Expected effort after v1 is stable:
+## Bidirectional Support Status (Dashboard -> Application)
 
-- Basic writable controls (checkbox, numeric text submit): about 2-4 focused days
-- Polished UX (validation/errors/ack indicators/retry): about 1-2 additional weeks
+Bidirectional support is implemented in direct transport mode for bool/double/string writable controls.
+The architecture still keeps this behavior adapter-driven so alternate transports can implement equivalent command flow.
 
 ### Design approach
 
@@ -614,7 +625,87 @@ Each channel can be its own ring buffer + event pair, or one mapping with two ri
 - Make requests idempotent where possible
 - Time out unacked requests and surface state to user
 
-Because v1 already has transport abstraction and message framing, this extension is additive and low-risk to existing receive path.
+Because v1 already has transport abstraction and message framing, this extension remained additive and low-risk to the existing receive path.
+
+## NetworkTables Adapter Direction (next)
+
+The next transport milestone is a classic NT TCP/IP adapter while keeping the current direct path intact.
+
+Key alignment points:
+
+- Robot program is expected to run the NT server role in normal FRC operation.
+- Dashboard runs as an NT client and connects to robot host/team-address (or explicit host override).
+- NT server retains cached topic values and replays latest values to late-joining subscribers.
+- Dashboard-side retained cache remains useful for adapter parity and reconnect UX, but server-retained values remain source-of-truth for NT sessions.
+
+Initial implementation slice:
+
+1. Add a transport adapter contract test suite that can run against each adapter implementation.
+2. Implement an NT-backed subscriber/publisher adapter pair behind the existing dashboard/model boundaries.
+3. Add explicit connect/disconnect UX (manual connect button + endpoint/team settings).
+4. Validate with localhost simulation using a real NT server/client pair in automated tests and manual dashboard loop.
+
+## Connection UX Direction (for transport switching)
+
+To keep interfaces clean while enabling transport growth, the UI should treat connection setup as adapter selection + endpoint settings.
+
+Recommended v1 of this UX:
+
+- Transport selector: `Direct (local IPC)` | `NetworkTables (NT4 TCP/IP)`
+- NT connection fields: Team Number and/or Host/IP, optional Client Name
+- Explicit action buttons: Connect, Disconnect
+- Status display remains adapter-agnostic (`Disconnected`, `Connecting`, `Connected`, `Stale`)
+- Widget/layout behavior is unchanged when transport changes; only backend adapter wiring changes
+
+Architecture rule:
+
+- UI binds to one transport-agnostic controller interface; transport-specific logic remains in adapter implementations
+- No widget code branches by transport type
+
+Validation baseline for this slice:
+
+- automated: localhost server/client roundtrip tests for bool/double/string telemetry and command writes
+- automated: reconnect test verifying latest value replay after client reconnect
+- manual: simulator + dashboard end-to-end check using known robot/sim keys
+
+Current implementation note:
+
+- A legacy NT2 compatibility adapter path is now integrated for simulator validation using sources under `D:/code/Robot_Simulation/Source/Libraries/SmartDashboard` when available at build time.
+- Build-time control:
+  - `SMARTDASHBOARD_ENABLE_LEGACY_NT2` (default ON)
+  - `SMARTDASHBOARD_LEGACY_NT2_DIR` (defaults to Robot_Simulation clone path)
+- If the legacy source path is unavailable, the NetworkTables selection remains available in UI but uses a disconnected stub adapter.
+
+## NetworkTables Source References
+
+Primary upstream source and protocol references for NT integration work:
+
+- `https://github.com/wpilibsuite/allwpilib/tree/main/ntcore`
+- `https://raw.githubusercontent.com/wpilibsuite/allwpilib/main/ntcore/src/main/native/include/networktables/NetworkTableInstance.h`
+- `https://raw.githubusercontent.com/wpilibsuite/allwpilib/main/ntcore/src/main/native/include/ntcore_cpp.h`
+- `https://github.com/wpilibsuite/allwpilib/blob/main/ntcore/doc/networktables4.adoc`
+- `https://docs.wpilib.org/en/stable/docs/software/networktables/networktables-networking.html`
+
+Historical/auxiliary references:
+
+- `https://github.com/wpilibsuite/ntcore` (archived, merged into allwpilib)
+- `https://github.com/wpilibsuite/NetworkTablesClients` (language-native client experiments, currently minimal)
+
+## Long-Term Interoperability Direction
+
+End goal is compatibility with modern WPILib dashboard ecosystems while preserving SmartDashboard UX flexibility.
+
+Interoperability principles:
+
+- Treat NetworkTables topic model and data types as the shared contract for cross-dashboard compatibility
+- Keep key naming conventions stable and path-like (example: `Drive/Speed`)
+- Keep transport adapters thin; avoid embedding dashboard-specific assumptions into transport
+- Preserve support for multiple simultaneous clients connected to the robot NT server
+
+Implication for future iterations:
+
+- As NT adapter matures, this dashboard can coexist with tools like Shuffleboard by reading/writing the same robot-hosted NT topics
+- Direct transport remains valuable for local teaching, isolated simulation, and controlled integration tests
 
 ## Proposed Initial Folder Layout
 

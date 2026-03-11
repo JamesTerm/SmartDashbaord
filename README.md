@@ -6,7 +6,7 @@ Lightweight C++ dashboard for FRC, inspired by WPILib SmartDashboard.
 
 - Built as a community-friendly path forward as legacy SmartDashboard approaches end-of-life (2027).
 - Focused scope: fast live values (`bool`, `double`, `string`), editable widgets, and saved layouts.
-- Uses a direct local transport layer (`*_direct`) instead of NetworkTables for v1.
+- Uses direct local transport as the current production path, with a transport-selection UI scaffold for upcoming NetworkTables support.
 
 ## Architecture Overview
 
@@ -32,8 +32,9 @@ Qt UI Rendering (tiles/widgets)
 ```
 
 Notes:
-- The current prototype intentionally avoids NetworkTables to reduce distributed-state coupling.
-- A NetworkTables ingestion adapter could be added later without changing the UI model layer.
+- The dashboard now routes telemetry/commands through a transport-agnostic interface in the UI layer.
+- Direct transport is implemented and fully test-backed.
+- NetworkTables transport now supports legacy NT2 simulator integration when legacy sources are present at build time; otherwise it falls back to a disconnected stub.
 
 Future consideration (not implemented yet):
 - introduce a decoupled telemetry event bus between ingestion and UI rendering
