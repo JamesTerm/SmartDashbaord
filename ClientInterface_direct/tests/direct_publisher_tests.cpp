@@ -222,9 +222,11 @@ namespace sd::direct
         const double defaultAmplitudeMin = -1.0;
         const double defaultAmplitudeMax = 1.0;
         const double defaultSweepSeconds = 3.0;
+        const double defaultSampleRateMs = 16.0;
         double configuredAmplitudeMin = defaultAmplitudeMin;
         double configuredAmplitudeMax = defaultAmplitudeMax;
         double configuredSweepSeconds = defaultSweepSeconds;
+        double configuredSampleRateMs = defaultSampleRateMs;
         std::mutex configMutex;
 
         // Give subscriber cache a moment to receive any existing config values.
@@ -233,7 +235,8 @@ namespace sd::direct
             double ignored = 0.0;
             return dashboard.TryGetDouble("Test/DoubleSine/Config/AmplitudeMin", ignored)
                 || dashboard.TryGetDouble("Test/DoubleSine/Config/AmplitudeMax", ignored)
-                || dashboard.TryGetDouble("Test/DoubleSine/Config/SweepSeconds", ignored);
+                || dashboard.TryGetDouble("Test/DoubleSine/Config/SweepSeconds", ignored)
+                || dashboard.TryGetDouble("Test/DoubleSine/Config/SampleRateMs", ignored);
         }, 150ms);
 
         auto readOrSeedDouble = [&dashboard](std::string_view key, double defaultValue, bool& seededDefault)
@@ -254,9 +257,11 @@ namespace sd::direct
         bool seededAmplitudeMin = false;
         bool seededAmplitudeMax = false;
         bool seededSweepSeconds = false;
+        bool seededSampleRateMs = false;
         configuredAmplitudeMin = readOrSeedDouble("Test/DoubleSine/Config/AmplitudeMin", defaultAmplitudeMin, seededAmplitudeMin);
         configuredAmplitudeMax = readOrSeedDouble("Test/DoubleSine/Config/AmplitudeMax", defaultAmplitudeMax, seededAmplitudeMax);
         configuredSweepSeconds = readOrSeedDouble("Test/DoubleSine/Config/SweepSeconds", defaultSweepSeconds, seededSweepSeconds);
+        configuredSampleRateMs = readOrSeedDouble("Test/DoubleSine/Config/SampleRateMs", defaultSampleRateMs, seededSampleRateMs);
 
         auto minCommandToken = dashboard.SubscribeDoubleCommand("Test/DoubleSine/Config/AmplitudeMin", [&configMutex, &configuredAmplitudeMin](double value)
         {
@@ -273,9 +278,15 @@ namespace sd::direct
             std::lock_guard<std::mutex> lock(configMutex);
             configuredSweepSeconds = value;
         });
+        auto sampleRateCommandToken = dashboard.SubscribeDoubleCommand("Test/DoubleSine/Config/SampleRateMs", [&configMutex, &configuredSampleRateMs](double value)
+        {
+            std::lock_guard<std::mutex> lock(configMutex);
+            configuredSampleRateMs = value;
+        });
         ASSERT_TRUE(static_cast<bool>(minCommandToken));
         ASSERT_TRUE(static_cast<bool>(maxCommandToken));
         ASSERT_TRUE(static_cast<bool>(sweepCommandToken));
+        ASSERT_TRUE(static_cast<bool>(sampleRateCommandToken));
 
         if (seededAmplitudeMin)
         {
@@ -289,17 +300,21 @@ namespace sd::direct
         {
             EXPECT_DOUBLE_EQ(configuredSweepSeconds, defaultSweepSeconds);
         }
+        if (seededSampleRateMs)
+        {
+            EXPECT_DOUBLE_EQ(configuredSampleRateMs, defaultSampleRateMs);
+        }
 
         // Always publish config values at test start so a fresh dashboard session
-        // sees all three config keys and can auto-create their widgets.
+        // sees all config keys and can auto-create their widgets.
         publisher->PublishDouble("Test/DoubleSine/Config/AmplitudeMin", configuredAmplitudeMin);
         publisher->PublishDouble("Test/DoubleSine/Config/AmplitudeMax", configuredAmplitudeMax);
         publisher->PublishDouble("Test/DoubleSine/Config/SweepSeconds", configuredSweepSeconds);
+        publisher->PublishDouble("Test/DoubleSine/Config/SampleRateMs", configuredSampleRateMs);
         publisher->FlushNow();
 
         const auto runStart = std::chrono::steady_clock::now();
         const auto maxCapDuration = 30s;
-        const auto step = 20ms;
         while (true)
         {
             const auto now = std::chrono::steady_clock::now();
@@ -308,11 +323,13 @@ namespace sd::direct
             double minValue = 0.0;
             double maxValue = 0.0;
             double sweepSeconds = 0.0;
+            double sampleRateMs = 0.0;
             {
                 std::lock_guard<std::mutex> lock(configMutex);
                 minValue = configuredAmplitudeMin;
                 maxValue = configuredAmplitudeMax;
                 sweepSeconds = std::max(0.5, configuredSweepSeconds);
+                sampleRateMs = std::clamp(configuredSampleRateMs, 1.0, 1000.0);
             }
 
             const auto targetDuration = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -324,6 +341,7 @@ namespace sd::direct
             publisher->PublishDouble("Test/DoubleSine/Config/AmplitudeMin", minValue);
             publisher->PublishDouble("Test/DoubleSine/Config/AmplitudeMax", maxValue);
             publisher->PublishDouble("Test/DoubleSine/Config/SweepSeconds", sweepSeconds);
+            publisher->PublishDouble("Test/DoubleSine/Config/SampleRateMs", sampleRateMs);
 
             // Sweep phase from -pi to +pi over current configured duration, then map to configured amplitude range.
             const double progress = std::clamp(
@@ -344,7 +362,7 @@ namespace sd::direct
                 break;
             }
 
-            std::this_thread::sleep_for(step);
+            std::this_thread::sleep_for(std::chrono::milliseconds(static_cast<int>(std::lround(sampleRateMs))));
         }
 
         ASSERT_TRUE(WaitUntil(

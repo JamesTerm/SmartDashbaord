@@ -5,6 +5,23 @@ Curated milestone history for this repository.
 - Edit this file for durable project milestones and outcomes.
 - Keep lean handoff context in `Agent_Session_Notes.md`.
 
+## 2026-03-11 - Line-plot smoothing, direct stream cadence tuning, and direct-label compaction
+
+- Improved line-plot smooth-scrolling behavior in `SmartDashboard/src/widgets/line_plot_widget.cpp`:
+  - decoupled sample ingest from paint cadence by switching to timer-driven repaint (~16 ms) instead of repaint-on-every-sample
+  - replaced jitter-sensitive x-window (`oldest..newest`) with a fixed-width viewport derived from `bufferSize * EMA(samplePeriod)`
+  - stabilized x-axis tick spacing (including number-lines mode) using nice-step quantization to avoid frame-to-frame label breathing
+- Extended line-plot test coverage in `SmartDashboard/tests/line_plot_widget_tests.cpp` and wired it into `SmartDashboard_tests` target in `SmartDashboard/CMakeLists.txt`.
+- Hardened Qt widget test bootstrapping in `SmartDashboard/tests/variable_tile_tests.cpp` by reusing a single `QApplication` instance for multi-test runs.
+- Added live publish-cadence tuning to direct stream test `DirectPublisherTests.StreamsSineWaveDouble`:
+  - new key `Test/DoubleSine/Config/SampleRateMs` (default `16.0`)
+  - updates are command-subscribed and applied on the active run
+  - loop delay now uses configured sample rate instead of a hardcoded sleep step
+- Added direct-mode UI label compaction in `SmartDashboard/src/app/main_window.cpp`:
+  - tile title text shows the final key segment only when transport is Direct (for example `Test/DoubleSine/Config/SampleRateMs` renders as `SampleRateMs`)
+  - full variable keys remain unchanged for publish/subscribe, command routing, and layout persistence identity.
+- Updated manual testing notes in `docs/testing.md` to include the new `SampleRateMs` tuning key.
+
 ## 2026-03-10 - Transport abstraction, parity contracts, and legacy NT2 integration
 
 - Added transport-parity contract coverage for direct adapter semantics in:

@@ -76,6 +76,11 @@ Use these checks when validating end-to-end UX behavior.
 3. Verify in dashboard:
    - state changes to `Connected`
    - tile updates continuously
+4. Optional tuning keys exposed by the stream test:
+   - `Test/DoubleSine/Config/SweepSeconds`
+   - `Test/DoubleSine/Config/AmplitudeMin`
+   - `Test/DoubleSine/Config/AmplitudeMax`
+   - `Test/DoubleSine/Config/SampleRateMs` (loop delay in milliseconds; lower = higher sample rate)
 
 ### Command roundtrip check
 

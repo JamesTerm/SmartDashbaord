@@ -1,9 +1,11 @@
 #pragma once
 
 #include <QWidget>
+#include <QTimer>
 
 #include <chrono>
 #include <deque>
+#include <utility>
 
 class QPaintEvent;
 
@@ -21,6 +23,9 @@ namespace sd::widgets
         void SetYAxisLimits(double lowerLimit, double upperLimit);
         void SetShowNumberLines(bool enabled);
         void SetShowGridLines(bool enabled);
+        int GetSampleCountForTesting() const;
+        double GetEstimatedSamplePeriodSecondsForTesting() const;
+        std::pair<double, double> GetXRangeForTesting() const;
 
     protected:
         void paintEvent(QPaintEvent* event) override;
@@ -49,13 +54,17 @@ namespace sd::widgets
         YExtents ComputeRecentYExtents() const;
 
         std::deque<SamplePoint> m_samples;
+        QTimer m_renderTimer;
         std::chrono::steady_clock::time_point m_startTime;
+        std::chrono::steady_clock::time_point m_lastSampleTime;
         bool m_hasStarted = false;
+        bool m_hasLastSampleTime = false;
         int m_bufferSizeSamples = 5000;
         bool m_autoYAxis = true;
         bool m_showNumberLines = false;
         bool m_showGridLines = false;
         double m_manualYLowerLimit = 0.0;
         double m_manualYUpperLimit = 1.0;
+        double m_estimatedSamplePeriodSeconds = 0.02;
     };
 }

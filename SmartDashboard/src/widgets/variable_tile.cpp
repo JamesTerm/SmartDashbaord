@@ -549,6 +549,16 @@ namespace sd::widgets
         UpdateValueDisplay();
     }
 
+    void VariableTile::SetTitleText(const QString& title)
+    {
+        if (m_titleLabel == nullptr)
+        {
+            return;
+        }
+
+        m_titleLabel->setText(title);
+    }
+
     void VariableTile::mousePressEvent(QMouseEvent* event)
     {
         if (m_editable && event->button() == Qt::LeftButton)

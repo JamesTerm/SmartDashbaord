@@ -72,6 +72,7 @@ namespace sd::widgets
         double GetDoubleValue() const;
         QString GetStringValue() const;
         void SetWidgetType(const QString& widgetType);
+        void SetTitleText(const QString& title);
 
     signals:
         void ChangeWidgetRequested(const QString& key, const QString& widgetType);

@@ -17,6 +17,14 @@ namespace sd::widgets
     {
         setMinimumHeight(80);
         setAutoFillBackground(true);
+
+        // Render-cadence decoupling: draw at a steady rate so axis updates do not
+        // inherit transport jitter from irregular sample arrival times.
+        m_renderTimer.setInterval(16);
+        connect(&m_renderTimer, &QTimer::timeout, this, [this]()
+        {
+            update();
+        });
     }
 
     void LinePlotWidget::AddSample(double value)
@@ -26,23 +34,42 @@ namespace sd::widgets
         {
             m_startTime = now;
             m_hasStarted = true;
+            m_lastSampleTime = now;
+            m_hasLastSampleTime = true;
+        }
+        else if (m_hasLastSampleTime)
+        {
+            const std::chrono::duration<double> delta = now - m_lastSampleTime;
+            const double deltaSeconds = std::clamp(delta.count(), 0.001, 1.0);
+            // Exponential moving average: smooth sample-period estimate used to
+            // derive a stable visible time window from sample-count buffer size.
+            m_estimatedSamplePeriodSeconds =
+                (0.1 * deltaSeconds) + (0.9 * m_estimatedSamplePeriodSeconds);
+            m_lastSampleTime = now;
         }
 
         const std::chrono::duration<double> elapsed = now - m_startTime;
         m_samples.push_back(SamplePoint{ elapsed.count(), value });
+
+        if (!m_renderTimer.isActive())
+        {
+            m_renderTimer.start();
+        }
 
         while (static_cast<int>(m_samples.size()) > m_bufferSizeSamples)
         {
             m_samples.pop_front();
         }
 
-        update();
     }
 
     void LinePlotWidget::ResetGraph()
     {
         m_samples.clear();
         m_hasStarted = false;
+        m_hasLastSampleTime = false;
+        m_estimatedSamplePeriodSeconds = 0.02;
+        m_renderTimer.stop();
         update();
     }
 
@@ -90,6 +117,22 @@ namespace sd::widgets
     {
         m_showGridLines = enabled;
         update();
+    }
+
+    int LinePlotWidget::GetSampleCountForTesting() const
+    {
+        return static_cast<int>(m_samples.size());
+    }
+
+    double LinePlotWidget::GetEstimatedSamplePeriodSecondsForTesting() const
+    {
+        return m_estimatedSamplePeriodSeconds;
+    }
+
+    std::pair<double, double> LinePlotWidget::GetXRangeForTesting() const
+    {
+        const AxisRange range = ComputeXRange();
+        return { range.min, range.max };
     }
 
     void LinePlotWidget::paintEvent(QPaintEvent* event)
@@ -174,9 +217,7 @@ namespace sd::widgets
         double xTickInterval;
         if (m_showNumberLines)
         {
-            // Use pixel-driven spacing to determine tick interval
-            const int targetInteriorTicks = std::max(4, drawRect.width() / 80);
-            xTickInterval = xSpan / static_cast<double>(targetInteriorTicks + 1);
+            xTickInterval = chooseTickStep(xSpan, std::max(4, drawRect.width() / 80));
         }
         else
         {
@@ -350,15 +391,16 @@ namespace sd::widgets
             return AxisRange{ 0.0, 1.0 };
         }
 
-        const double headTime = m_samples.back().xSeconds;
-        if (m_samples.size() < static_cast<size_t>(m_bufferSizeSamples))
-        {
-            return AxisRange{ 0.0, std::max(1.0, headTime) };
-        }
+        const double latestSampleTime = m_samples.back().xSeconds;
+        const double samplePeriod = std::clamp(m_estimatedSamplePeriodSeconds, 0.001, 1.0);
+        const double targetWindow = std::max(1.0, samplePeriod * static_cast<double>(m_bufferSizeSamples));
 
-        const double tailTime = m_samples.front().xSeconds;
-        const double end = std::max(headTime, tailTime + 0.001);
-        return AxisRange{ tailTime, end };
+        // Smooth-scroll strategy: lock viewport to a fixed time width and anchor
+        // to the newest sample time. This avoids frame-to-frame span breathing
+        // when sample arrival has small timing jitter.
+        const double end = std::max(targetWindow, latestSampleTime);
+        const double start = end - targetWindow;
+        return AxisRange{ start, std::max(end, start + 0.001) };
     }
 
     LinePlotWidget::AxisRange LinePlotWidget::ComputeYRange() const

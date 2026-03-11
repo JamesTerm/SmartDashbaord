@@ -19,6 +19,7 @@
 #include <QMetaObject>
 #include <QPalette>
 #include <QSettings>
+#include <QStringList>
 #include <QStatusBar>
 #include <QVariant>
 #include <QWidget>
@@ -526,6 +527,7 @@ sd::widgets::VariableTile* MainWindow::GetOrCreateTile(const QString& key, sd::w
     }
 
     auto* tile = new sd::widgets::VariableTile(key, type, m_canvas);
+    tile->SetTitleText(BuildDisplayLabel(key));
     connect(
         tile,
         &sd::widgets::VariableTile::ChangeWidgetRequested,
@@ -572,6 +574,22 @@ sd::widgets::VariableTile* MainWindow::GetOrCreateTile(const QString& key, sd::w
     }
 
     return tile;
+}
+
+QString MainWindow::BuildDisplayLabel(const QString& key) const
+{
+    if (m_connectionConfig.kind != sd::transport::TransportKind::Direct)
+    {
+        return key;
+    }
+
+    const QStringList segments = key.split('/', Qt::SkipEmptyParts);
+    if (segments.isEmpty())
+    {
+        return key;
+    }
+
+    return segments.back();
 }
 
 void MainWindow::UpdateWindowConnectionText(int state)
@@ -887,6 +905,13 @@ void MainWindow::OnDisconnectTransport()
 void MainWindow::OnUseDirectTransport()
 {
     m_connectionConfig.kind = sd::transport::TransportKind::Direct;
+    for (const auto& [_, tile] : m_tiles)
+    {
+        if (tile != nullptr)
+        {
+            tile->SetTitleText(BuildDisplayLabel(tile->GetKey()));
+        }
+    }
     ApplyTransportMenuChecks();
     PersistConnectionSettings();
 }
@@ -894,6 +919,13 @@ void MainWindow::OnUseDirectTransport()
 void MainWindow::OnUseNetworkTablesTransport()
 {
     m_connectionConfig.kind = sd::transport::TransportKind::NetworkTables;
+    for (const auto& [_, tile] : m_tiles)
+    {
+        if (tile != nullptr)
+        {
+            tile->SetTitleText(BuildDisplayLabel(tile->GetKey()));
+        }
+    }
     ApplyTransportMenuChecks();
     PersistConnectionSettings();
 }
@@ -1007,6 +1039,17 @@ void MainWindow::StartTransport()
             }, Qt::QueuedConnection);
         }
     );
+
+    if (started)
+    {
+        for (const auto& [_, tile] : m_tiles)
+        {
+            if (tile != nullptr)
+            {
+                tile->SetTitleText(BuildDisplayLabel(tile->GetKey()));
+            }
+        }
+    }
 
     if (!started)
     {

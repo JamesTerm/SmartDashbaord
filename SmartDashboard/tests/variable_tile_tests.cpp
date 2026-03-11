@@ -5,8 +5,24 @@
 
 #include <gtest/gtest.h>
 
+#include <memory>
+
 namespace
 {
+    QApplication* EnsureApp()
+    {
+        if (QApplication::instance() != nullptr)
+        {
+            return qobject_cast<QApplication*>(QApplication::instance());
+        }
+
+        static int argc = 1;
+        static char appName[] = "SmartDashboardTests";
+        static char* argv[] = { appName };
+        static std::unique_ptr<QApplication> app = std::make_unique<QApplication>(argc, argv);
+        return app.get();
+    }
+
     QProgressBar* FindProgressBar(sd::widgets::VariableTile& tile)
     {
         return tile.findChild<QProgressBar*>();
@@ -15,9 +31,7 @@ namespace
 
 TEST(VariableTileTests, ProgressBarZeroCentersBeforeWidgetIsShown)
 {
-    int argc = 0;
-    char** argv = nullptr;
-    QApplication app(argc, argv);
+    ASSERT_NE(EnsureApp(), nullptr);
 
     sd::widgets::VariableTile tile("test.progress", sd::widgets::VariableType::Double);
     tile.SetWidgetType("double.progress");

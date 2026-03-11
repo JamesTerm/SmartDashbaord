@@ -77,6 +77,7 @@ private:
     void MarkLayoutDirty();
     void ApplyTransportMenuChecks();
     void PersistConnectionSettings() const;
+    QString BuildDisplayLabel(const QString& key) const;
     void StartTransport();
     void StopTransport();
 
