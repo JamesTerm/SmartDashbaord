@@ -43,6 +43,15 @@
 - Added `SmartDashboard/tests/line_plot_widget_tests.cpp` stress-oriented regression coverage for varying buffer/rate scenarios; `SmartDashboard_tests` now includes both line-plot and variable-tile tests.
 - `DirectPublisherTests.StreamsSineWaveDouble` now exposes live-tunable `Test/DoubleSine/Config/SampleRateMs` (default 16 ms) so publish cadence can be adjusted without editing code.
 - Direct transport UI label compaction: tile title text now shows only the last key segment in Direct mode (for example `.../Config/SampleRateMs` -> `SampleRateMs`) while preserving full underlying keys for publish/subscribe and layout identity.
+- Telemetry recording/playback vertical slice is now implemented on branch `feature/playback-recording-replay`:
+  - recorder writes live Direct/NT bool/double/string events to `logs/session_<timestamp>.jsonl`
+  - replay transport can load session files and drive existing widget/model flow with play/pause/seek/speed
+  - timeline scrub/zoom/pan control exists in status bar and is wired to replay cursor
+- Telemetry UI controls were refined for operator workflow:
+  - menu toggle to enable/disable telemetry UI entirely (`Connection -> Enable telemetry recording/playback UI`)
+  - compact transport controls now use icon-style play/pause and record indicators
+  - record control is disabled/ghosted in replay transport
+  - replay label compaction now matches direct mode (shows last key segment only)
 
 ## Known constraints / active considerations
 

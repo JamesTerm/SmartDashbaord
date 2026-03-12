@@ -5,6 +5,31 @@ Curated milestone history for this repository.
 - Edit this file for durable project milestones and outcomes.
 - Keep lean handoff context in `Agent_Session_Notes.md`.
 
+## 2026-03-12 - Telemetry recording/replay slice and controls refinement
+
+- Added first telemetry recording/replay vertical slice on feature branch `feature/playback-recording-replay`.
+- Added replay transport path to dashboard transport contract (`Replay` kind + playback control APIs) so replay behaves as a transport source rather than UI-special-cased data.
+- Implemented session recorder in main window flow:
+  - live Direct/NetworkTables sessions can write newline-delimited JSON event logs under `logs/session_<timestamp>.jsonl`
+  - records bool/double/string updates and connection-state events
+  - uses a background writer thread to avoid blocking UI update paths
+- Implemented replay file loading and deterministic playback behavior in transport layer:
+  - play/pause/seek/rate controls (`0.25x`, `0.5x`, `1x`, `2x` in UI)
+  - cursor/duration reporting for timeline binding
+  - index/checkpoint-assisted state reconstruction on seek
+- Added timeline widget and UI integration:
+  - new `PlaybackTimelineWidget` with scrub (left-drag), zoom (wheel), and pan (right-drag)
+  - mounted in status bar and synchronized with replay cursor
+  - timeline now has explicit discoverability tooltip in app UI
+- Added initial automated coverage for timeline behavior:
+  - `PlaybackTimelineWidgetTests.ClampsCursorAndWindowToDuration`
+- Refined telemetry UX after manual testing:
+  - replay tile labels now use compact last-segment display like direct mode
+  - added telemetry feature toggle (`Connection -> Enable telemetry recording/playback UI`) to fully hide controls/timeline when not needed
+  - recording is now operator-controlled via dedicated record toggle (instead of always recording on connect)
+  - record control is disabled/ghosted while replay transport is active
+  - compact icon controls now use a combined play/pause button and a separate record indicator button for better timeline real estate
+
 ## 2026-03-11 - Line-plot smoothing, direct stream cadence tuning, and direct-label compaction
 
 - Improved line-plot smooth-scrolling behavior in `SmartDashboard/src/widgets/line_plot_widget.cpp`:

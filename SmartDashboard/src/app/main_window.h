@@ -27,6 +27,8 @@ class QWidget;
 class QMenu;
 class QActionGroup;
 class QComboBox;
+class QPushButton;
+class QToolButton;
 class QTimer;
 
 namespace sd::widgets
@@ -65,10 +67,12 @@ private slots:
     void OnUseDirectTransport();
     void OnUseNetworkTablesTransport();
     void OnUseReplayTransport();
+    void OnToggleTelemetryFeature();
     void OnSetNtHost();
     void OnSetNtTeam();
     void OnToggleNtUseTeam();
     void OnOpenReplayFile();
+    void OnRecordToggled(bool checked);
     void OnPlaybackPlayPause();
     void OnPlaybackRateChanged(int index);
     void OnPlaybackCursorScrubbed(std::int64_t cursorUs);
@@ -117,12 +121,17 @@ private:
     QAction* m_useDirectTransportAction = nullptr;
     QAction* m_useNetworkTablesTransportAction = nullptr;
     QAction* m_useReplayTransportAction = nullptr;
+    QAction* m_telemetryFeatureAction = nullptr;
     QAction* m_ntUseTeamAction = nullptr;
     QAction* m_openReplayFileAction = nullptr;
-    QAction* m_playPausePlaybackAction = nullptr;
+    QWidget* m_telemetryControlsPanel = nullptr;
+    QPushButton* m_recordButton = nullptr;
+    QToolButton* m_playPauseButton = nullptr;
     QComboBox* m_playbackRateCombo = nullptr;
     sd::widgets::PlaybackTimelineWidget* m_playbackTimeline = nullptr;
     QTimer* m_playbackUiTimer = nullptr;
+    bool m_telemetryFeatureEnabled = true;
+    bool m_recordRequested = false;
     bool m_isEditable = false;
     bool m_snapToGrid = true;
     sd::widgets::EditInteractionMode m_editInteractionMode = sd::widgets::EditInteractionMode::MoveAndResize;

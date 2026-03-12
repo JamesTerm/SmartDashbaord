@@ -30,6 +30,7 @@
 #include <QSettings>
 #include <QStringList>
 #include <QStatusBar>
+#include <QToolButton>
 #include <QTimer>
 #include <QVariant>
 #include <QWidgetAction>
@@ -237,6 +238,9 @@ MainWindow::MainWindow(QWidget* parent)
     m_useReplayTransportAction = connectionMenu->addAction("Use Replay transport");
     m_useReplayTransportAction->setCheckable(true);
     connectionMenu->addSeparator();
+    m_telemetryFeatureAction = connectionMenu->addAction("Enable telemetry recording/playback UI");
+    m_telemetryFeatureAction->setCheckable(true);
+    m_telemetryFeatureAction->setChecked(true);
     m_openReplayFileAction = connectionMenu->addAction("Replay: Open session file...");
     connectionMenu->addSeparator();
     m_ntUseTeamAction = connectionMenu->addAction("NT: Use team number");
@@ -249,24 +253,40 @@ MainWindow::MainWindow(QWidget* parent)
     connect(m_useDirectTransportAction, &QAction::triggered, this, &MainWindow::OnUseDirectTransport);
     connect(m_useNetworkTablesTransportAction, &QAction::triggered, this, &MainWindow::OnUseNetworkTablesTransport);
     connect(m_useReplayTransportAction, &QAction::triggered, this, &MainWindow::OnUseReplayTransport);
+    connect(m_telemetryFeatureAction, &QAction::triggered, this, &MainWindow::OnToggleTelemetryFeature);
     connect(m_openReplayFileAction, &QAction::triggered, this, &MainWindow::OnOpenReplayFile);
     connect(m_ntUseTeamAction, &QAction::triggered, this, &MainWindow::OnToggleNtUseTeam);
     connect(ntSetHostAction, &QAction::triggered, this, &MainWindow::OnSetNtHost);
     connect(ntSetTeamAction, &QAction::triggered, this, &MainWindow::OnSetNtTeam);
 
-    auto* playbackControls = new QWidget(this);
-    auto* playbackLayout = new QHBoxLayout(playbackControls);
+    m_telemetryControlsPanel = new QWidget(this);
+    auto* playbackLayout = new QHBoxLayout(m_telemetryControlsPanel);
     playbackLayout->setContentsMargins(0, 0, 0, 0);
     playbackLayout->setSpacing(6);
 
-    auto* playbackLabel = new QLabel("Playback", playbackControls);
+    auto* playbackLabel = new QLabel("Telemetry", m_telemetryControlsPanel);
     playbackLayout->addWidget(playbackLabel);
 
-    auto* playbackButton = new QPushButton("Play", playbackControls);
-    playbackButton->setObjectName("playbackPlayPauseButton");
-    playbackLayout->addWidget(playbackButton);
+    m_recordButton = new QPushButton(QString::fromUtf8("\xE2\x97\x8F"), m_telemetryControlsPanel);
+    m_recordButton->setToolTip("Record telemetry");
+    m_recordButton->setCheckable(true);
+    m_recordButton->setChecked(false);
+    m_recordButton->setFixedSize(24, 24);
+    m_recordButton->setStyleSheet(
+        "QPushButton { color: #8a8a8a; font-weight: 900; }"
+        "QPushButton:checked { color: #ff2b2b; border: 1px solid #9b1b1b; background-color: #221616; }"
+        "QPushButton:disabled { color: #595959; border-color: #3f3f3f; }"
+    );
+    playbackLayout->addWidget(m_recordButton);
 
-    m_playbackRateCombo = new QComboBox(playbackControls);
+    m_playPauseButton = new QToolButton(m_telemetryControlsPanel);
+    m_playPauseButton->setText(QString::fromUtf8("\xE2\x96\xB6"));
+    m_playPauseButton->setToolTip("Play/Pause telemetry replay");
+    m_playPauseButton->setFixedSize(24, 24);
+    m_playPauseButton->setStyleSheet("QToolButton { color: #2f9e44; font-weight: 700; }");
+    playbackLayout->addWidget(m_playPauseButton);
+
+    m_playbackRateCombo = new QComboBox(m_telemetryControlsPanel);
     m_playbackRateCombo->addItem("0.25x", 0.25);
     m_playbackRateCombo->addItem("0.5x", 0.5);
     m_playbackRateCombo->addItem("1x", 1.0);
@@ -274,13 +294,14 @@ MainWindow::MainWindow(QWidget* parent)
     m_playbackRateCombo->setCurrentIndex(2);
     playbackLayout->addWidget(m_playbackRateCombo);
 
-    statusBar()->addPermanentWidget(playbackControls);
-    m_playPausePlaybackAction = new QAction("Play", this);
-    connect(m_playPausePlaybackAction, &QAction::triggered, this, &MainWindow::OnPlaybackPlayPause);
-    connect(playbackButton, &QPushButton::clicked, this, &MainWindow::OnPlaybackPlayPause);
+    statusBar()->addPermanentWidget(m_telemetryControlsPanel);
+    connect(m_recordButton, &QPushButton::toggled, this, &MainWindow::OnRecordToggled);
+    connect(m_playPauseButton, &QToolButton::clicked, this, &MainWindow::OnPlaybackPlayPause);
     connect(m_playbackRateCombo, qOverload<int>(&QComboBox::currentIndexChanged), this, &MainWindow::OnPlaybackRateChanged);
 
     m_playbackTimeline = new sd::widgets::PlaybackTimelineWidget(this);
+    m_playbackTimeline->setMinimumWidth(260);
+    m_playbackTimeline->setToolTip("Telemetry timeline (left-drag scrub, wheel zoom, right-drag pan)");
     statusBar()->addPermanentWidget(m_playbackTimeline, 1);
     connect(m_playbackTimeline, &sd::widgets::PlaybackTimelineWidget::CursorScrubbedUs, this, &MainWindow::OnPlaybackCursorScrubbed);
 
@@ -293,6 +314,16 @@ MainWindow::MainWindow(QWidget* parent)
     m_connectionConfig.ntUseTeam = settings.value("connection/ntUseTeam", true).toBool();
     m_connectionConfig.ntClientName = settings.value("connection/ntClientName", "SmartDashboardApp").toString();
     m_connectionConfig.replayFilePath = settings.value("connection/replayFilePath").toString();
+    m_telemetryFeatureEnabled = settings.value("telemetry/enabled", true).toBool();
+    m_recordRequested = settings.value("telemetry/recordEnabled", false).toBool();
+    if (m_telemetryFeatureAction != nullptr)
+    {
+        m_telemetryFeatureAction->setChecked(m_telemetryFeatureEnabled);
+    }
+    if (m_recordButton != nullptr)
+    {
+        m_recordButton->setChecked(m_recordRequested);
+    }
     ApplyTransportMenuChecks();
 
     m_playbackUiTimer = new QTimer(this);
@@ -637,7 +668,10 @@ sd::widgets::VariableTile* MainWindow::GetOrCreateTile(const QString& key, sd::w
 
 QString MainWindow::BuildDisplayLabel(const QString& key) const
 {
-    if (m_connectionConfig.kind != sd::transport::TransportKind::Direct)
+    if (
+        m_connectionConfig.kind != sd::transport::TransportKind::Direct
+        && m_connectionConfig.kind != sd::transport::TransportKind::Replay
+    )
     {
         return key;
     }
@@ -973,6 +1007,7 @@ void MainWindow::OnUseDirectTransport()
     }
     ApplyTransportMenuChecks();
     PersistConnectionSettings();
+    UpdatePlaybackUiState();
 }
 
 void MainWindow::OnUseNetworkTablesTransport()
@@ -992,6 +1027,11 @@ void MainWindow::OnUseNetworkTablesTransport()
 
 void MainWindow::OnUseReplayTransport()
 {
+    if (!m_telemetryFeatureEnabled)
+    {
+        return;
+    }
+
     m_connectionConfig.kind = sd::transport::TransportKind::Replay;
     for (const auto& [_, tile] : m_tiles)
     {
@@ -1002,6 +1042,37 @@ void MainWindow::OnUseReplayTransport()
     }
     ApplyTransportMenuChecks();
     PersistConnectionSettings();
+    UpdatePlaybackUiState();
+}
+
+void MainWindow::OnToggleTelemetryFeature()
+{
+    m_telemetryFeatureEnabled = (m_telemetryFeatureAction != nullptr) && m_telemetryFeatureAction->isChecked();
+
+    const bool hadTransport = (m_transport != nullptr);
+    if (!m_telemetryFeatureEnabled)
+    {
+        StopSessionRecording();
+        if (m_connectionConfig.kind == sd::transport::TransportKind::Replay)
+        {
+            m_connectionConfig.kind = sd::transport::TransportKind::Direct;
+            for (const auto& [_, tile] : m_tiles)
+            {
+                if (tile != nullptr)
+                {
+                    tile->SetTitleText(BuildDisplayLabel(tile->GetKey()));
+                }
+            }
+
+            if (hadTransport)
+            {
+                StartTransport();
+            }
+        }
+    }
+
+    PersistConnectionSettings();
+    ApplyTransportMenuChecks();
     UpdatePlaybackUiState();
 }
 
@@ -1079,15 +1150,32 @@ void MainWindow::OnOpenReplayFile()
     StartTransport();
 }
 
+void MainWindow::OnRecordToggled(bool checked)
+{
+    m_recordRequested = checked;
+    PersistConnectionSettings();
+
+    if (checked)
+    {
+        StartSessionRecording();
+    }
+    else
+    {
+        StopSessionRecording();
+    }
+
+    UpdatePlaybackUiState();
+}
+
 void MainWindow::OnPlaybackPlayPause()
 {
-    if (!m_transport || !m_transport->SupportsPlayback())
+    if (!m_transport || !m_transport->SupportsPlayback() || !m_telemetryFeatureEnabled)
     {
         return;
     }
 
-    const bool playing = m_transport->IsPlaybackPlaying();
-    m_transport->SetPlaybackPlaying(!playing);
+    const bool isPlaying = m_transport->IsPlaybackPlaying();
+    m_transport->SetPlaybackPlaying(!isPlaying);
     UpdatePlaybackUiState();
 }
 
@@ -1135,9 +1223,19 @@ void MainWindow::ApplyTransportMenuChecks()
         m_ntUseTeamAction->setChecked(m_connectionConfig.ntUseTeam);
     }
 
+    if (m_telemetryFeatureAction != nullptr)
+    {
+        m_telemetryFeatureAction->setChecked(m_telemetryFeatureEnabled);
+    }
+
+    if (m_useReplayTransportAction != nullptr)
+    {
+        m_useReplayTransportAction->setEnabled(m_telemetryFeatureEnabled);
+    }
+
     if (m_openReplayFileAction != nullptr)
     {
-        m_openReplayFileAction->setEnabled(true);
+        m_openReplayFileAction->setEnabled(m_telemetryFeatureEnabled);
     }
 }
 
@@ -1150,6 +1248,8 @@ void MainWindow::PersistConnectionSettings() const
     settings.setValue("connection/ntUseTeam", m_connectionConfig.ntUseTeam);
     settings.setValue("connection/ntClientName", m_connectionConfig.ntClientName);
     settings.setValue("connection/replayFilePath", m_connectionConfig.replayFilePath);
+    settings.setValue("telemetry/enabled", m_telemetryFeatureEnabled);
+    settings.setValue("telemetry/recordEnabled", m_recordRequested);
 }
 
 void MainWindow::StartTransport()
@@ -1223,21 +1323,48 @@ void MainWindow::StopTransport()
 
 void MainWindow::UpdatePlaybackUiState()
 {
-    const bool hasPlayback = (m_transport != nullptr) && m_transport->SupportsPlayback();
-
-    if (m_playPausePlaybackAction != nullptr)
-    {
-        m_playPausePlaybackAction->setEnabled(hasPlayback);
-        m_playPausePlaybackAction->setText(hasPlayback && m_transport->IsPlaybackPlaying() ? "Pause" : "Play");
-    }
+    const bool hasPlayback = (m_transport != nullptr) && m_transport->SupportsPlayback() && m_telemetryFeatureEnabled;
+    const bool canRecordOnTransport = m_telemetryFeatureEnabled && IsRecordingTransportKind(m_connectionConfig.kind);
 
     if (m_playbackRateCombo != nullptr)
     {
         m_playbackRateCombo->setEnabled(hasPlayback);
     }
 
+    if (m_recordButton != nullptr)
+    {
+        m_recordButton->setEnabled(canRecordOnTransport);
+        if (m_recordButton->isChecked() != m_recordRequested)
+        {
+            m_recordButton->setChecked(m_recordRequested);
+        }
+    }
+
+    if (m_playPauseButton != nullptr)
+    {
+        m_playPauseButton->setEnabled(hasPlayback);
+        if (hasPlayback && m_transport != nullptr && m_transport->IsPlaybackPlaying())
+        {
+            m_playPauseButton->setText(QString::fromUtf8("\xE2\x8F\xB8"));
+            m_playPauseButton->setStyleSheet("QToolButton { color: #f2c94c; font-weight: 700; }");
+            m_playPauseButton->setToolTip("Pause telemetry replay");
+        }
+        else
+        {
+            m_playPauseButton->setText(QString::fromUtf8("\xE2\x96\xB6"));
+            m_playPauseButton->setStyleSheet("QToolButton { color: #2f9e44; font-weight: 700; }");
+            m_playPauseButton->setToolTip("Play telemetry replay");
+        }
+    }
+
+    if (m_telemetryControlsPanel != nullptr)
+    {
+        m_telemetryControlsPanel->setVisible(m_telemetryFeatureEnabled);
+    }
+
     if (m_playbackTimeline != nullptr)
     {
+        m_playbackTimeline->setVisible(m_telemetryFeatureEnabled);
         m_playbackTimeline->setEnabled(hasPlayback);
         if (hasPlayback)
         {
@@ -1263,7 +1390,7 @@ void MainWindow::StartSessionRecording()
 {
     StopSessionRecording();
 
-    if (!IsRecordingTransportKind(m_connectionConfig.kind))
+    if (!m_telemetryFeatureEnabled || !m_recordRequested || !IsRecordingTransportKind(m_connectionConfig.kind))
     {
         return;
     }
