@@ -68,6 +68,15 @@
   - supports required args (`--out`, `--label`, `--duration-sec`) and preferred ops (`--start-delay-ms`, `--sample-ms`, `--overwrite`, `--append`, `--quiet`, `--verbose`, repeatable `--tag`)
   - supports orchestration args (`--list-signals`, `--signals`, `--stop-file`, `--run-id`)
   - writes stable metadata + signal-series JSON schema with robust temp-file replace on overwrite mode
+- Capture CLI iteration-1 connection hardening added for empty-log troubleshooting:
+  - direct channel override args: `--mapping-name`, `--data-event-name`, `--heartbeat-event-name`
+  - startup gating arg: `--wait-for-connected-ms` (default `2000`)
+  - strict non-empty guard: `--require-first-sample` (fails non-zero on empty capture)
+  - verbose output now includes connection diagnostics and selected channel names
+  - summary now distinguishes `Connection state at capture end` vs `Post-stop connection state` to avoid false confusion when post-stop is `Disconnected`
+- Added internal automated coverage for capture CLI behavior:
+  - `ClientInterface_direct/tests/capture_cli_tests.cpp`
+  - validates successful capture on custom direct channels and timeout failure path
 - New teaching/user docs for harness usage:
   - `docs/testing_harness_capture_cli.md`
   - README section `Testing Harness Capture CLI`

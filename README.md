@@ -182,4 +182,17 @@ Example commands:
 - example_name_2 worker OFF prefetch OFF:
   - `build/ClientInterface_direct/Debug/SmartDashboardCaptureCli.exe --out runs/example_name_2_worker_off_prefetch_off.json --label "example_name_2 worker OFF prefetch OFF" --duration-sec 45 --tag app=example_name_2 --tag worker=off --tag prefetch=off`
 
+Connection-safe variant (recommended for harness automation):
+
+- `build/ClientInterface_direct/Debug/SmartDashboardCaptureCli.exe --out runs/example_name_1_worker_on_prefetch_off.json --label "example_name_1 worker ON prefetch OFF" --duration-sec 45 --wait-for-connected-ms 5000 --require-first-sample`
+
+If your publisher uses non-default direct channel names, also pass:
+
+- `--mapping-name <name> --data-event-name <name> --heartbeat-event-name <name>`
+
+Console summary note:
+
+- `Post-stop connection state` is expected to be `Disconnected` because subscriber shutdown has already happened.
+- Use `Connection observed during capture` and `Connection state at capture end` to judge run health.
+
 See `docs/testing_harness_capture_cli.md` for full argument reference and JSON schema details.

@@ -30,6 +30,11 @@ Preferred/optional:
 - `--quiet` minimal console output
 - `--verbose` additional run diagnostics
 - `--tag <k=v>` repeatable metadata tags
+- `--mapping-name <name>` direct subscriber mapping override
+- `--data-event-name <name>` direct subscriber data-event override
+- `--heartbeat-event-name <name>` direct subscriber heartbeat-event override
+- `--wait-for-connected-ms <number>` fail if direct channel does not reach `Connected` in time (default `2000`)
+- `--require-first-sample` fail non-zero if zero telemetry samples were captured
 - `--list-signals` print observed signals and exit
 - `--signals <csv>` capture only selected signals
 - `--stop-file <path>` stop early when file appears
@@ -38,9 +43,32 @@ Preferred/optional:
 ## Behavior summary
 
 - Exit code `0` on success, non-zero on argument/start/write errors.
+- Exit code `6` when connection does not reach `Connected` before timeout.
+- Exit code `7` when `--require-first-sample` is set and no data was captured.
 - Prints start/end time, output path, and per-signal sample counts.
+- Prints connection diagnostics in summary:
+  - `Connection observed during capture`
+  - `Connection state at capture end` (before subscriber stop)
+  - `Post-stop connection state` (typically `Disconnected`)
 - Writes metadata and signal-series data in stable JSON schema.
 - Uses temp-file + rename for overwrite mode to avoid truncated output on normal completion.
+
+### Connection troubleshooting for empty captures
+
+If files are valid JSON but signals are empty, the most common issue is direct channel name mismatch.
+
+Use one or more of:
+
+- `--mapping-name`
+- `--data-event-name`
+- `--heartbeat-event-name`
+
+And add:
+
+- `--wait-for-connected-ms 5000`
+- `--require-first-sample`
+
+This gives an explicit failure instead of silently producing an empty run file.
 
 ## Example commands
 
@@ -91,6 +119,11 @@ build/ClientInterface_direct/Debug/SmartDashboardCaptureCli.exe \
       "sample_ms": 0,
       "overwrite": false,
       "append": false,
+      "mapping_name": "",
+      "data_event_name": "",
+      "heartbeat_event_name": "",
+      "wait_for_connected_ms": 2000,
+      "require_first_sample": false,
       "signals": "",
       "stop_file": ""
     },

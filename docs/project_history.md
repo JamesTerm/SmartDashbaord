@@ -67,6 +67,26 @@ Curated milestone history for this repository.
 - Generalized sample naming for clarity in public docs/help text:
   - replaced project-specific names with `example_name_1` and `example_name_2`
 
+### Follow-up refinement (same session)
+
+- Added iteration-1 connection hardening for harness runs that were generating empty output files:
+  - direct channel override args: `--mapping-name`, `--data-event-name`, `--heartbeat-event-name`
+  - connection wait arg: `--wait-for-connected-ms` (default `2000`)
+  - strict data guard arg: `--require-first-sample` (non-zero exit on empty capture)
+- Added explicit diagnostics and failure modes:
+  - timeout failure when subscriber never reaches `Connected` (`exit code 6`)
+  - no-sample failure when strict guard is enabled (`exit code 7`)
+  - verbose output includes selected channel names and final connection state
+- Updated harness docs and README examples to include connection-safe usage guidance.
+
+- Clarified capture-summary connection semantics to prevent misread healthy runs:
+  - reports `Connection observed during capture`
+  - reports `Connection state at capture end` (before stop)
+  - reports `Post-stop connection state` separately (expected `Disconnected`)
+- Added internal automated tests for capture CLI:
+  - `ClientInterface_direct/tests/capture_cli_tests.cpp`
+  - covers successful capture against custom channel names and connection-timeout failure behavior
+
 ## 2026-03-11 - Line-plot smoothing, direct stream cadence tuning, and direct-label compaction
 
 - Improved line-plot smooth-scrolling behavior in `SmartDashboard/src/widgets/line_plot_widget.cpp`:

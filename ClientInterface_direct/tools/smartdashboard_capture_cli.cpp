@@ -48,6 +48,11 @@ namespace
         std::string signalsCsv;
         std::string stopFilePath;
         std::string runId;
+        std::string mappingName;
+        std::string dataEventName;
+        std::string heartbeatEventName;
+        int waitForConnectedMs = 2000;
+        bool requireFirstSample = false;
         std::vector<std::pair<std::string, std::string>> tags;
         std::vector<std::string> rawArgs;
     };
@@ -141,6 +146,27 @@ namespace
         }
     }
 
+    std::string ConnectionStateToString(sd::direct::ConnectionState state)
+    {
+        switch (state)
+        {
+            case sd::direct::ConnectionState::Connected:
+                return "Connected";
+            case sd::direct::ConnectionState::Connecting:
+                return "Connecting";
+            case sd::direct::ConnectionState::Stale:
+                return "Stale";
+            case sd::direct::ConnectionState::Disconnected:
+            default:
+                return "Disconnected";
+        }
+    }
+
+    std::wstring ToWideLossy(std::string_view text)
+    {
+        return std::wstring(text.begin(), text.end());
+    }
+
     std::string GenerateRunId()
     {
         const auto now = std::chrono::system_clock::now();
@@ -171,6 +197,11 @@ namespace
            << "  --quiet\n"
            << "  --verbose\n"
            << "  --tag <k=v>                (repeatable)\n"
+           << "  --mapping-name <name>      (direct channel mapping name override)\n"
+           << "  --data-event-name <name>   (direct channel data event override)\n"
+           << "  --heartbeat-event-name <name> (direct channel heartbeat event override)\n"
+           << "  --wait-for-connected-ms <number> (default 2000)\n"
+           << "  --require-first-sample     (fail if no samples captured)\n"
            << "  --list-signals\n"
            << "  --signals <csv>\n"
            << "  --stop-file <path>\n"
@@ -344,6 +375,49 @@ namespace
                 }
                 options.tags.push_back({v->substr(0, pos), v->substr(pos + 1)});
             }
+            else if (arg == "--mapping-name")
+            {
+                auto v = needValue(arg);
+                if (!v)
+                {
+                    return false;
+                }
+                options.mappingName = *v;
+            }
+            else if (arg == "--data-event-name")
+            {
+                auto v = needValue(arg);
+                if (!v)
+                {
+                    return false;
+                }
+                options.dataEventName = *v;
+            }
+            else if (arg == "--heartbeat-event-name")
+            {
+                auto v = needValue(arg);
+                if (!v)
+                {
+                    return false;
+                }
+                options.heartbeatEventName = *v;
+            }
+            else if (arg == "--wait-for-connected-ms")
+            {
+                auto v = needValue(arg);
+                if (!v)
+                {
+                    return false;
+                }
+                if (!parseInt(*v, arg, options.waitForConnectedMs))
+                {
+                    return false;
+                }
+            }
+            else if (arg == "--require-first-sample")
+            {
+                options.requireFirstSample = true;
+            }
             else if (arg == "--list-signals")
             {
                 options.listSignals = true;
@@ -407,6 +481,12 @@ namespace
         if (options.startDelayMs < 0)
         {
             error = "--start-delay-ms must be >= 0";
+            return false;
+        }
+
+        if (options.waitForConnectedMs < 0)
+        {
+            error = "--wait-for-connected-ms must be >= 0";
             return false;
         }
 
@@ -544,6 +624,11 @@ namespace
         json << "      \"sample_ms\": " << options.sampleMs << ",\n";
         json << "      \"overwrite\": " << (options.overwrite ? "true" : "false") << ",\n";
         json << "      \"append\": " << (options.append ? "true" : "false") << ",\n";
+        json << "      \"mapping_name\": \"" << EscapeJson(options.mappingName) << "\",\n";
+        json << "      \"data_event_name\": \"" << EscapeJson(options.dataEventName) << "\",\n";
+        json << "      \"heartbeat_event_name\": \"" << EscapeJson(options.heartbeatEventName) << "\",\n";
+        json << "      \"wait_for_connected_ms\": " << options.waitForConnectedMs << ",\n";
+        json << "      \"require_first_sample\": " << (options.requireFirstSample ? "true" : "false") << ",\n";
         json << "      \"signals\": \"" << EscapeJson(options.signalsCsv) << "\",\n";
         json << "      \"stop_file\": \"" << EscapeJson(options.stopFilePath) << "\"\n";
         json << "    },\n";
@@ -718,6 +803,18 @@ int main(int argc, char** argv)
     }
 
     sd::direct::SubscriberConfig subscriberConfig;
+    if (!options.mappingName.empty())
+    {
+        subscriberConfig.mappingName = ToWideLossy(options.mappingName);
+    }
+    if (!options.dataEventName.empty())
+    {
+        subscriberConfig.dataEventName = ToWideLossy(options.dataEventName);
+    }
+    if (!options.heartbeatEventName.empty())
+    {
+        subscriberConfig.heartbeatEventName = ToWideLossy(options.heartbeatEventName);
+    }
     auto subscriber = sd::direct::CreateDirectSubscriber(subscriberConfig);
     if (!subscriber)
     {
@@ -726,14 +823,19 @@ int main(int argc, char** argv)
     }
 
     std::atomic<sd::direct::ConnectionState> connectionState {sd::direct::ConnectionState::Disconnected};
+    std::atomic<bool> connectedObserved {false};
     const bool started = subscriber->Start(
         [&state](const sd::direct::VariableUpdate& update)
         {
             AddUpdate(state, update, Clock::now());
         },
-        [&connectionState](sd::direct::ConnectionState next)
+        [&connectionState, &connectedObserved](sd::direct::ConnectionState next)
         {
             connectionState.store(next, std::memory_order_relaxed);
+            if (next == sd::direct::ConnectionState::Connected)
+            {
+                connectedObserved.store(true, std::memory_order_relaxed);
+            }
         }
     );
 
@@ -751,13 +853,41 @@ int main(int argc, char** argv)
             std::cout << "Label: " << options.label << "\n"
                       << "Run ID: " << options.runId << "\n"
                       << "Duration seconds: " << options.durationSec << "\n"
-                      << "Sample ms: " << options.sampleMs << "\n";
+                      << "Sample ms: " << options.sampleMs << "\n"
+                      << "Wait for connected ms: " << options.waitForConnectedMs << "\n"
+                      << "Require first sample: " << (options.requireFirstSample ? "true" : "false") << "\n"
+                      << "Mapping: " << (options.mappingName.empty() ? "<default>" : options.mappingName) << "\n"
+                      << "Data event: " << (options.dataEventName.empty() ? "<default>" : options.dataEventName) << "\n"
+                      << "Heartbeat event: " << (options.heartbeatEventName.empty() ? "<default>" : options.heartbeatEventName) << "\n";
         }
     }
 
     if (options.startDelayMs > 0)
     {
         std::this_thread::sleep_for(std::chrono::milliseconds(options.startDelayMs));
+    }
+
+    if (options.waitForConnectedMs > 0)
+    {
+        const auto deadline = Clock::now() + std::chrono::milliseconds(options.waitForConnectedMs);
+        bool connectedSeen = false;
+        while (Clock::now() < deadline)
+        {
+            if (connectionState.load(std::memory_order_relaxed) == sd::direct::ConnectionState::Connected)
+            {
+                connectedSeen = true;
+                break;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+
+        if (!connectedSeen)
+        {
+            std::cerr << "Connection timeout: did not reach Connected within " << options.waitForConnectedMs << " ms.\n"
+                      << "Tip: pass --mapping-name/--data-event-name/--heartbeat-event-name if your publisher uses custom direct channel names.\n";
+            subscriber->Stop();
+            return 6;
+        }
     }
 
     const auto startWall = std::chrono::system_clock::now();
@@ -786,6 +916,7 @@ int main(int argc, char** argv)
     }
 
     const auto endWall = std::chrono::system_clock::now();
+    const sd::direct::ConnectionState stateBeforeStop = connectionState.load(std::memory_order_relaxed);
     subscriber->Stop();
 
     if (options.listSignals)
@@ -811,6 +942,13 @@ int main(int argc, char** argv)
     }
 
     const std::uint64_t totalUpdates = state.totalUpdates.load(std::memory_order_relaxed);
+    if (options.requireFirstSample && totalUpdates == 0)
+    {
+        std::cerr << "Capture failed: no telemetry samples were captured.\n"
+                  << "Tip: verify channel names and try --mapping-name/--data-event-name/--heartbeat-event-name.\n";
+        return 7;
+    }
+
     const std::string jsonText = BuildRunJson(options, startWall, endWall, state, totalUpdates);
 
     std::string writeError;
@@ -824,6 +962,12 @@ int main(int argc, char** argv)
     {
         std::cout << "Capture end time (UTC): " << ToIso8601Utc(endWall) << "\n";
         std::cout << "Output file: " << options.outPath << "\n";
+        std::cout << "Connection observed during capture: "
+                  << (connectedObserved.load(std::memory_order_relaxed) ? "true" : "false") << "\n";
+        std::cout << "Connection state at capture end: "
+                  << ConnectionStateToString(stateBeforeStop) << "\n";
+        std::cout << "Post-stop connection state: "
+                  << ConnectionStateToString(connectionState.load(std::memory_order_relaxed)) << "\n";
 
         std::map<std::string, std::size_t> counts;
         {

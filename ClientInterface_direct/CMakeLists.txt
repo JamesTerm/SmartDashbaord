@@ -73,6 +73,7 @@ if(BUILD_TESTING)
     FetchContent_MakeAvailable(googletest)
 
     add_executable(ClientInterface_direct_tests
+        tests/capture_cli_tests.cpp
         tests/direct_publisher_tests.cpp
         tests/smartdashboard_client_tests.cpp
         tests/transport_parity_contract_tests.cpp
