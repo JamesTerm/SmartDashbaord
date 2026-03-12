@@ -9,6 +9,8 @@
 
 namespace sd::widgets
 {
+    // Keep all timeline math in microseconds so replay seek and widget state
+    // reconstruction stay deterministic across play/pause/seek operations.
     PlaybackTimelineWidget::PlaybackTimelineWidget(QWidget* parent)
         : QWidget(parent)
     {
@@ -127,6 +129,7 @@ namespace sd::widgets
 
         if (m_panning)
         {
+            // Pan translates visible time window in fixed units-per-pixel space.
             const int dx = event->position().x() - m_lastPanX;
             m_lastPanX = event->position().x();
 
@@ -162,6 +165,7 @@ namespace sd::widgets
             return;
         }
 
+        // Zoom anchors around cursor position to preserve operator context while inspecting events.
         const std::int64_t anchorUs = PositionToTimeUs(event->position().x());
         const std::int64_t oldSpanUs = std::max<std::int64_t>(1, m_windowEndUs - m_windowStartUs);
         const double zoomFactor = event->angleDelta().y() > 0 ? 0.8 : 1.25;
@@ -218,6 +222,7 @@ namespace sd::widgets
             return;
         }
 
+        // Preserve span while clamping so zoom level remains stable during pan/seek edges.
         if (m_windowStartUs < 0)
         {
             m_windowEndUs -= m_windowStartUs;

@@ -6,6 +6,9 @@
 
 namespace sd::widgets
 {
+    // Shared replay timeline control used by all widgets.
+    // Teaching note: this exposes a single cursor/window model so playback state
+    // stays transport-agnostic and synchronized across the dashboard.
     class PlaybackTimelineWidget final : public QWidget
     {
         Q_OBJECT
@@ -34,8 +37,11 @@ namespace sd::widgets
         void wheelEvent(QWheelEvent* event) override;
 
     private:
+        // Coordinate conversion helpers between pixels and timeline microseconds.
         std::int64_t PositionToTimeUs(int x) const;
         int TimeUsToPosition(std::int64_t timeUs) const;
+
+        // Clamp the visible window into [0, duration] while preserving span.
         void ClampWindowToDuration();
         void EmitWindowChanged();
 

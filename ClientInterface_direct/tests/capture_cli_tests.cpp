@@ -17,6 +17,7 @@
 
 namespace
 {
+    // Lossy ASCII widening is acceptable for these deterministic test channel names.
     std::wstring ToWide(const std::string& s)
     {
         return std::wstring(s.begin(), s.end());
@@ -29,6 +30,8 @@ namespace
     }
 
 #ifdef _WIN32
+    // Launch the capture CLI as a child process so tests validate real command parsing,
+    // exit codes, and file-writing behavior instead of only in-process helpers.
     int RunProcess(const std::filesystem::path& exePath, const std::vector<std::string>& args)
     {
         std::string cmd = "\"" + exePath.string() + "\"";
@@ -100,6 +103,7 @@ TEST(CaptureCliTests, CapturesDataAndWritesMetadata)
     ASSERT_NE(publisher, nullptr);
     ASSERT_TRUE(publisher->Start());
 
+    // Producer thread simulates a live telemetry source while CLI captures.
     std::atomic<bool> keepRunning {true};
     std::thread producer([&]()
     {
@@ -200,6 +204,7 @@ TEST(CaptureCliTests, AutoConnectMethodCanFindLegacyShortChannel)
     ASSERT_NE(publisher, nullptr);
     ASSERT_TRUE(publisher->Start());
 
+    // This case validates auto-mode fallback against legacy short channel naming.
     std::atomic<bool> keepRunning {true};
     std::thread producer([&]()
     {

@@ -210,6 +210,9 @@ namespace
             return candidates;
         }
 
+        // Connection candidate ordering acts as a bounded fallback chain.
+        // This is a small "chain of responsibility" style pattern that keeps
+        // discovery deterministic and easy for students to trace in logs/tests.
         // auto mode: try explicit override first (if present), then known defaults.
         if (!options.mappingName.empty() || !options.dataEventName.empty() || !options.heartbeatEventName.empty())
         {
@@ -677,6 +680,8 @@ namespace
         const CaptureState& state,
         std::uint64_t capturedUpdateCount)
     {
+        // Snapshot under lock, then render JSON outside the lock.
+        // Teaching note: this keeps lock hold-time short and avoids lock + I/O coupling.
         std::map<std::string, SignalSeries> snapshot;
         {
             std::lock_guard<std::mutex> lock(state.mutex);
@@ -902,6 +907,7 @@ int main(int argc, char** argv)
         return 3;
     }
 
+    // Split wait budget across candidates so auto mode remains bounded in wall time.
     const int perCandidateWaitMs = (std::max)(250, options.waitForConnectedMs / static_cast<int>(candidates.size()));
     bool subscriberStarted = false;
     std::string selectedCandidate = "";
@@ -958,6 +964,8 @@ int main(int argc, char** argv)
         {
             if (options.connectMethod == "auto" && options.requireFirstSample)
             {
+                // In auto mode, require at least one sample before accepting the candidate.
+                // This avoids false-positive "Connected" on a channel that has no payload flow.
                 const auto sampleDeadline = Clock::now() + std::chrono::milliseconds((std::max)(250, perCandidateWaitMs / 2));
                 bool sawSample = sampleObserved.load(std::memory_order_relaxed);
                 while (!sawSample && Clock::now() < sampleDeadline)
@@ -1068,6 +1076,7 @@ int main(int argc, char** argv)
         return 0;
     }
 
+    // totalUpdates is our latest-value/coalescing independent truth for "did we capture anything".
     const std::uint64_t totalUpdates = state.totalUpdates.load(std::memory_order_relaxed);
     if (options.requireFirstSample && totalUpdates == 0)
     {

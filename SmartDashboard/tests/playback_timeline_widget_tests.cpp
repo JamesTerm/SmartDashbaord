@@ -8,6 +8,7 @@
 
 namespace
 {
+    // Reuse one QApplication across tests to keep Qt test startup deterministic.
     QApplication* EnsureApp()
     {
         if (QApplication::instance() != nullptr)
