@@ -43,6 +43,52 @@
 - Added `SmartDashboard/tests/line_plot_widget_tests.cpp` stress-oriented regression coverage for varying buffer/rate scenarios; `SmartDashboard_tests` now includes both line-plot and variable-tile tests.
 - `DirectPublisherTests.StreamsSineWaveDouble` now exposes live-tunable `Test/DoubleSine/Config/SampleRateMs` (default 16 ms) so publish cadence can be adjusted without editing code.
 - Direct transport UI label compaction: tile title text now shows only the last key segment in Direct mode (for example `.../Config/SampleRateMs` -> `SampleRateMs`) while preserving full underlying keys for publish/subscribe and layout identity.
+- Telemetry recording/playback vertical slice is now implemented on branch `feature/playback-recording-replay`:
+  - recorder writes live Direct/NT bool/double/string events to `logs/session_<timestamp>.jsonl`
+  - replay transport can load session files and drive existing widget/model flow with play/pause/seek/speed
+  - timeline scrub/zoom/pan control exists in status bar and is wired to replay cursor
+- Telemetry UI controls were refined for operator workflow:
+  - menu toggle to enable/disable telemetry UI entirely (`Connection -> Enable telemetry recording/playback UI`)
+  - compact transport controls now use icon-style play/pause and record indicators
+  - record control is disabled/ghosted in replay transport
+  - replay label compaction now matches direct mode (shows last key segment only)
+- Replay workflow/connection semantics were further refined:
+  - switching transport kind now tears down active transport first so stale "Connected" state does not persist across mode changes
+  - replay mode status bar now shows only `Replay` (filename kept in title bar)
+  - replay mode window title shows selected replay filename (or `no file selected`)
+  - replay mode auto-starts when a persisted replay file path exists; Connect/Disconnect actions are disabled in replay mode
+- Telemetry controls got additional UX polish:
+  - playback controls/scrub are ghosted when not in replay mode
+  - added rewind-to-start control (`|◀`) that pauses playback and seeks to t=0
+  - play/pause icon now has explicit disabled-state styling so ghosting is visually obvious
+- Added standalone testing-harness capture CLI target `SmartDashboardCaptureCli`:
+  - source: `ClientInterface_direct/tools/smartdashboard_capture_cli.cpp`
+  - build target wired in `ClientInterface_direct/CMakeLists.txt`
+  - exe path (Debug): `build/ClientInterface_direct/Debug/SmartDashboardCaptureCli.exe`
+  - supports required args (`--out`, `--label`, `--duration-sec`) and preferred ops (`--start-delay-ms`, `--sample-ms`, `--overwrite`, `--append`, `--quiet`, `--verbose`, repeatable `--tag`)
+  - supports orchestration args (`--list-signals`, `--signals`, `--stop-file`, `--run-id`)
+  - writes stable metadata + signal-series JSON schema with robust temp-file replace on overwrite mode
+- Capture CLI iteration-1 connection hardening added for empty-log troubleshooting:
+  - direct channel override args: `--mapping-name`, `--data-event-name`, `--heartbeat-event-name`
+  - startup gating arg: `--wait-for-connected-ms` (default `2000`)
+  - strict non-empty guard: `--require-first-sample` (fails non-zero on empty capture)
+  - verbose output now includes connection diagnostics and selected channel names
+  - summary now distinguishes `Connection state at capture end` vs `Post-stop connection state` to avoid false confusion when post-stop is `Disconnected`
+- Iteration-2 started on capture connection method selection:
+  - new arg `--connect-method <direct|auto>`
+  - `auto` tries explicit overrides first (if set), then known default direct channel families
+  - this is intended to reduce empty-run risk when publisher channel family is uncertain
+  - external validation note: healthy captures may end with `Connection state at capture end: Stale` and `Post-stop connection state: Disconnected`; this is acceptable when `Connection observed during capture: true` and sample counts are non-zero
+- Added internal automated coverage for capture CLI behavior:
+  - `ClientInterface_direct/tests/capture_cli_tests.cpp`
+  - validates successful capture on custom direct channels and timeout failure path
+- New teaching/user docs for harness usage:
+  - `docs/testing_harness_capture_cli.md`
+  - README section `Testing Harness Capture CLI`
+  - examples intentionally use generic placeholders (`example_name_1`, `example_name_2`) to avoid project-specific confusion
+- Added replay planning + user-facing docs:
+  - `docs/replay_parity_roadmap.md` (iterative parity checklist and acceptance path)
+  - `docs/replay_user_manual.md` (operator workflow guide for replay controls and timeline interactions)
 
 ## Known constraints / active considerations
 

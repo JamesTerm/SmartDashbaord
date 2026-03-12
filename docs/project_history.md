@@ -5,6 +5,104 @@ Curated milestone history for this repository.
 - Edit this file for durable project milestones and outcomes.
 - Keep lean handoff context in `Agent_Session_Notes.md`.
 
+## 2026-03-12 - Telemetry recording/replay slice and controls refinement
+
+- Added first telemetry recording/replay vertical slice on feature branch `feature/playback-recording-replay`.
+- Added replay transport path to dashboard transport contract (`Replay` kind + playback control APIs) so replay behaves as a transport source rather than UI-special-cased data.
+- Implemented session recorder in main window flow:
+  - live Direct/NetworkTables sessions can write newline-delimited JSON event logs under `logs/session_<timestamp>.jsonl`
+  - records bool/double/string updates and connection-state events
+  - uses a background writer thread to avoid blocking UI update paths
+- Implemented replay file loading and deterministic playback behavior in transport layer:
+  - play/pause/seek/rate controls (`0.25x`, `0.5x`, `1x`, `2x` in UI)
+  - cursor/duration reporting for timeline binding
+  - index/checkpoint-assisted state reconstruction on seek
+- Added timeline widget and UI integration:
+  - new `PlaybackTimelineWidget` with scrub (left-drag), zoom (wheel), and pan (right-drag)
+  - mounted in status bar and synchronized with replay cursor
+  - timeline now has explicit discoverability tooltip in app UI
+- Added initial automated coverage for timeline behavior:
+  - `PlaybackTimelineWidgetTests.ClampsCursorAndWindowToDuration`
+- Refined telemetry UX after manual testing:
+  - replay tile labels now use compact last-segment display like direct mode
+  - added telemetry feature toggle (`Connection -> Enable telemetry recording/playback UI`) to fully hide controls/timeline when not needed
+  - recording is now operator-controlled via dedicated record toggle (instead of always recording on connect)
+  - record control is disabled/ghosted while replay transport is active
+  - compact icon controls now use a combined play/pause button and a separate record indicator button for better timeline real estate
+
+### Follow-up refinement (same session)
+
+- Fixed transport-switch connection-state consistency in `MainWindow`:
+  - changing transport kind now stops any active transport first, preventing stale connected-state UI when mode changes
+- Updated replay-mode status/title behavior:
+  - status bar now shows concise `Replay` text only (to preserve timeline width)
+  - window title carries replay file context (`Replay (<filename>)` or `Replay (no file selected)`)
+- Updated replay control semantics:
+  - replay mode auto-starts when a persisted replay file path exists (no manual Connect required)
+  - Connect/Disconnect actions are disabled in replay mode
+- Added compact rewind-to-start playback control (`|◀`) for replay workflows:
+  - rewinds to cursor `0` and pauses playback
+- Improved non-replay visual affordances:
+  - play/pause icon now has explicit disabled-state styling so ghosted state is clear
+  - replay-only controls (scrub, speed, play/pause, rewind) are visibly ghosted outside replay mode
+
+## 2026-03-12 - Standalone testing-harness capture CLI
+
+- Added new standalone command-driven capture executable target:
+  - `SmartDashboardCaptureCli` (`ClientInterface_direct/tools/smartdashboard_capture_cli.cpp`)
+  - build wiring added in `ClientInterface_direct/CMakeLists.txt`
+- Implemented command-line contract for automated A/B harness runs:
+  - required args: `--out`, `--label`, `--duration-sec`
+  - preferred args: `--start-delay-ms`, `--sample-ms`, `--overwrite`, `--append`, `--quiet`, `--verbose`, repeatable `--tag k=v`
+  - operational args: `--list-signals`, `--signals`, `--stop-file`, `--run-id`
+- Implemented runtime and output behavior:
+  - clear usage and argument validation with non-zero error exits
+  - deterministic metadata-rich JSON output (`schema_version`, `metadata`, `signals`)
+  - robust file write path using temp-file + rename for overwrite mode
+  - append mode support for multi-run documents in one file
+  - console summary includes start/end timestamps, output path, and per-signal sample counts
+- Added teaching/documentation coverage:
+  - `docs/testing_harness_capture_cli.md` with argument reference and schema sample
+  - `README.md` section `Testing Harness Capture CLI` with runnable commands
+- Generalized sample naming for clarity in public docs/help text:
+  - replaced project-specific names with `example_name_1` and `example_name_2`
+
+### Follow-up refinement (same session)
+
+- Added iteration-1 connection hardening for harness runs that were generating empty output files:
+  - direct channel override args: `--mapping-name`, `--data-event-name`, `--heartbeat-event-name`
+  - connection wait arg: `--wait-for-connected-ms` (default `2000`)
+  - strict data guard arg: `--require-first-sample` (non-zero exit on empty capture)
+- Added explicit diagnostics and failure modes:
+  - timeout failure when subscriber never reaches `Connected` (`exit code 6`)
+  - no-sample failure when strict guard is enabled (`exit code 7`)
+  - verbose output includes selected channel names and final connection state
+- Updated harness docs and README examples to include connection-safe usage guidance.
+
+- Clarified capture-summary connection semantics to prevent misread healthy runs:
+  - reports `Connection observed during capture`
+  - reports `Connection state at capture end` (before stop)
+  - reports `Post-stop connection state` separately (expected `Disconnected`)
+- Added internal automated tests for capture CLI:
+  - `ClientInterface_direct/tests/capture_cli_tests.cpp`
+  - covers successful capture against custom channel names and connection-timeout failure behavior
+
+## 2026-03-12 - Capture CLI iteration 2 (connection method selection)
+
+- Added `--connect-method <direct|auto>` to `SmartDashboardCaptureCli`.
+- Implemented candidate-based connection selection:
+  - `direct`: use explicit/direct configured channel path only
+  - `auto`: try explicit overrides first (if provided), then known default direct channel families
+- Added selected-candidate diagnostics in verbose output for troubleshooting.
+- Extended internal tests with auto-mode coverage against legacy-short channel naming.
+- Updated README and harness docs with auto-connect usage guidance.
+
+## 2026-03-12 - Replay parity roadmap and user manual
+
+- Added `docs/replay_parity_roadmap.md` to define iterative replay parity goals against modern dashboard workflows.
+- Added `docs/replay_user_manual.md` to provide operator instructions for replay mode, timeline controls, and troubleshooting usage patterns.
+- Updated `README.md` and session notes to surface these docs for both student learning and practical test workflows.
+
 ## 2026-03-11 - Line-plot smoothing, direct stream cadence tuning, and direct-label compaction
 
 - Improved line-plot smooth-scrolling behavior in `SmartDashboard/src/widgets/line_plot_widget.cpp`:

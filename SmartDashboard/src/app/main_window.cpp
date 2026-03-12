@@ -2,14 +2,21 @@
 
 #include "layout/layout_serializer.h"
 #include "sd_direct_types.h"
+#include "widgets/playback_timeline_widget.h"
 
 #include <QAction>
 #include <QApplication>
+#include <QComboBox>
 #include <QCloseEvent>
 #include <QCoreApplication>
+#include <QDateTime>
+#include <QDir>
 #include <QEvent>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QHBoxLayout>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QLabel>
 #include <QMessageBox>
 #include <QMenu>
@@ -18,11 +25,18 @@
 #include <QLineEdit>
 #include <QMetaObject>
 #include <QPalette>
+#include <QPushButton>
+#include <QSaveFile>
 #include <QSettings>
 #include <QStringList>
 #include <QStatusBar>
+#include <QToolButton>
+#include <QTimer>
 #include <QVariant>
+#include <QWidgetAction>
 #include <QWidget>
+
+#include <chrono>
 
 namespace
 {
@@ -221,6 +235,13 @@ MainWindow::MainWindow(QWidget* parent)
     m_useDirectTransportAction->setCheckable(true);
     m_useNetworkTablesTransportAction = connectionMenu->addAction("Use NetworkTables transport");
     m_useNetworkTablesTransportAction->setCheckable(true);
+    m_useReplayTransportAction = connectionMenu->addAction("Use Replay transport");
+    m_useReplayTransportAction->setCheckable(true);
+    connectionMenu->addSeparator();
+    m_telemetryFeatureAction = connectionMenu->addAction("Enable telemetry recording/playback UI");
+    m_telemetryFeatureAction->setCheckable(true);
+    m_telemetryFeatureAction->setChecked(true);
+    m_openReplayFileAction = connectionMenu->addAction("Replay: Open session file...");
     connectionMenu->addSeparator();
     m_ntUseTeamAction = connectionMenu->addAction("NT: Use team number");
     m_ntUseTeamAction->setCheckable(true);
@@ -231,9 +252,69 @@ MainWindow::MainWindow(QWidget* parent)
     connect(m_disconnectTransportAction, &QAction::triggered, this, &MainWindow::OnDisconnectTransport);
     connect(m_useDirectTransportAction, &QAction::triggered, this, &MainWindow::OnUseDirectTransport);
     connect(m_useNetworkTablesTransportAction, &QAction::triggered, this, &MainWindow::OnUseNetworkTablesTransport);
+    connect(m_useReplayTransportAction, &QAction::triggered, this, &MainWindow::OnUseReplayTransport);
+    connect(m_telemetryFeatureAction, &QAction::triggered, this, &MainWindow::OnToggleTelemetryFeature);
+    connect(m_openReplayFileAction, &QAction::triggered, this, &MainWindow::OnOpenReplayFile);
     connect(m_ntUseTeamAction, &QAction::triggered, this, &MainWindow::OnToggleNtUseTeam);
     connect(ntSetHostAction, &QAction::triggered, this, &MainWindow::OnSetNtHost);
     connect(ntSetTeamAction, &QAction::triggered, this, &MainWindow::OnSetNtTeam);
+
+    m_telemetryControlsPanel = new QWidget(this);
+    auto* playbackLayout = new QHBoxLayout(m_telemetryControlsPanel);
+    playbackLayout->setContentsMargins(0, 0, 0, 0);
+    playbackLayout->setSpacing(6);
+
+    auto* playbackLabel = new QLabel("Telemetry", m_telemetryControlsPanel);
+    playbackLayout->addWidget(playbackLabel);
+
+    m_recordButton = new QPushButton(QString::fromUtf8("\xE2\x97\x8F"), m_telemetryControlsPanel);
+    m_recordButton->setToolTip("Record telemetry");
+    m_recordButton->setCheckable(true);
+    m_recordButton->setChecked(false);
+    m_recordButton->setFixedSize(24, 24);
+    m_recordButton->setStyleSheet(
+        "QPushButton { color: #8a8a8a; font-weight: 900; }"
+        "QPushButton:checked { color: #ff2b2b; border: 1px solid #9b1b1b; background-color: #221616; }"
+        "QPushButton:disabled { color: #595959; border-color: #3f3f3f; }"
+    );
+    playbackLayout->addWidget(m_recordButton);
+
+    m_rewindButton = new QToolButton(m_telemetryControlsPanel);
+    m_rewindButton->setText(QString::fromUtf8("|\xE2\x97\x80"));
+    m_rewindButton->setToolTip("Rewind to beginning");
+    m_rewindButton->setFixedSize(24, 24);
+    m_rewindButton->setStyleSheet(
+        "QToolButton { color: #8e9aaf; font-weight: 700; }"
+        "QToolButton:disabled { color: #5a5a5a; }"
+    );
+    playbackLayout->addWidget(m_rewindButton);
+
+    m_playPauseButton = new QToolButton(m_telemetryControlsPanel);
+    m_playPauseButton->setText(QString::fromUtf8("\xE2\x96\xB6"));
+    m_playPauseButton->setToolTip("Play/Pause telemetry replay");
+    m_playPauseButton->setFixedSize(24, 24);
+    m_playPauseButton->setStyleSheet("QToolButton { color: #2f9e44; font-weight: 700; }");
+    playbackLayout->addWidget(m_playPauseButton);
+
+    m_playbackRateCombo = new QComboBox(m_telemetryControlsPanel);
+    m_playbackRateCombo->addItem("0.25x", 0.25);
+    m_playbackRateCombo->addItem("0.5x", 0.5);
+    m_playbackRateCombo->addItem("1x", 1.0);
+    m_playbackRateCombo->addItem("2x", 2.0);
+    m_playbackRateCombo->setCurrentIndex(2);
+    playbackLayout->addWidget(m_playbackRateCombo);
+
+    statusBar()->addPermanentWidget(m_telemetryControlsPanel);
+    connect(m_recordButton, &QPushButton::toggled, this, &MainWindow::OnRecordToggled);
+    connect(m_rewindButton, &QToolButton::clicked, this, &MainWindow::OnPlaybackRewindToStart);
+    connect(m_playPauseButton, &QToolButton::clicked, this, &MainWindow::OnPlaybackPlayPause);
+    connect(m_playbackRateCombo, qOverload<int>(&QComboBox::currentIndexChanged), this, &MainWindow::OnPlaybackRateChanged);
+
+    m_playbackTimeline = new sd::widgets::PlaybackTimelineWidget(this);
+    m_playbackTimeline->setMinimumWidth(260);
+    m_playbackTimeline->setToolTip("Telemetry timeline (left-drag scrub, wheel zoom, right-drag pan)");
+    statusBar()->addPermanentWidget(m_playbackTimeline, 1);
+    connect(m_playbackTimeline, &sd::widgets::PlaybackTimelineWidget::CursorScrubbedUs, this, &MainWindow::OnPlaybackCursorScrubbed);
 
     QSettings settings("SmartDashboard", "SmartDashboardApp");
     m_connectionConfig.kind = static_cast<sd::transport::TransportKind>(
@@ -243,7 +324,24 @@ MainWindow::MainWindow(QWidget* parent)
     m_connectionConfig.ntTeam = settings.value("connection/ntTeam", 0).toInt();
     m_connectionConfig.ntUseTeam = settings.value("connection/ntUseTeam", true).toBool();
     m_connectionConfig.ntClientName = settings.value("connection/ntClientName", "SmartDashboardApp").toString();
+    m_connectionConfig.replayFilePath = settings.value("connection/replayFilePath").toString();
+    m_telemetryFeatureEnabled = settings.value("telemetry/enabled", true).toBool();
+    m_recordRequested = settings.value("telemetry/recordEnabled", false).toBool();
+    if (m_telemetryFeatureAction != nullptr)
+    {
+        m_telemetryFeatureAction->setChecked(m_telemetryFeatureEnabled);
+    }
+    if (m_recordButton != nullptr)
+    {
+        m_recordButton->setChecked(m_recordRequested);
+    }
     ApplyTransportMenuChecks();
+
+    m_playbackUiTimer = new QTimer(this);
+    m_playbackUiTimer->setInterval(100);
+    connect(m_playbackUiTimer, &QTimer::timeout, this, &MainWindow::UpdatePlaybackUiState);
+    m_playbackUiTimer->start();
+    UpdatePlaybackUiState();
 
     connect(
         qApp,
@@ -361,6 +459,8 @@ void MainWindow::OnVariableUpdateReceived(const QString& key, int valueType, con
         default:
             break;
     }
+
+    RecordVariableEvent(key, valueType, value, seq);
 }
 
 void MainWindow::OnConnectionStateChanged(int state)
@@ -375,6 +475,7 @@ void MainWindow::OnConnectionStateChanged(int state)
     }
 
     UpdateWindowConnectionText(state);
+    RecordConnectionEvent(state);
 }
 
 void MainWindow::OnSaveLayout()
@@ -578,7 +679,10 @@ sd::widgets::VariableTile* MainWindow::GetOrCreateTile(const QString& key, sd::w
 
 QString MainWindow::BuildDisplayLabel(const QString& key) const
 {
-    if (m_connectionConfig.kind != sd::transport::TransportKind::Direct)
+    if (
+        m_connectionConfig.kind != sd::transport::TransportKind::Direct
+        && m_connectionConfig.kind != sd::transport::TransportKind::Replay
+    )
     {
         return key;
     }
@@ -596,6 +700,12 @@ void MainWindow::UpdateWindowConnectionText(int state)
 {
     m_connectionState = state;
     RefreshWindowTitle();
+
+    if (m_connectionConfig.kind == sd::transport::TransportKind::Replay)
+    {
+        m_statusLabel->setText("Replay");
+        return;
+    }
 
     QString stateText = "Disconnected";
     if (state == static_cast<int>(sd::transport::ConnectionState::Connecting))
@@ -866,44 +976,67 @@ QString MainWindow::GetLayoutTitleSegment() const
 
 void MainWindow::RefreshWindowTitle()
 {
-    QString stateText = "Disconnected";
-    if (m_connectionState == static_cast<int>(sd::transport::ConnectionState::Connecting))
+    QString connectionText = "Disconnected";
+    if (m_connectionConfig.kind == sd::transport::TransportKind::Replay)
     {
-        stateText = "Connecting";
+        const QString replayFile = m_connectionConfig.replayFilePath.trimmed();
+        const QString replayName = replayFile.isEmpty() ? "no file selected" : QFileInfo(replayFile).fileName();
+        connectionText = QString("Replay (%1)").arg(replayName);
+    }
+    else if (m_connectionState == static_cast<int>(sd::transport::ConnectionState::Connecting))
+    {
+        connectionText = "Connecting";
     }
     else if (m_connectionState == static_cast<int>(sd::transport::ConnectionState::Connected))
     {
-        stateText = "Connected";
+        connectionText = "Connected";
     }
     else if (m_connectionState == static_cast<int>(sd::transport::ConnectionState::Stale))
     {
-        stateText = "Stale";
+        connectionText = "Stale";
     }
 
     const QString layoutName = GetLayoutTitleSegment();
     const QString dirtySuffix = m_layoutDirty ? " *" : "";
     if (!layoutName.isEmpty())
     {
-        setWindowTitle(QString("SmartDashboard - %1 [%2]%3").arg(stateText, layoutName, dirtySuffix));
+        setWindowTitle(QString("SmartDashboard - %1 [%2]%3").arg(connectionText, layoutName, dirtySuffix));
         return;
     }
 
-    setWindowTitle(QString("SmartDashboard - %1%2").arg(stateText, dirtySuffix));
+    setWindowTitle(QString("SmartDashboard - %1%2").arg(connectionText, dirtySuffix));
 }
 
 void MainWindow::OnConnectTransport()
 {
+    if (m_connectionConfig.kind == sd::transport::TransportKind::Replay)
+    {
+        return;
+    }
+
     StartTransport();
 }
 
 void MainWindow::OnDisconnectTransport()
 {
+    if (m_connectionConfig.kind == sd::transport::TransportKind::Replay)
+    {
+        return;
+    }
+
     StopTransport();
     UpdateWindowConnectionText(static_cast<int>(sd::transport::ConnectionState::Disconnected));
 }
 
 void MainWindow::OnUseDirectTransport()
 {
+    const bool kindChanged = m_connectionConfig.kind != sd::transport::TransportKind::Direct;
+    if (kindChanged && m_transport != nullptr)
+    {
+        StopTransport();
+        UpdateWindowConnectionText(static_cast<int>(sd::transport::ConnectionState::Disconnected));
+    }
+
     m_connectionConfig.kind = sd::transport::TransportKind::Direct;
     for (const auto& [_, tile] : m_tiles)
     {
@@ -914,10 +1047,19 @@ void MainWindow::OnUseDirectTransport()
     }
     ApplyTransportMenuChecks();
     PersistConnectionSettings();
+    UpdateWindowConnectionText(m_connectionState);
+    UpdatePlaybackUiState();
 }
 
 void MainWindow::OnUseNetworkTablesTransport()
 {
+    const bool kindChanged = m_connectionConfig.kind != sd::transport::TransportKind::NetworkTables;
+    if (kindChanged && m_transport != nullptr)
+    {
+        StopTransport();
+        UpdateWindowConnectionText(static_cast<int>(sd::transport::ConnectionState::Disconnected));
+    }
+
     m_connectionConfig.kind = sd::transport::TransportKind::NetworkTables;
     for (const auto& [_, tile] : m_tiles)
     {
@@ -928,6 +1070,72 @@ void MainWindow::OnUseNetworkTablesTransport()
     }
     ApplyTransportMenuChecks();
     PersistConnectionSettings();
+    UpdateWindowConnectionText(m_connectionState);
+    UpdatePlaybackUiState();
+}
+
+void MainWindow::OnUseReplayTransport()
+{
+    if (!m_telemetryFeatureEnabled)
+    {
+        return;
+    }
+
+    const bool kindChanged = m_connectionConfig.kind != sd::transport::TransportKind::Replay;
+    if (kindChanged && m_transport != nullptr)
+    {
+        StopTransport();
+        UpdateWindowConnectionText(static_cast<int>(sd::transport::ConnectionState::Disconnected));
+    }
+
+    m_connectionConfig.kind = sd::transport::TransportKind::Replay;
+    for (const auto& [_, tile] : m_tiles)
+    {
+        if (tile != nullptr)
+        {
+            tile->SetTitleText(BuildDisplayLabel(tile->GetKey()));
+        }
+    }
+    ApplyTransportMenuChecks();
+    PersistConnectionSettings();
+    UpdateWindowConnectionText(m_connectionState);
+    UpdatePlaybackUiState();
+
+    if (!m_connectionConfig.replayFilePath.trimmed().isEmpty())
+    {
+        StartTransport();
+    }
+}
+
+void MainWindow::OnToggleTelemetryFeature()
+{
+    m_telemetryFeatureEnabled = (m_telemetryFeatureAction != nullptr) && m_telemetryFeatureAction->isChecked();
+
+    const bool hadTransport = (m_transport != nullptr);
+    if (!m_telemetryFeatureEnabled)
+    {
+        StopSessionRecording();
+        if (m_connectionConfig.kind == sd::transport::TransportKind::Replay)
+        {
+            m_connectionConfig.kind = sd::transport::TransportKind::Direct;
+            for (const auto& [_, tile] : m_tiles)
+            {
+                if (tile != nullptr)
+                {
+                    tile->SetTitleText(BuildDisplayLabel(tile->GetKey()));
+                }
+            }
+
+            if (hadTransport)
+            {
+                StartTransport();
+            }
+        }
+    }
+
+    PersistConnectionSettings();
+    ApplyTransportMenuChecks();
+    UpdatePlaybackUiState();
 }
 
 void MainWindow::OnSetNtHost()
@@ -984,8 +1192,94 @@ void MainWindow::OnToggleNtUseTeam()
     PersistConnectionSettings();
 }
 
+void MainWindow::OnOpenReplayFile()
+{
+    const QString selected = QFileDialog::getOpenFileName(
+        this,
+        "Open Replay Session",
+        m_connectionConfig.replayFilePath,
+        "Replay Files (*.jsonl *.log);;All Files (*)"
+    );
+    if (selected.isEmpty())
+    {
+        return;
+    }
+
+    m_connectionConfig.replayFilePath = selected;
+    m_connectionConfig.kind = sd::transport::TransportKind::Replay;
+    ApplyTransportMenuChecks();
+    PersistConnectionSettings();
+    UpdateWindowConnectionText(m_connectionState);
+    StartTransport();
+}
+
+void MainWindow::OnRecordToggled(bool checked)
+{
+    m_recordRequested = checked;
+    PersistConnectionSettings();
+
+    if (checked)
+    {
+        StartSessionRecording();
+    }
+    else
+    {
+        StopSessionRecording();
+    }
+
+    UpdatePlaybackUiState();
+}
+
+void MainWindow::OnPlaybackRewindToStart()
+{
+    if (!m_transport || !m_transport->SupportsPlayback() || !m_telemetryFeatureEnabled)
+    {
+        return;
+    }
+
+    m_transport->SetPlaybackPlaying(false);
+    m_transport->SeekPlaybackUs(0);
+    UpdatePlaybackUiState();
+}
+
+void MainWindow::OnPlaybackPlayPause()
+{
+    if (!m_transport || !m_transport->SupportsPlayback() || !m_telemetryFeatureEnabled)
+    {
+        return;
+    }
+
+    const bool isPlaying = m_transport->IsPlaybackPlaying();
+    m_transport->SetPlaybackPlaying(!isPlaying);
+    UpdatePlaybackUiState();
+}
+
+void MainWindow::OnPlaybackRateChanged(int index)
+{
+    if (!m_transport || !m_transport->SupportsPlayback() || m_playbackRateCombo == nullptr)
+    {
+        return;
+    }
+
+    const double rate = m_playbackRateCombo->itemData(index).toDouble();
+    m_transport->SetPlaybackRate(rate);
+}
+
+void MainWindow::OnPlaybackCursorScrubbed(std::int64_t cursorUs)
+{
+    if (!m_transport || !m_transport->SupportsPlayback())
+    {
+        return;
+    }
+
+    m_transport->SeekPlaybackUs(cursorUs);
+    UpdatePlaybackUiState();
+}
+
 void MainWindow::ApplyTransportMenuChecks()
 {
+    const bool replayMode = m_connectionConfig.kind == sd::transport::TransportKind::Replay;
+
     if (m_useDirectTransportAction != nullptr)
     {
         m_useDirectTransportAction->setChecked(m_connectionConfig.kind == sd::transport::TransportKind::Direct);
@@ -996,9 +1290,39 @@ void MainWindow::ApplyTransportMenuChecks()
         m_useNetworkTablesTransportAction->setChecked(m_connectionConfig.kind == sd::transport::TransportKind::NetworkTables);
     }
 
+    if (m_useReplayTransportAction != nullptr)
+    {
+        m_useReplayTransportAction->setChecked(m_connectionConfig.kind == sd::transport::TransportKind::Replay);
+    }
+
     if (m_ntUseTeamAction != nullptr)
     {
         m_ntUseTeamAction->setChecked(m_connectionConfig.ntUseTeam);
+    }
+
+    if (m_telemetryFeatureAction != nullptr)
+    {
+        m_telemetryFeatureAction->setChecked(m_telemetryFeatureEnabled);
+    }
+
+    if (m_useReplayTransportAction != nullptr)
+    {
+        m_useReplayTransportAction->setEnabled(m_telemetryFeatureEnabled);
+    }
+
+    if (m_openReplayFileAction != nullptr)
+    {
+        m_openReplayFileAction->setEnabled(m_telemetryFeatureEnabled);
+    }
+
+    if (m_connectTransportAction != nullptr)
+    {
+        m_connectTransportAction->setEnabled(!replayMode);
+    }
+
+    if (m_disconnectTransportAction != nullptr)
+    {
+        m_disconnectTransportAction->setEnabled(!replayMode);
     }
 }
 
@@ -1010,15 +1334,20 @@ void MainWindow::PersistConnectionSettings() const
     settings.setValue("connection/ntTeam", m_connectionConfig.ntTeam);
     settings.setValue("connection/ntUseTeam", m_connectionConfig.ntUseTeam);
     settings.setValue("connection/ntClientName", m_connectionConfig.ntClientName);
+    settings.setValue("connection/replayFilePath", m_connectionConfig.replayFilePath);
+    settings.setValue("telemetry/enabled", m_telemetryFeatureEnabled);
+    settings.setValue("telemetry/recordEnabled", m_recordRequested);
 }
 
 void MainWindow::StartTransport()
 {
     StopTransport();
+    StartSessionRecording();
 
     m_transport = sd::transport::CreateDashboardTransport(m_connectionConfig);
     if (!m_transport)
     {
+        StopSessionRecording();
         UpdateWindowConnectionText(static_cast<int>(sd::transport::ConnectionState::Disconnected));
         return;
     }
@@ -1049,20 +1378,350 @@ void MainWindow::StartTransport()
                 tile->SetTitleText(BuildDisplayLabel(tile->GetKey()));
             }
         }
+
+        if (m_transport->SupportsPlayback() && m_playbackRateCombo != nullptr)
+        {
+            m_transport->SetPlaybackRate(m_playbackRateCombo->currentData().toDouble());
+        }
     }
 
     if (!started)
     {
+        StopSessionRecording();
         m_transport.reset();
         UpdateWindowConnectionText(static_cast<int>(sd::transport::ConnectionState::Disconnected));
     }
+
+    UpdatePlaybackUiState();
 }
 
 void MainWindow::StopTransport()
 {
     if (m_transport)
     {
+        RecordConnectionEvent(static_cast<int>(sd::transport::ConnectionState::Disconnected));
         m_transport->Stop();
         m_transport.reset();
     }
+
+    StopSessionRecording();
+    UpdatePlaybackUiState();
+}
+
+void MainWindow::UpdatePlaybackUiState()
+{
+    const bool replayMode = m_connectionConfig.kind == sd::transport::TransportKind::Replay;
+    const bool hasPlayback = replayMode && (m_transport != nullptr) && m_transport->SupportsPlayback() && m_telemetryFeatureEnabled;
+    const bool canRecordOnTransport = m_telemetryFeatureEnabled && IsRecordingTransportKind(m_connectionConfig.kind);
+
+    if (m_playbackRateCombo != nullptr)
+    {
+        m_playbackRateCombo->setEnabled(hasPlayback);
+    }
+
+    if (m_recordButton != nullptr)
+    {
+        m_recordButton->setEnabled(canRecordOnTransport);
+        if (m_recordButton->isChecked() != m_recordRequested)
+        {
+            m_recordButton->setChecked(m_recordRequested);
+        }
+    }
+
+    if (m_playPauseButton != nullptr)
+    {
+        m_playPauseButton->setEnabled(hasPlayback);
+        if (hasPlayback && m_transport != nullptr && m_transport->IsPlaybackPlaying())
+        {
+            m_playPauseButton->setText(QString::fromUtf8("\xE2\x8F\xB8"));
+            m_playPauseButton->setStyleSheet(
+                "QToolButton { color: #f2c94c; font-weight: 700; }"
+                "QToolButton:disabled { color: #5a5a5a; }"
+            );
+            m_playPauseButton->setToolTip("Pause telemetry replay");
+        }
+        else
+        {
+            m_playPauseButton->setText(QString::fromUtf8("\xE2\x96\xB6"));
+            m_playPauseButton->setStyleSheet(
+                "QToolButton { color: #2f9e44; font-weight: 700; }"
+                "QToolButton:disabled { color: #5a5a5a; }"
+            );
+            m_playPauseButton->setToolTip("Play telemetry replay");
+        }
+    }
+
+    if (m_rewindButton != nullptr)
+    {
+        m_rewindButton->setEnabled(hasPlayback);
+    }
+
+    if (m_telemetryControlsPanel != nullptr)
+    {
+        m_telemetryControlsPanel->setVisible(m_telemetryFeatureEnabled);
+    }
+
+    if (m_playbackTimeline != nullptr)
+    {
+        m_playbackTimeline->setVisible(m_telemetryFeatureEnabled);
+        m_playbackTimeline->setEnabled(hasPlayback);
+        m_playbackTimeline->setWindowOpacity(hasPlayback ? 1.0 : 0.45);
+        if (hasPlayback)
+        {
+            const std::int64_t durationUs = m_transport->GetPlaybackDurationUs();
+            const std::int64_t cursorUs = m_transport->GetPlaybackCursorUs();
+            m_playbackTimeline->SetDurationUs(durationUs);
+            if (m_playbackTimeline->GetWindowEndUs() <= m_playbackTimeline->GetWindowStartUs())
+            {
+                m_playbackTimeline->SetWindowUs(0, durationUs);
+            }
+            m_playbackTimeline->SetCursorUs(cursorUs);
+        }
+        else
+        {
+            m_playbackTimeline->SetDurationUs(0);
+            m_playbackTimeline->SetCursorUs(0);
+            m_playbackTimeline->SetWindowUs(0, 0);
+        }
+    }
+}
+
+void MainWindow::StartSessionRecording()
+{
+    StopSessionRecording();
+
+    if (!m_telemetryFeatureEnabled || !m_recordRequested || !IsRecordingTransportKind(m_connectionConfig.kind))
+    {
+        return;
+    }
+
+    const QString logsDir = QDir::currentPath() + "/logs";
+    QDir().mkpath(logsDir);
+
+    const QString timestamp = QDateTime::currentDateTimeUtc().toString("yyyyMMdd_HHmmss_zzz");
+    m_recordingFilePath = QString("%1/session_%2.jsonl").arg(logsDir, timestamp);
+
+    m_recordingStartEpochUs = static_cast<std::uint64_t>(QDateTime::currentMSecsSinceEpoch()) * 1000ULL;
+    m_recordingStartSteadyUs = static_cast<std::uint64_t>(
+        std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()
+        ).count()
+    );
+    m_recordingLastTimestampUs = 0;
+
+    {
+        std::lock_guard<std::mutex> lock(m_recordingMutex);
+        m_recordingQueue.clear();
+        m_recordingStopRequested = false;
+        m_recordingThreadRunning = true;
+    }
+
+    m_recordingThread = std::thread([this]()
+    {
+        QFile file(m_recordingFilePath);
+        if (!file.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text))
+        {
+            std::lock_guard<std::mutex> lock(m_recordingMutex);
+            m_recordingThreadRunning = false;
+            return;
+        }
+
+        while (true)
+        {
+            QByteArray line;
+            {
+                std::unique_lock<std::mutex> lock(m_recordingMutex);
+                m_recordingCv.wait(lock, [this]()
+                {
+                    return m_recordingStopRequested || !m_recordingQueue.empty();
+                });
+
+                if (!m_recordingQueue.empty())
+                {
+                    line = std::move(m_recordingQueue.front());
+                    m_recordingQueue.pop_front();
+                }
+                else if (m_recordingStopRequested)
+                {
+                    break;
+                }
+            }
+
+            if (!line.isEmpty())
+            {
+                file.write(line);
+                file.write("\n");
+            }
+        }
+
+        {
+            std::lock_guard<std::mutex> lock(m_recordingMutex);
+            while (!m_recordingQueue.empty())
+            {
+                const QByteArray line = std::move(m_recordingQueue.front());
+                m_recordingQueue.pop_front();
+                if (!line.isEmpty())
+                {
+                    file.write(line);
+                    file.write("\n");
+                }
+            }
+            m_recordingThreadRunning = false;
+        }
+
+        file.flush();
+        file.close();
+    });
+}
+
+void MainWindow::StopSessionRecording()
+{
+    {
+        std::lock_guard<std::mutex> lock(m_recordingMutex);
+        if (!m_recordingThreadRunning && !m_recordingThread.joinable())
+        {
+            return;
+        }
+
+        m_recordingStopRequested = true;
+    }
+
+    m_recordingCv.notify_all();
+    if (m_recordingThread.joinable())
+    {
+        m_recordingThread.join();
+    }
+
+    std::lock_guard<std::mutex> lock(m_recordingMutex);
+    m_recordingQueue.clear();
+    m_recordingThreadRunning = false;
+    m_recordingStopRequested = false;
+}
+
+void MainWindow::RecordVariableEvent(const QString& key, int valueType, const QVariant& value, quint64 seq)
+{
+    if (!IsRecordingTransportKind(m_connectionConfig.kind))
+    {
+        return;
+    }
+
+    std::uint64_t nowSteadyUs = static_cast<std::uint64_t>(
+        std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()
+        ).count()
+    );
+
+    std::uint64_t timestampUs = 0;
+    if (nowSteadyUs >= m_recordingStartSteadyUs)
+    {
+        timestampUs = nowSteadyUs - m_recordingStartSteadyUs;
+    }
+    if (timestampUs < m_recordingLastTimestampUs)
+    {
+        timestampUs = m_recordingLastTimestampUs;
+    }
+    m_recordingLastTimestampUs = timestampUs;
+
+    QString typeString = "string";
+    if (valueType == static_cast<int>(sd::direct::ValueType::Bool))
+    {
+        typeString = "bool";
+    }
+    else if (valueType == static_cast<int>(sd::direct::ValueType::Double))
+    {
+        typeString = "double";
+    }
+
+    QJsonObject object;
+    object.insert("eventKind", "data");
+    object.insert("timestampUs", static_cast<qint64>(timestampUs));
+    object.insert("key", key);
+    object.insert("valueType", typeString);
+    object.insert("seq", QString::number(seq));
+    if (typeString == "bool")
+    {
+        object.insert("value", value.toBool());
+    }
+    else if (typeString == "double")
+    {
+        object.insert("value", value.toDouble());
+    }
+    else
+    {
+        object.insert("value", value.toString());
+    }
+
+    const QByteArray line = QJsonDocument(object).toJson(QJsonDocument::Compact);
+    {
+        std::lock_guard<std::mutex> lock(m_recordingMutex);
+        if (!m_recordingThreadRunning || m_recordingStopRequested)
+        {
+            return;
+        }
+
+        m_recordingQueue.push_back(line);
+    }
+    m_recordingCv.notify_one();
+}
+
+void MainWindow::RecordConnectionEvent(int state)
+{
+    if (!IsRecordingTransportKind(m_connectionConfig.kind))
+    {
+        return;
+    }
+
+    std::uint64_t nowSteadyUs = static_cast<std::uint64_t>(
+        std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()
+        ).count()
+    );
+
+    std::uint64_t timestampUs = 0;
+    if (nowSteadyUs >= m_recordingStartSteadyUs)
+    {
+        timestampUs = nowSteadyUs - m_recordingStartSteadyUs;
+    }
+    if (timestampUs < m_recordingLastTimestampUs)
+    {
+        timestampUs = m_recordingLastTimestampUs;
+    }
+    m_recordingLastTimestampUs = timestampUs;
+
+    QString stateText = "Disconnected";
+    if (state == static_cast<int>(sd::transport::ConnectionState::Connecting))
+    {
+        stateText = "Connecting";
+    }
+    else if (state == static_cast<int>(sd::transport::ConnectionState::Connected))
+    {
+        stateText = "Connected";
+    }
+    else if (state == static_cast<int>(sd::transport::ConnectionState::Stale))
+    {
+        stateText = "Stale";
+    }
+
+    QJsonObject object;
+    object.insert("eventKind", "connection_state");
+    object.insert("timestampUs", static_cast<qint64>(timestampUs));
+    object.insert("state", stateText);
+    object.insert("stateValue", state);
+
+    const QByteArray line = QJsonDocument(object).toJson(QJsonDocument::Compact);
+    {
+        std::lock_guard<std::mutex> lock(m_recordingMutex);
+        if (!m_recordingThreadRunning || m_recordingStopRequested)
+        {
+            return;
+        }
+
+        m_recordingQueue.push_back(line);
+    }
+    m_recordingCv.notify_one();
+}
+
+bool MainWindow::IsRecordingTransportKind(sd::transport::TransportKind kind) const
+{
+    return kind == sd::transport::TransportKind::Direct || kind == sd::transport::TransportKind::NetworkTables;
 }
