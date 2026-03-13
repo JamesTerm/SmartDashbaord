@@ -110,6 +110,24 @@ Curated milestone history for this repository.
 - Started next iteration branch: `feature/replay-iteration-a-timeline-readability`.
 - Next implementation target is Iteration A from `docs/replay_parity_roadmap.md` (timeline readability and temporal affordances).
 
+## 2026-03-12 - Replay parity iterations A+B (timeline readability, markers, jump workflow)
+
+- Implemented Iteration A timeline readability in `PlaybackTimelineWidget`:
+  - adaptive tick marks with time labels that remain readable across broad/narrow zoom windows
+  - explicit cursor timestamp readout and visible-window span readout
+  - overview strip that shows full replay duration with highlighted current window span
+- Added focused automated coverage for timeline readability behavior in `SmartDashboard/tests/playback_timeline_widget_tests.cpp`:
+  - `TickStepAdaptsAcrossZoomSpans`
+  - `TimeAndSpanLabelsUseReadableFormats`
+- Implemented Iteration B marker workflow across transport + UI:
+  - replay transport now extracts typed playback markers from `connection_state` and `marker` events (`connect`, `disconnect`, `stale`, generic)
+  - transport contract extended with marker retrieval API (`GetPlaybackMarkers`) and shared marker model types
+  - timeline renders marker glyphs in both overview and zoomed track views
+  - status bar playback controls now include previous/next marker jump actions (`⏮` / `⏭`) that seek replay cursor to adjacent markers
+- Validation:
+  - built `SmartDashboard_tests` and `SmartDashboardApp`
+  - replay timeline test suite passes after A+B changes
+
 ## 2026-03-11 - Line-plot smoothing, direct stream cadence tuning, and direct-label compaction
 
 - Improved line-plot smooth-scrolling behavior in `SmartDashboard/src/widgets/line_plot_widget.cpp`:

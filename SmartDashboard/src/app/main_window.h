@@ -18,6 +18,7 @@
 #include <cstdint>
 #include <memory>
 #include <unordered_map>
+#include <vector>
 
 class QAction;
 class QCloseEvent;
@@ -77,6 +78,8 @@ private slots:
     void OnPlaybackPlayPause();
     void OnPlaybackRateChanged(int index);
     void OnPlaybackCursorScrubbed(std::int64_t cursorUs);
+    void OnPlaybackPreviousMarker();
+    void OnPlaybackNextMarker();
 
 private:
     using TileMap = std::unordered_map<std::string, sd::widgets::VariableTile*>;
@@ -104,6 +107,7 @@ private:
     void StartTransport();
     void StopTransport();
     void UpdatePlaybackUiState();
+    void RefreshReplayMarkers();
     void StartSessionRecording();
     void StopSessionRecording();
     void RecordVariableEvent(const QString& key, int valueType, const QVariant& value, quint64 seq);
@@ -129,6 +133,8 @@ private:
     QPushButton* m_recordButton = nullptr;
     QToolButton* m_rewindButton = nullptr;
     QToolButton* m_playPauseButton = nullptr;
+    QToolButton* m_prevMarkerButton = nullptr;
+    QToolButton* m_nextMarkerButton = nullptr;
     QComboBox* m_playbackRateCombo = nullptr;
     sd::widgets::PlaybackTimelineWidget* m_playbackTimeline = nullptr;
     QTimer* m_playbackUiTimer = nullptr;
@@ -159,4 +165,5 @@ private:
     std::uint64_t m_recordingStartEpochUs = 0;
     std::uint64_t m_recordingLastTimestampUs = 0;
     std::uint64_t m_recordingStartSteadyUs = 0;
+    std::vector<std::int64_t> m_replayMarkerTimesUs;
 };

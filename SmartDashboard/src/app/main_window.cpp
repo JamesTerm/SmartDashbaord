@@ -37,6 +37,7 @@
 #include <QWidget>
 
 #include <chrono>
+#include <limits>
 
 namespace
 {
@@ -296,6 +297,26 @@ MainWindow::MainWindow(QWidget* parent)
     m_playPauseButton->setStyleSheet("QToolButton { color: #2f9e44; font-weight: 700; }");
     playbackLayout->addWidget(m_playPauseButton);
 
+    m_prevMarkerButton = new QToolButton(m_telemetryControlsPanel);
+    m_prevMarkerButton->setText(QString::fromUtf8("\xE2\x8F\xAE"));
+    m_prevMarkerButton->setToolTip("Jump to previous marker");
+    m_prevMarkerButton->setFixedSize(24, 24);
+    m_prevMarkerButton->setStyleSheet(
+        "QToolButton { color: #8e9aaf; font-weight: 700; }"
+        "QToolButton:disabled { color: #5a5a5a; }"
+    );
+    playbackLayout->addWidget(m_prevMarkerButton);
+
+    m_nextMarkerButton = new QToolButton(m_telemetryControlsPanel);
+    m_nextMarkerButton->setText(QString::fromUtf8("\xE2\x8F\xAD"));
+    m_nextMarkerButton->setToolTip("Jump to next marker");
+    m_nextMarkerButton->setFixedSize(24, 24);
+    m_nextMarkerButton->setStyleSheet(
+        "QToolButton { color: #8e9aaf; font-weight: 700; }"
+        "QToolButton:disabled { color: #5a5a5a; }"
+    );
+    playbackLayout->addWidget(m_nextMarkerButton);
+
     m_playbackRateCombo = new QComboBox(m_telemetryControlsPanel);
     m_playbackRateCombo->addItem("0.25x", 0.25);
     m_playbackRateCombo->addItem("0.5x", 0.5);
@@ -308,6 +329,8 @@ MainWindow::MainWindow(QWidget* parent)
     connect(m_recordButton, &QPushButton::toggled, this, &MainWindow::OnRecordToggled);
     connect(m_rewindButton, &QToolButton::clicked, this, &MainWindow::OnPlaybackRewindToStart);
     connect(m_playPauseButton, &QToolButton::clicked, this, &MainWindow::OnPlaybackPlayPause);
+    connect(m_prevMarkerButton, &QToolButton::clicked, this, &MainWindow::OnPlaybackPreviousMarker);
+    connect(m_nextMarkerButton, &QToolButton::clicked, this, &MainWindow::OnPlaybackNextMarker);
     connect(m_playbackRateCombo, qOverload<int>(&QComboBox::currentIndexChanged), this, &MainWindow::OnPlaybackRateChanged);
 
     m_playbackTimeline = new sd::widgets::PlaybackTimelineWidget(this);
@@ -1276,6 +1299,61 @@ void MainWindow::OnPlaybackCursorScrubbed(std::int64_t cursorUs)
     UpdatePlaybackUiState();
 }
 
+void MainWindow::OnPlaybackPreviousMarker()
+{
+    if (!m_transport || !m_transport->SupportsPlayback() || m_replayMarkerTimesUs.empty())
+    {
+        return;
+    }
+
+    const std::int64_t cursorUs = m_transport->GetPlaybackCursorUs();
+    std::int64_t targetUs = -1;
+    for (std::size_t i = m_replayMarkerTimesUs.size(); i > 0; --i)
+    {
+        const std::int64_t markerUs = m_replayMarkerTimesUs[i - 1];
+        if (markerUs < cursorUs)
+        {
+            targetUs = markerUs;
+            break;
+        }
+    }
+
+    if (targetUs < 0)
+    {
+        targetUs = m_replayMarkerTimesUs.front();
+    }
+
+    m_transport->SeekPlaybackUs(targetUs);
+    UpdatePlaybackUiState();
+}
+
+void MainWindow::OnPlaybackNextMarker()
+{
+    if (!m_transport || !m_transport->SupportsPlayback() || m_replayMarkerTimesUs.empty())
+    {
+        return;
+    }
+
+    const std::int64_t cursorUs = m_transport->GetPlaybackCursorUs();
+    std::int64_t targetUs = -1;
+    for (const std::int64_t markerUs : m_replayMarkerTimesUs)
+    {
+        if (markerUs > cursorUs)
+        {
+            targetUs = markerUs;
+            break;
+        }
+    }
+
+    if (targetUs < 0)
+    {
+        targetUs = m_replayMarkerTimesUs.back();
+    }
+
+    m_transport->SeekPlaybackUs(targetUs);
+    UpdatePlaybackUiState();
+}
+
 void MainWindow::ApplyTransportMenuChecks()
 {
     const bool replayMode = m_connectionConfig.kind == sd::transport::TransportKind::Replay;
@@ -1456,6 +1534,25 @@ void MainWindow::UpdatePlaybackUiState()
         m_rewindButton->setEnabled(hasPlayback);
     }
 
+    if (hasPlayback)
+    {
+        RefreshReplayMarkers();
+    }
+    else
+    {
+        m_replayMarkerTimesUs.clear();
+    }
+
+    const bool hasMarkers = hasPlayback && !m_replayMarkerTimesUs.empty();
+    if (m_prevMarkerButton != nullptr)
+    {
+        m_prevMarkerButton->setEnabled(hasMarkers);
+    }
+    if (m_nextMarkerButton != nullptr)
+    {
+        m_nextMarkerButton->setEnabled(hasMarkers);
+    }
+
     if (m_telemetryControlsPanel != nullptr)
     {
         m_telemetryControlsPanel->setVisible(m_telemetryFeatureEnabled);
@@ -1476,13 +1573,58 @@ void MainWindow::UpdatePlaybackUiState()
                 m_playbackTimeline->SetWindowUs(0, durationUs);
             }
             m_playbackTimeline->SetCursorUs(cursorUs);
+
+            std::vector<sd::widgets::TimelineMarker> timelineMarkers;
+            timelineMarkers.reserve(m_replayMarkerTimesUs.size());
+            const std::vector<sd::transport::PlaybackMarker> transportMarkers = m_transport->GetPlaybackMarkers();
+            for (const sd::transport::PlaybackMarker& marker : transportMarkers)
+            {
+                sd::widgets::TimelineMarker timelineMarker;
+                timelineMarker.timestampUs = marker.timestampUs;
+                switch (marker.kind)
+                {
+                    case sd::transport::PlaybackMarkerKind::Connect:
+                        timelineMarker.kind = sd::widgets::TimelineMarkerKind::Connect;
+                        break;
+                    case sd::transport::PlaybackMarkerKind::Disconnect:
+                        timelineMarker.kind = sd::widgets::TimelineMarkerKind::Disconnect;
+                        break;
+                    case sd::transport::PlaybackMarkerKind::Stale:
+                        timelineMarker.kind = sd::widgets::TimelineMarkerKind::Stale;
+                        break;
+                    case sd::transport::PlaybackMarkerKind::Generic:
+                    default:
+                        timelineMarker.kind = sd::widgets::TimelineMarkerKind::Generic;
+                        break;
+                }
+                timelineMarker.label = marker.label;
+                timelineMarkers.push_back(timelineMarker);
+            }
+            m_playbackTimeline->SetMarkers(timelineMarkers);
         }
         else
         {
             m_playbackTimeline->SetDurationUs(0);
             m_playbackTimeline->SetCursorUs(0);
             m_playbackTimeline->SetWindowUs(0, 0);
+            m_playbackTimeline->SetMarkers({});
         }
+    }
+}
+
+void MainWindow::RefreshReplayMarkers()
+{
+    m_replayMarkerTimesUs.clear();
+    if (!m_transport || !m_transport->SupportsPlayback())
+    {
+        return;
+    }
+
+    const std::vector<sd::transport::PlaybackMarker> markers = m_transport->GetPlaybackMarkers();
+    m_replayMarkerTimesUs.reserve(markers.size());
+    for (const sd::transport::PlaybackMarker& marker : markers)
+    {
+        m_replayMarkerTimesUs.push_back(marker.timestampUs);
     }
 }
 

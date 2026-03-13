@@ -48,6 +48,30 @@ namespace sd::transport
             }
         }
 
+        PlaybackMarkerKind ToPlaybackMarkerKindFromState(const QString& stateText)
+        {
+            const QString normalized = stateText.trimmed().toLower();
+            if (normalized == "connected" || normalized == "connect")
+            {
+                return PlaybackMarkerKind::Connect;
+            }
+            if (normalized == "disconnected" || normalized == "disconnect")
+            {
+                return PlaybackMarkerKind::Disconnect;
+            }
+            if (normalized == "stale")
+            {
+                return PlaybackMarkerKind::Stale;
+            }
+
+            return PlaybackMarkerKind::Generic;
+        }
+
+        PlaybackMarkerKind ToPlaybackMarkerKindFromMarkerType(const QString& markerType)
+        {
+            return ToPlaybackMarkerKindFromState(markerType);
+        }
+
         class DirectDashboardTransport final : public IDashboardTransport
         {
         public:
@@ -978,6 +1002,12 @@ namespace sd::transport
                 return m_playing;
             }
 
+            std::vector<PlaybackMarker> GetPlaybackMarkers() const override
+            {
+                std::lock_guard<std::mutex> lock(m_mutex);
+                return m_markers;
+            }
+
         private:
             enum class ReplayEventKind
             {
@@ -991,6 +1021,7 @@ namespace sd::transport
                 ReplayEventKind kind = ReplayEventKind::Data;
                 std::int64_t timestampUs = 0;
                 VariableUpdate update;
+                PlaybackMarker marker;
             };
 
             struct Checkpoint
@@ -1053,6 +1084,14 @@ namespace sd::transport
                 std::lock_guard<std::mutex> lock(m_mutex);
                 m_events = std::move(loaded);
                 m_durationUs = std::max<std::int64_t>(0, m_events.back().timestampUs);
+                m_markers.clear();
+                for (const ReplayEvent& event : m_events)
+                {
+                    if (event.kind == ReplayEventKind::ConnectionState || event.kind == ReplayEventKind::Marker)
+                    {
+                        m_markers.push_back(event.marker);
+                    }
+                }
                 BuildCheckpointsLocked();
                 return true;
             }
@@ -1065,12 +1104,21 @@ namespace sd::transport
                 if (kind == "connection_state")
                 {
                     event.kind = ReplayEventKind::ConnectionState;
+                    const QString stateText = object.value("state").toString("Disconnected");
+                    event.marker.timestampUs = event.timestampUs;
+                    event.marker.kind = ToPlaybackMarkerKindFromState(stateText);
+                    event.marker.label = stateText;
                     return true;
                 }
 
                 if (kind == "marker")
                 {
                     event.kind = ReplayEventKind::Marker;
+                    const QString markerType = object.value("markerType").toString(object.value("type").toString("marker"));
+                    const QString markerLabel = object.value("label").toString(markerType);
+                    event.marker.timestampUs = event.timestampUs;
+                    event.marker.kind = ToPlaybackMarkerKindFromMarkerType(markerType);
+                    event.marker.label = markerLabel;
                     return true;
                 }
 
@@ -1280,6 +1328,7 @@ namespace sd::transport
             std::int64_t m_lastTickUs = 0;
             std::size_t m_nextEventIndex = 0;
             std::vector<ReplayEvent> m_events;
+            std::vector<PlaybackMarker> m_markers;
             std::vector<Checkpoint> m_checkpoints;
             std::thread m_worker;
             VariableUpdateCallback m_onVariableUpdate;

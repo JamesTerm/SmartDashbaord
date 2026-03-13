@@ -94,6 +94,20 @@
   - stable milestone tag created: `v0.9.0-replay-foundation`
   - current active branch for next work: `feature/replay-iteration-a-timeline-readability`
   - next planned implementation slice: Iteration A from `docs/replay_parity_roadmap.md` (timeline readability)
+- Replay parity iteration progress update:
+  - Iteration A (timeline readability) is now implemented:
+    - adaptive timeline tick marks + readable time labels across zoom levels
+    - cursor timestamp and visible window-span readouts in timeline UI
+    - overview strip showing full duration with highlighted visible window
+  - Iteration B (system markers and jump workflow) is now implemented:
+    - replay transport parses `connection_state` and `marker` events into typed playback markers
+    - timeline renders marker glyphs in both overview and visible track windows
+    - status bar adds previous/next marker jump controls (`⏮` / `⏭`) wired to replay seek
+  - Playback timeline regression coverage now includes:
+    - cursor/window clamp behavior
+    - tick-step adaptation across zoom spans
+    - readable time/span label formatting
+  - Next planned implementation slice: Iteration C (marker list panel + keyboard navigation)
 
 ## Known constraints / active considerations
 
