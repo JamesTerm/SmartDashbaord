@@ -103,11 +103,16 @@
     - replay transport parses `connection_state` and `marker` events into typed playback markers
     - timeline renders marker glyphs in both overview and visible track windows
     - status bar adds previous/next marker jump controls (`⏮` / `⏭`) wired to replay seek
+  - Iteration C (marker list panel + keyboard navigation) is now implemented:
+    - added docked `Replay Markers` list with timestamp/type/label rows
+    - clicking/activating a marker list row seeks replay to that marker timestamp
+    - marker list selection auto-follows replay cursor to nearest prior marker
+    - keyboard stepping in replay mode: `Left/Right` = ±100 ms, `Shift+Left/Shift+Right` = ±1 s
   - Playback timeline regression coverage now includes:
     - cursor/window clamp behavior
     - tick-step adaptation across zoom spans
     - readable time/span label formatting
-  - Next planned implementation slice: Iteration C (marker list panel + keyboard navigation)
+  - Next planned implementation slice: Iteration D (analysis helpers: bookmarks/anomalies/selection stats)
 
 ## Known constraints / active considerations
 

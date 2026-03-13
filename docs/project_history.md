@@ -128,6 +128,21 @@ Curated milestone history for this repository.
   - built `SmartDashboard_tests` and `SmartDashboardApp`
   - replay timeline test suite passes after A+B changes
 
+## 2026-03-12 - Replay parity iteration C (marker list panel + keyboard stepping)
+
+- Added a replay marker list panel in the main window UI (`Replay Markers` dock):
+  - displays marker rows with formatted timestamp, marker kind, and marker label
+  - wired click/activation to seek replay cursor directly to selected marker time
+  - list selection auto-follows replay cursor by selecting nearest marker at-or-before current cursor
+- Added keyboard replay navigation in replay mode:
+  - `Left` / `Right` arrows step cursor by `100 ms`
+  - `Shift+Left` / `Shift+Right` step cursor by `1 s`
+- Marker list panel visibility now follows telemetry replay context:
+  - shown only when telemetry UI is enabled and replay transport is selected
+- Validation:
+  - built `SmartDashboardApp`
+  - existing playback timeline tests continue to pass
+
 ## 2026-03-11 - Line-plot smoothing, direct stream cadence tuning, and direct-label compaction
 
 - Improved line-plot smooth-scrolling behavior in `SmartDashboard/src/widgets/line_plot_widget.cpp`:

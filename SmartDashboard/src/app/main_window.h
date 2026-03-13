@@ -23,11 +23,15 @@
 class QAction;
 class QCloseEvent;
 class QEvent;
+class QKeyEvent;
 class QLabel;
 class QWidget;
 class QMenu;
 class QActionGroup;
 class QComboBox;
+class QDockWidget;
+class QListWidget;
+class QListWidgetItem;
 class QPushButton;
 class QToolButton;
 class QTimer;
@@ -80,6 +84,7 @@ private slots:
     void OnPlaybackCursorScrubbed(std::int64_t cursorUs);
     void OnPlaybackPreviousMarker();
     void OnPlaybackNextMarker();
+    void OnReplayMarkerActivated(QListWidgetItem* item);
 
 private:
     using TileMap = std::unordered_map<std::string, sd::widgets::VariableTile*>;
@@ -87,6 +92,7 @@ private:
 
     bool eventFilter(QObject* watched, QEvent* event) override;
     void closeEvent(QCloseEvent* event) override;
+    void keyPressEvent(QKeyEvent* event) override;
 
     sd::widgets::VariableTile* GetOrCreateTile(const QString& key, sd::widgets::VariableType type);
     void UpdateWindowConnectionText(int state);
@@ -108,6 +114,8 @@ private:
     void StopTransport();
     void UpdatePlaybackUiState();
     void RefreshReplayMarkers();
+    void RefreshReplayMarkerList(std::int64_t cursorUs);
+    void StepPlaybackByUs(std::int64_t deltaUs);
     void StartSessionRecording();
     void StopSessionRecording();
     void RecordVariableEvent(const QString& key, int valueType, const QVariant& value, quint64 seq);
@@ -136,6 +144,8 @@ private:
     QToolButton* m_prevMarkerButton = nullptr;
     QToolButton* m_nextMarkerButton = nullptr;
     QComboBox* m_playbackRateCombo = nullptr;
+    QDockWidget* m_replayMarkerDock = nullptr;
+    QListWidget* m_replayMarkerList = nullptr;
     sd::widgets::PlaybackTimelineWidget* m_playbackTimeline = nullptr;
     QTimer* m_playbackUiTimer = nullptr;
     bool m_telemetryFeatureEnabled = true;
@@ -165,5 +175,7 @@ private:
     std::uint64_t m_recordingStartEpochUs = 0;
     std::uint64_t m_recordingLastTimestampUs = 0;
     std::uint64_t m_recordingStartSteadyUs = 0;
+    std::vector<sd::transport::PlaybackMarker> m_replayMarkers;
     std::vector<std::int64_t> m_replayMarkerTimesUs;
+    bool m_syncingMarkerSelection = false;
 };
