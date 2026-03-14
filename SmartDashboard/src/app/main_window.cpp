@@ -422,6 +422,8 @@ MainWindow::MainWindow(QWidget* parent)
 
     m_replayMarkerList = new QListWidget(markerPanel);
     m_replayMarkerList->setSelectionMode(QAbstractItemView::SingleSelection);
+    m_replayMarkerList->setSelectionBehavior(QAbstractItemView::SelectRows);
+    m_replayMarkerList->setMouseTracking(false);
     m_replayMarkerList->setAlternatingRowColors(true);
     markerPanelLayout->addWidget(m_replayMarkerList, 1);
 
@@ -1642,7 +1644,7 @@ void MainWindow::OnPlaybackNextMarker()
 
 void MainWindow::OnReplayMarkerActivated(QListWidgetItem* item)
 {
-    if (item == nullptr || m_syncingMarkerSelection)
+    if (item == nullptr)
     {
         return;
     }
@@ -1969,9 +1971,8 @@ void MainWindow::UpdatePlaybackUiState()
             }
 
             std::vector<sd::widgets::TimelineMarker> timelineMarkers;
-            timelineMarkers.reserve(m_replayMarkerTimesUs.size());
-            const std::vector<sd::transport::PlaybackMarker> transportMarkers = m_transport->GetPlaybackMarkers();
-            for (const sd::transport::PlaybackMarker& marker : transportMarkers)
+            timelineMarkers.reserve(m_replayMarkers.size());
+            for (const sd::transport::PlaybackMarker& marker : m_replayMarkers)
             {
                 sd::widgets::TimelineMarker timelineMarker;
                 timelineMarker.timestampUs = marker.timestampUs;
@@ -2048,23 +2049,48 @@ void MainWindow::RefreshReplayMarkerList(std::int64_t cursorUs)
         return;
     }
 
-    m_syncingMarkerSelection = true;
-    m_replayMarkerList->setUpdatesEnabled(false);
-    while (m_replayMarkerList->count() > 0)
+    bool rebuildNeeded = (m_replayMarkerList->count() != static_cast<int>(m_replayMarkers.size()));
+    if (!rebuildNeeded)
     {
-        delete m_replayMarkerList->takeItem(0);
+        for (int i = 0; i < m_replayMarkerList->count(); ++i)
+        {
+            const QListWidgetItem* item = m_replayMarkerList->item(i);
+            const sd::transport::PlaybackMarker& marker = m_replayMarkers[static_cast<std::size_t>(i)];
+            const QString labelText = marker.label.trimmed().isEmpty() ? MarkerKindLabel(marker.kind) : marker.label.trimmed();
+            const QString itemText = QString("%1  [%2]  %3").arg(FormatReplayTimeUs(marker.timestampUs), MarkerKindLabel(marker.kind), labelText);
+            if (item == nullptr || item->data(Qt::UserRole).toLongLong() != marker.timestampUs || item->text() != itemText)
+            {
+                rebuildNeeded = true;
+                break;
+            }
+        }
+    }
+
+    m_syncingMarkerSelection = true;
+    if (rebuildNeeded)
+    {
+        m_replayMarkerList->setUpdatesEnabled(false);
+        while (m_replayMarkerList->count() > 0)
+        {
+            delete m_replayMarkerList->takeItem(0);
+        }
+
+        for (const sd::transport::PlaybackMarker& marker : m_replayMarkers)
+        {
+            const QString labelText = marker.label.trimmed().isEmpty() ? MarkerKindLabel(marker.kind) : marker.label.trimmed();
+            const QString itemText = QString("%1  [%2]  %3").arg(FormatReplayTimeUs(marker.timestampUs), MarkerKindLabel(marker.kind), labelText);
+            auto* item = new QListWidgetItem(itemText, m_replayMarkerList);
+            item->setData(Qt::UserRole, QVariant::fromValue<qlonglong>(marker.timestampUs));
+            item->setFlags((item->flags() | Qt::ItemIsEnabled | Qt::ItemIsSelectable) & ~Qt::ItemIsEditable);
+            item->setToolTip("Jump replay cursor to this marker");
+        }
+        m_replayMarkerList->setUpdatesEnabled(true);
     }
 
     int selectedRow = -1;
     for (std::size_t i = 0; i < m_replayMarkers.size(); ++i)
     {
         const sd::transport::PlaybackMarker& marker = m_replayMarkers[i];
-        const QString labelText = marker.label.trimmed().isEmpty() ? MarkerKindLabel(marker.kind) : marker.label.trimmed();
-        const QString itemText = QString("%1  [%2]  %3").arg(FormatReplayTimeUs(marker.timestampUs), MarkerKindLabel(marker.kind), labelText);
-        auto* item = new QListWidgetItem(itemText, m_replayMarkerList);
-        item->setData(Qt::UserRole, QVariant::fromValue<qlonglong>(marker.timestampUs));
-        item->setFlags((item->flags() | Qt::ItemIsEnabled | Qt::ItemIsSelectable) & ~Qt::ItemIsEditable);
-        item->setToolTip("Jump replay cursor to this marker");
         if (marker.timestampUs <= cursorUs)
         {
             selectedRow = static_cast<int>(i);
@@ -2077,11 +2103,13 @@ void MainWindow::RefreshReplayMarkerList(std::int64_t cursorUs)
     }
     if (selectedRow >= 0)
     {
-        m_replayMarkerList->setCurrentRow(selectedRow);
+        if (m_replayMarkerList->currentRow() != selectedRow)
+        {
+            m_replayMarkerList->setCurrentRow(selectedRow);
+        }
     }
 
     m_replayMarkerList->setEnabled(!m_replayMarkers.empty());
-    m_replayMarkerList->setUpdatesEnabled(true);
 
     RefreshReplaySummaryLabel();
 

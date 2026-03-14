@@ -20,6 +20,7 @@ Curated milestone history for this repository.
 - Added replay analysis persistence behaviors:
   - user bookmarks now persist across sessions (`QSettings` key `replay/userBookmarks`)
   - replay marker panel visibility preference now persists reliably across sessions (`QSettings` key `replay/markersVisible`), including startup/replay-context transitions
+  - aligned timeline marker rendering source with Replay Markers panel source so marker list rows and timeline glyphs represent the same merged marker set
 - Validation:
   - built `SmartDashboardApp` after each incremental UX/persistence patch
   - manual operator validation confirmed replay marker visibility preference now restores correctly between sessions
