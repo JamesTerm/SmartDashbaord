@@ -44,11 +44,15 @@
 - Added x-tick hysteresis in line plot step selection (`0.70x..1.60x` hold window) to reduce x-axis/gridline oscillation under jittered cadence while keeping absolute-time tick anchoring.
 - Added line-plot burst/pause/resume regression case that validates x-range remains exactly `[oldestRetained, newestRetained]` with full buffer anchoring.
 - New student/mentor-friendly reference doc created: `docs/line_plot_notes.md` summarizing tradeoffs (time accuracy vs readability), sample-anchored viewport behavior, EMA/tick concepts, and diagnostics ideas.
+- Replay path now documents and supports two telemetry JSON shapes by design:
+  - replay-event stream (SmartDashboard recorder, line-delimited events)
+  - capture-session object (SmartDashboardCaptureCli, `metadata` + `signals[]`)
+  - rationale: interactive replay semantics vs automation/harness analysis schema
 - Added `SmartDashboard/tests/line_plot_widget_tests.cpp` stress-oriented regression coverage for varying buffer/rate scenarios; `SmartDashboard_tests` now includes both line-plot and variable-tile tests.
 - `DirectPublisherTests.StreamsSineWaveDouble` now exposes live-tunable `Test/DoubleSine/Config/SampleRateMs` (default 16 ms) so publish cadence can be adjusted without editing code.
 - Direct transport UI label compaction: tile title text now shows only the last key segment in Direct mode (for example `.../Config/SampleRateMs` -> `SampleRateMs`) while preserving full underlying keys for publish/subscribe and layout identity.
 - Telemetry recording/playback vertical slice is now implemented on branch `feature/playback-recording-replay`:
-  - recorder writes live Direct/NT bool/double/string events to `logs/session_<timestamp>.jsonl`
+  - recorder writes live Direct/NT bool/double/string events to `logs/session_<timestamp>.json` (newline-delimited JSON events)
   - replay transport can load session files and drive existing widget/model flow with play/pause/seek/speed
   - timeline scrub/zoom/pan control exists in status bar and is wired to replay cursor
 - Telemetry UI controls were refined for operator workflow:

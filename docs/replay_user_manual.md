@@ -14,8 +14,24 @@ Use replay to answer questions like:
 
 ## Prerequisites
 
-- A recorded replay session file (`.jsonl` or compatible replay log).
+- A recorded replay session file (`.json`).
+- Format note: replay files are newline-delimited JSON events (JSONL-style content) stored with a `.json` extension.
 - A dashboard layout with widgets mapped to the keys you want to analyze.
+
+## Why there are two replay-related JSON formats
+
+You may see two valid telemetry file shapes in this project:
+
+- **Replay event stream format** (produced by SmartDashboard recording):
+  - one JSON event per line
+  - event-centric fields like `eventKind`, `timestampUs`, `key`, `value`
+  - optimized for timeline replay controls (`play`, `seek`, markers, connection-state events)
+- **Capture session format** (produced by `SmartDashboardCaptureCli`):
+  - one top-level JSON object with `metadata` and `signals[]`
+  - each signal has a `samples[]` series with `t_us`
+  - optimized for automated harness analysis, A/B comparisons, and metadata tagging
+
+Both are now accepted by Replay transport. They exist because they were designed for different workflows (operator replay vs. automated test-harness analysis).
 
 ## Opening replay mode
 

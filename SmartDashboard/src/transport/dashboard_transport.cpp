@@ -4,6 +4,7 @@
 #include "sd_direct_subscriber.h"
 
 #include <QFile>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QVariant>
@@ -1054,38 +1055,81 @@ namespace sd::transport
                     return false;
                 }
 
+                const QByteArray raw = file.readAll();
+                if (raw.trimmed().isEmpty())
+                {
+                    return false;
+                }
+
                 std::vector<ReplayEvent> loaded;
                 m_pendingAutoMarkers.clear();
                 m_lastAutoMarkerByKey.clear();
                 loaded.reserve(4096);
-                while (!file.atEnd())
+
+                // First try full-document JSON formats. Capture CLI outputs a
+                // single JSON object with metadata/signals, while replay logs may
+                // also be stored as a single JSON event object.
+                QJsonParseError fullDocError;
+                const QJsonDocument fullDoc = QJsonDocument::fromJson(raw, &fullDocError);
+                if (fullDocError.error == QJsonParseError::NoError && fullDoc.isObject())
                 {
-                    const QByteArray line = file.readLine().trimmed();
-                    if (line.isEmpty())
+                    const QJsonObject root = fullDoc.object();
+                    if (TryParseCaptureSession(root, loaded))
                     {
-                        continue;
+                        // parsed via capture schema
                     }
-
-                    QJsonParseError parseError;
-                    const QJsonDocument doc = QJsonDocument::fromJson(line, &parseError);
-                    if (parseError.error != QJsonParseError::NoError || !doc.isObject())
+                    else
                     {
-                        continue;
+                        ReplayEvent event;
+                        if (ParseReplayEvent(root, event))
+                        {
+                            loaded.push_back(std::move(event));
+                        }
                     }
+                }
 
-                    ReplayEvent event;
-                    if (!ParseReplayEvent(doc.object(), event))
+                // Fallback: line-delimited JSON replay events.
+                if (loaded.empty())
+                {
+                    const QList<QByteArray> lines = raw.split('\n');
+                    for (const QByteArray& rawLine : lines)
                     {
-                        continue;
-                    }
+                        const QByteArray line = rawLine.trimmed();
+                        if (line.isEmpty())
+                        {
+                            continue;
+                        }
 
-                    loaded.push_back(std::move(event));
+                        QJsonParseError parseError;
+                        const QJsonDocument doc = QJsonDocument::fromJson(line, &parseError);
+                        if (parseError.error != QJsonParseError::NoError || !doc.isObject())
+                        {
+                            continue;
+                        }
+
+                        ReplayEvent event;
+                        if (!ParseReplayEvent(doc.object(), event))
+                        {
+                            continue;
+                        }
+
+                        loaded.push_back(std::move(event));
+                    }
                 }
 
                 if (loaded.empty())
                 {
                     return false;
                 }
+
+                std::sort(
+                    loaded.begin(),
+                    loaded.end(),
+                    [](const ReplayEvent& lhs, const ReplayEvent& rhs)
+                    {
+                        return lhs.timestampUs < rhs.timestampUs;
+                    }
+                );
 
                 std::lock_guard<std::mutex> lock(m_mutex);
                 m_events = std::move(loaded);
@@ -1113,6 +1157,74 @@ namespace sd::transport
                 m_pendingAutoMarkers.clear();
                 BuildCheckpointsLocked();
                 return true;
+            }
+
+            bool TryParseCaptureSession(const QJsonObject& root, std::vector<ReplayEvent>& loaded)
+            {
+                if (!root.contains("signals") || !root.value("signals").isArray())
+                {
+                    return false;
+                }
+
+                const QJsonArray signalArray = root.value("signals").toArray();
+                if (signalArray.isEmpty())
+                {
+                    return false;
+                }
+
+                std::unordered_map<std::string, std::uint64_t> seqByKey;
+                for (const QJsonValue& signalValue : signalArray)
+                {
+                    if (!signalValue.isObject())
+                    {
+                        continue;
+                    }
+
+                    const QJsonObject signal = signalValue.toObject();
+                    const QString key = signal.value("key").toString();
+                    const QString type = signal.value("type").toString().trimmed().toLower();
+                    const QJsonArray samples = signal.value("samples").toArray();
+                    if (key.isEmpty() || samples.isEmpty())
+                    {
+                        continue;
+                    }
+
+                    const std::string keyUtf8 = key.toStdString();
+                    for (const QJsonValue& sampleValue : samples)
+                    {
+                        if (!sampleValue.isObject())
+                        {
+                            continue;
+                        }
+
+                        const QJsonObject sample = sampleValue.toObject();
+                        ReplayEvent event;
+                        event.kind = ReplayEventKind::Data;
+                        event.timestampUs = sample.value("t_us").toVariant().toLongLong();
+                        event.update.key = key;
+                        event.update.seq = ++seqByKey[keyUtf8];
+
+                        if (type == "bool")
+                        {
+                            event.update.valueType = static_cast<int>(sd::direct::ValueType::Bool);
+                            event.update.value = sample.value("value").toBool();
+                        }
+                        else if (type == "double")
+                        {
+                            event.update.valueType = static_cast<int>(sd::direct::ValueType::Double);
+                            event.update.value = sample.value("value").toDouble();
+                        }
+                        else
+                        {
+                            event.update.valueType = static_cast<int>(sd::direct::ValueType::String);
+                            event.update.value = sample.value("value").toVariant().toString();
+                        }
+
+                        loaded.push_back(std::move(event));
+                    }
+                }
+
+                return !loaded.empty();
             }
 
             bool ParseReplayEvent(const QJsonObject& object, ReplayEvent& event)

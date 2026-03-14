@@ -37,12 +37,23 @@ Curated milestone history for this repository.
   - `docs/line_plot_notes.md`
   - covers design tradeoffs, anchoring strategies, EMA smoothing rationale, hysteresis concept, and diagnostics ideas for future tuning.
 
+### Follow-up refinement (same session)
+
+- Replay file extension contract aligned in UI and recorder path:
+  - replay open dialog now filters to `.json`
+  - session recorder now emits `session_<timestamp>.json`
+  - replay manual clarifies content remains newline-delimited JSON events (JSONL-style) under `.json` extension
+- Replay loader compatibility expanded to accept both schemas:
+  - SmartDashboard replay event-stream format (line-delimited event objects)
+  - capture CLI session format (`metadata` + `signals[]` series)
+  - this resolves "loads with no time" behavior when opening harness-capture JSON directly in replay mode
+
 ## 2026-03-12 - Telemetry recording/replay slice and controls refinement
 
 - Added first telemetry recording/replay vertical slice on feature branch `feature/playback-recording-replay`.
 - Added replay transport path to dashboard transport contract (`Replay` kind + playback control APIs) so replay behaves as a transport source rather than UI-special-cased data.
 - Implemented session recorder in main window flow:
-  - live Direct/NetworkTables sessions can write newline-delimited JSON event logs under `logs/session_<timestamp>.jsonl`
+  - live Direct/NetworkTables sessions can write newline-delimited JSON event logs under `logs/session_<timestamp>.json`
   - records bool/double/string updates and connection-state events
   - uses a background writer thread to avoid blocking UI update paths
 - Implemented replay file loading and deterministic playback behavior in transport layer:

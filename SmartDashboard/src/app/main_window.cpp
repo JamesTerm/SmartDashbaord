@@ -1507,7 +1507,7 @@ void MainWindow::OnOpenReplayFile()
         this,
         "Open Replay Session",
         m_connectionConfig.replayFilePath,
-        "Replay Files (*.jsonl *.log);;All Files (*)"
+        "Replay Files (*.json);;All Files (*)"
     );
     if (selected.isEmpty())
     {
@@ -2198,7 +2198,7 @@ void MainWindow::StartSessionRecording()
     QDir().mkpath(logsDir);
 
     const QString timestamp = QDateTime::currentDateTimeUtc().toString("yyyyMMdd_HHmmss_zzz");
-    m_recordingFilePath = QString("%1/session_%2.jsonl").arg(logsDir, timestamp);
+    m_recordingFilePath = QString("%1/session_%2.json").arg(logsDir, timestamp);
 
     m_recordingStartEpochUs = static_cast<std::uint64_t>(QDateTime::currentMSecsSinceEpoch()) * 1000ULL;
     m_recordingStartSteadyUs = static_cast<std::uint64_t>(
