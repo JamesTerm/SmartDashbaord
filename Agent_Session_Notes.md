@@ -41,6 +41,10 @@
   - dockable `Replay Controls`, `Replay Timeline`, and `Replay Markers` panels with persisted visibility and `Reset Replay Layout`
 - `docs/project_history.md` is the authoritative milestone log; keep this file to current-state handoff only.
 - Compatibility direction for simulator work is now documented: keep legacy NT behavior as a stable baseline and treat Shuffleboard-oriented additions as additive profiles.
+- Direct reconnect improvement now in progress/validated with Robot_Simulation pairing:
+  - replay retained control values at transport start
+  - republish remembered control widget values on `Connected` transitions
+  - goal: dashboard-owned controls survive repeated simulator restarts without restarting dashboard.
 
 ## Known constraints / active considerations
 
@@ -57,3 +61,8 @@
 4. Define acceptance criteria first, then implement in a small slice.
 5. Run automated tests (`docs/testing.md`) plus one targeted manual validation loop.
 6. Record durable milestone details in `docs/project_history.md`.
+
+## Active follow-up log
+
+- `AutonTest` and `TestMove` startup/reconnect behavior with Robot_Simulation direct mode now passes in manual paired testing after control republish/replay additions.
+- Keep an eye on additional dashboard-owned keys that may need explicit scoped alias conventions documented for mixed legacy layouts.

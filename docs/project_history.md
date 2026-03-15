@@ -7,6 +7,22 @@ Curated milestone history for this repository.
 - Keep milestone sections in descending chronological order (newest first) so recent changes are immediately visible.
 - Historical branch/status wording in older entries is time-bound; read each section as a snapshot from that date.
 
+## 2026-03-15 - Direct transport control replay for simulator reconnect stability
+
+- Added direct transport retained-control replay hook to dashboard transport interface:
+  - `IDashboardTransport::ReplayRetainedControls(...)`.
+- Implemented retained control replay in direct dashboard transport:
+  - caches latest direct variable updates by key (`m_latestByKey`)
+  - replays key control values (`AutonTest`, `Test/AutonTest`) on transport start path.
+- Added startup and reconnect control republish behavior in main window:
+  - publishes current operator control tile values on transport start
+  - republishes remembered control values when connection transitions to `Connected`
+  - includes chooser `key/selected` publish behavior.
+- Added remembered control cache in main window for reconnects without fresh UI edit events.
+- Validation:
+  - `SmartDashboardApp` builds in Debug.
+  - paired manual stress against Robot_Simulation direct mode confirms control values (`AutonTest`, `TestMove`) survive repeated simulator restarts without restarting SmartDashboard.
+
 ## 2026-03-15 - Robot simulation transport contract aligned with Shuffleboard-focused direction
 
 - Added dedicated simulator-facing transport handoff guide:

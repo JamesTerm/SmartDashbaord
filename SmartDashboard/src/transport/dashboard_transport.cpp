@@ -97,6 +97,7 @@ namespace sd::transport
             {
                 m_onVariableUpdate = std::move(onVariableUpdate);
                 m_onConnectionState = std::move(onConnectionState);
+                m_latestByKey.clear();
 
                 if (!m_subscriber || !m_commandPublisher)
                 {
@@ -138,9 +139,15 @@ namespace sd::transport
                         }
 
                         m_onVariableUpdate(converted);
+
+                        m_latestByKey[update.key] = update;
                     },
                     [this](sd::direct::ConnectionState state)
                     {
+                        if (state == sd::direct::ConnectionState::Connected)
+                        {
+                            m_connectedSeen.store(true);
+                        }
                         if (m_onConnectionState)
                         {
                             m_onConnectionState(ToConnectionState(state));
@@ -153,6 +160,8 @@ namespace sd::transport
                     m_commandPublisher->Stop();
                     return false;
                 }
+
+                m_connectedSeen.store(false);
 
                 return true;
             }
@@ -168,6 +177,14 @@ namespace sd::transport
                 {
                     m_commandPublisher->Stop();
                 }
+
+                m_latestByKey.clear();
+                m_connectedSeen.store(false);
+            }
+
+            bool HasSeenConnected() const
+            {
+                return m_connectedSeen.load();
             }
 
             bool PublishBool(const QString& key, bool value) override
@@ -200,11 +217,48 @@ namespace sd::transport
                 return m_commandPublisher->FlushNow();
             }
 
+            void ReplayRetainedControls(const std::function<void(const QString& key, int valueType, const QVariant& value)>& replayFn) override
+            {
+                if (!replayFn)
+                {
+                    return;
+                }
+
+                const auto replayNumeric = [&](const QString& key)
+                {
+                    const std::string stdKey = key.toStdString();
+                    const auto it = m_latestByKey.find(stdKey);
+                    if (it == m_latestByKey.end())
+                    {
+                        return;
+                    }
+
+                    if (it->second.type == sd::direct::ValueType::Double)
+                    {
+                        replayFn(key, static_cast<int>(sd::direct::ValueType::Double), QVariant(it->second.value.doubleValue));
+                    }
+                    else if (it->second.type == sd::direct::ValueType::String)
+                    {
+                        bool ok = false;
+                        const double parsed = QString::fromStdString(it->second.value.stringValue).toDouble(&ok);
+                        if (ok)
+                        {
+                            replayFn(key, static_cast<int>(sd::direct::ValueType::Double), QVariant(parsed));
+                        }
+                    }
+                };
+
+                replayNumeric(QStringLiteral("AutonTest"));
+                replayNumeric(QStringLiteral("Test/AutonTest"));
+            }
+
         private:
             std::unique_ptr<sd::direct::IDirectSubscriber> m_subscriber;
             std::unique_ptr<sd::direct::IDirectPublisher> m_commandPublisher;
             VariableUpdateCallback m_onVariableUpdate;
             ConnectionStateCallback m_onConnectionState;
+            std::unordered_map<std::string, sd::direct::VariableUpdate> m_latestByKey;
+            std::atomic<bool> m_connectedSeen {false};
         };
 
         class NetworkTablesDashboardTransport final : public IDashboardTransport

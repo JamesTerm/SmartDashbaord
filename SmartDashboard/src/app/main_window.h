@@ -128,6 +128,7 @@ private:
     void RecordVariableEvent(const QString& key, int valueType, const QVariant& value, quint64 seq);
     void RecordConnectionEvent(int state);
     bool IsRecordingTransportKind(sd::transport::TransportKind kind) const;
+    void PublishRememberedControlValues();
 
     QWidget* m_canvas = nullptr;
     QLabel* m_statusLabel = nullptr;
@@ -181,6 +182,13 @@ private:
     sd::model::VariableStore m_variableStore;
     sd::transport::ConnectionConfig m_connectionConfig;
     std::unique_ptr<sd::transport::IDashboardTransport> m_transport;
+    struct RememberedControlValue
+    {
+        int valueType = 3;
+        QVariant value;
+        bool isChooserSelected = false;
+    };
+    std::unordered_map<std::string, RememberedControlValue> m_rememberedControlValues;
 
     std::mutex m_recordingMutex;
     std::condition_variable m_recordingCv;
