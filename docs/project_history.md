@@ -5,8 +5,26 @@ Curated milestone history for this repository.
 - Edit this file for durable project milestones and outcomes.
 - Keep lean handoff context in `Agent_Session_Notes.md`.
 - Keep milestone sections in descending chronological order (newest first) so recent changes are immediately visible.
+- Historical branch/status wording in older entries is time-bound; read each section as a snapshot from that date.
 
-## 2026-03-14 - Dockable replay workspace iteration 1 (controls + timeline panels)
+## 2026-03-14 - Documentation synchronization and handoff cleanup
+
+- Reduced `Agent_Session_Notes.md` to handoff-critical current-state context only.
+- Reaffirmed documentation split:
+  - `Agent_Session_Notes.md` = lean next-session handoff
+  - `docs/project_history.md` = durable milestone log
+- Refreshed replay documentation to match local `main` state:
+  - `docs/replay_parity_roadmap.md` now marks baseline and competitive parity items as implemented
+  - advanced replay section now distinguishes implemented vs. still-future items
+  - dockable replay workspace note now reflects merged/finalized status instead of in-progress branch language
+  - `docs/replay_user_manual.md` now matches the dockable replay workspace layout (`Replay Controls` and `Replay Timeline` panels, status-bar readouts)
+
+## 2026-03-14 - Dockable replay workspace finalized and merged to main
+
+- Merged `feature/replay-dockable-workspace` into local `main` after workspace validation.
+- Replay workspace on `main` now includes dockable `Replay Controls`, `Replay Timeline`, and `Replay Markers` panels with persisted visibility/layout behavior.
+
+### Implementation details from the feature branch
 
 - Added dockable replay workspace panels for parity with Replay Markers workflow:
   - `Replay Controls` moved into its own `QDockWidget`
@@ -192,8 +210,8 @@ Curated milestone history for this repository.
 
 - Merged `feature/playback-recording-replay` into local `main` after replay + capture CLI validation.
 - Created annotated stability tag: `v0.9.0-replay-foundation`.
-- Started next iteration branch: `feature/replay-iteration-a-timeline-readability`.
-- Next implementation target is Iteration A from `docs/replay_parity_roadmap.md` (timeline readability and temporal affordances).
+- At that time, the next iteration branch was `feature/replay-iteration-a-timeline-readability`.
+- At that time, the next implementation target was Iteration A from `docs/replay_parity_roadmap.md` (timeline readability and temporal affordances).
 
 ## 2026-03-12 - Replay parity iterations A+B (timeline readability, markers, jump workflow)
 
