@@ -46,7 +46,7 @@ namespace sd::widgets
     PlaybackTimelineWidget::PlaybackTimelineWidget(QWidget* parent)
         : QWidget(parent)
     {
-        setMinimumHeight(72);
+        setMinimumHeight(54);
         setMouseTracking(true);
     }
 
@@ -159,9 +159,6 @@ namespace sd::widgets
 
         if (m_durationUs <= 0)
         {
-            painter.setPen(QColor(140, 140, 140));
-            painter.drawText(rect().adjusted(kOuterPaddingPx, 0, -kOuterPaddingPx, -kOuterPaddingPx), Qt::AlignBottom | Qt::AlignLeft, "t=0.000s");
-            painter.drawText(rect().adjusted(kOuterPaddingPx, 0, -kOuterPaddingPx, -kOuterPaddingPx), Qt::AlignBottom | Qt::AlignRight, "window=0.000s");
             return;
         }
 
@@ -218,17 +215,6 @@ namespace sd::widgets
         painter.setPen(QPen(QColor(255, 190, 90), 2));
         painter.drawLine(cursorX, trackRect.top(), cursorX, trackRect.bottom());
 
-        painter.setPen(QColor(210, 210, 210));
-        painter.drawText(
-            rect().adjusted(kOuterPaddingPx, 0, -kOuterPaddingPx, -kOuterPaddingPx),
-            Qt::AlignBottom | Qt::AlignLeft,
-            QString("t=%1").arg(FormatTimeLabel(m_cursorUs))
-        );
-        painter.drawText(
-            rect().adjusted(kOuterPaddingPx, 0, -kOuterPaddingPx, -kOuterPaddingPx),
-            Qt::AlignBottom | Qt::AlignRight,
-            QString("window=%1").arg(FormatSpanLabel(windowSpanUs))
-        );
     }
 
     void PlaybackTimelineWidget::mousePressEvent(QMouseEvent* event)

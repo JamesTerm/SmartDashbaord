@@ -92,11 +92,11 @@ namespace
 
         if (floating)
         {
-            timeline->setMinimumHeight(94);
+            timeline->setMinimumHeight(54);
         }
         else
         {
-            timeline->setMinimumHeight(62);
+            timeline->setMinimumHeight(54);
         }
     }
 
