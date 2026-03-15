@@ -164,6 +164,13 @@ Treat this as the readiness gate before presenting NetworkTables support as a co
     - works unchanged
     - works through adapter/translation layer
     - not yet supported
+  - Legacy compatibility baseline is explicit:
+    - preserve a stable `legacy-smartdashboard-baseline` behavior profile for validation
+    - allow `shuffleboard-additive` behaviors only when they do not break legacy baseline behavior
+  - Key migration policy is explicit for operator-controlled values:
+    - canonical scoped keys (for example `Test/AutonTest`) are preferred
+    - legacy flat aliases (for example `AutonTest`) remain supported during migration
+    - read scoped first, then alias fallback where needed
 
 - **High-priority near-foundation items**
   - Graph/plot support that covers normal `Shuffleboard` expectations for numeric telemetry.

@@ -7,6 +7,18 @@ Curated milestone history for this repository.
 - Keep milestone sections in descending chronological order (newest first) so recent changes are immediately visible.
 - Historical branch/status wording in older entries is time-bound; read each section as a snapshot from that date.
 
+## 2026-03-15 - Robot simulation transport contract aligned with Shuffleboard-focused direction
+
+- Added dedicated simulator-facing transport handoff guide:
+  - `docs/robot_simulation_transport_guide.md`
+- Document now captures dual-mode simulator expectation for interoperability work:
+  - `Direct` mode for local deterministic integration loops
+  - `Legacy NT` mode as compatibility baseline for SmartDashboard/Shuffleboard migration validation
+- Compatibility stance is now explicit and reusable across sessions:
+  - keep legacy NT behavior stable as the comparison oracle
+  - allow Shuffleboard-oriented behavior as additive profile work that must not break legacy baseline behavior
+- Added explicit guidance for chooser contract and migration key policy (`scoped preferred + legacy alias fallback`) so Robot_Simulation and dashboard sessions share the same assumptions.
+
 ## 2026-03-14 - Documentation synchronization and handoff cleanup
 
 - Reduced `Agent_Session_Notes.md` to handoff-critical current-state context only.

@@ -25,6 +25,7 @@
 - Durable milestone history: `docs/project_history.md`
 - Replay operator reference: `docs/replay_user_manual.md`
 - Replay status/roadmap reference: `docs/replay_parity_roadmap.md`
+- Robot simulation transport contract: `docs/robot_simulation_transport_guide.md`
 
 ## Quick context for next session
 
@@ -39,6 +40,7 @@
   - timeline scrub/zoom/pan, adaptive tick labels, cursor/window readouts, marker jumps, marker dock, keyboard stepping, bookmarks, anomaly markers, and visible-window marker summary
   - dockable `Replay Controls`, `Replay Timeline`, and `Replay Markers` panels with persisted visibility and `Reset Replay Layout`
 - `docs/project_history.md` is the authoritative milestone log; keep this file to current-state handoff only.
+- Compatibility direction for simulator work is now documented: keep legacy NT behavior as a stable baseline and treat Shuffleboard-oriented additions as additive profiles.
 
 ## Known constraints / active considerations
 

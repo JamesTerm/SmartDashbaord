@@ -63,6 +63,7 @@ Future consideration (not implemented yet):
 - `docs/testing_harness_capture_cli.md` - command-line telemetry capture for automated test harness runs
 - `docs/replay_parity_roadmap.md` - replay/timeline parity roadmap versus modern dashboard workflows
 - `docs/replay_user_manual.md` - operator-focused replay feature usage guide
+- `docs/robot_simulation_transport_guide.md` - simulator-side transport contract for `Direct` vs `Legacy NT` integration and chooser compatibility
 - `Agent_Session_Notes.md` - lean next-session handoff context
 
 ## Replay Training

@@ -62,6 +62,31 @@ Selection writeback expectation:
 - dashboard publishes operator choice to `<base>/selected`
 - simulator should observe and apply selection changes
 
+## Key naming policy (scoped and legacy aliases)
+
+To stay compatible with both legacy SmartDashboard and modern hierarchical dashboards (Shuffleboard-style), key handling should support both scoped and flat forms during migration.
+
+- Canonical operator-control keys should be scoped (example: `Test/AutonTest`).
+- Legacy flat aliases should remain accepted (example: `AutonTest`).
+- If both scoped and flat variants exist, prefer scoped value.
+- Robot code should avoid rewriting operator-owned keys during normal read paths.
+
+Directionality (both ways):
+
+- Dashboard -> robot (commands/settings):
+  - publish canonical scoped key
+  - optionally mirror legacy flat alias during transition
+  - robot should read scoped first, then alias fallback
+- Robot -> dashboard (telemetry/state):
+  - publish canonical scoped key for new behavior
+  - keep legacy aliases only where needed for backward compatibility
+
+Migration note for `AutonTest`:
+
+- Treat as dashboard-owned input.
+- Preferred key: `Test/AutonTest`.
+- Legacy fallback: `AutonTest`.
+
 ## Backward-compatibility strategy
 
 Use a dual-profile mindset:
