@@ -7,6 +7,8 @@ Lightweight C++ dashboard for FRC, inspired by WPILib SmartDashboard.
 - Built as a community-friendly path forward as legacy SmartDashboard approaches end-of-life (2027).
 - Focused scope: fast live values (`bool`, `double`, `string`), editable widgets, and saved layouts.
 - Uses direct local transport as the current production path, with a transport-selection UI scaffold for upcoming NetworkTables support.
+- Product direction: become a practical `Shuffleboard`-class dashboard replacement first, while keeping built-in replay/telemetry as a strong differentiator.
+- Adoption principle: teams should be able to keep existing robot publishing patterns whenever possible; compatibility/translation adapters are preferred over forcing robot-code rewrites.
 
 ## Architecture Overview
 
@@ -95,6 +97,15 @@ See `docs/development_workflow.md` and `docs/ai_development_guidelines.md` for p
 - Early prototype
 - Exploring dashboard architecture trade-offs
 - Exploring AI-assisted development workflows in a student-mentored setting
+
+Current product-direction priorities:
+
+- compatibility with existing team publishing workflows
+- foundation-first readiness before broad `NetworkTables` rollout
+- strong live dashboard usefulness compared with `Shuffleboard`
+- `SendableChooser`-class compatibility and other common team workflows
+- improved plotting, including future multi-trace line-plot support
+- replay/telemetry features that strengthen debugging without taking over the product
 
 Current focus is architecture validation, workflow clarity, and test-backed behavior, not feature completeness.
 
