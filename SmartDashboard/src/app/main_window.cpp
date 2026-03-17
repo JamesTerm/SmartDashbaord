@@ -1117,11 +1117,12 @@ void MainWindow::OnVariableUpdateReceived(const QString& key, int valueType, con
             {
                 chooserTile->SetWidgetType("string.chooser");
                 chooserTile->SetStringChooserMode(true);
-                chooserTile->SetStringValue(value.toString());
                 chooserTile->SetTitleText(BuildDisplayLabel(chooserBase));
 
                 if (suffix == "/selected")
                 {
+                    chooserTile->SetStringValue(value.toString());
+
                     RememberedControlValue chooserRemembered;
                     chooserRemembered.valueType = static_cast<int>(sd::direct::ValueType::String);
                     chooserRemembered.value = value;

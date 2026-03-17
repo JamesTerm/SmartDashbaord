@@ -37,6 +37,9 @@ namespace sd::direct
             m_update = std::move(onUpdate);
             m_state = std::move(onState);
             m_instanceId = NextInstanceId();
+            m_lastProducerHeartbeatUs = 0;
+            m_lastHeartbeatChangeUs = 0;
+            m_staleLogged = false;
             SetState(ConnectionState::Connecting);
 
             // Shared-memory consumer endpoint setup.
@@ -101,6 +104,9 @@ namespace sd::direct
             m_heartbeatEvent.Close();
             m_dataEvent.Close();
             m_region.Close();
+            m_lastProducerHeartbeatUs = 0;
+            m_lastHeartbeatChangeUs = 0;
+            m_staleLogged = false;
             SetState(ConnectionState::Disconnected);
         }
 
@@ -136,6 +142,15 @@ namespace sd::direct
             {
                 return;
             }
+
+			std::ostringstream out;
+			out << "[DirectSubscriber] state " << static_cast<int>(previous)
+				<< " -> " << static_cast<int>(state)
+				<< " lastSeq=" << m_lastSeq.load(std::memory_order_acquire)
+				<< " dropped=" << m_droppedCount.load(std::memory_order_acquire)
+				<< " instance=" << m_instanceId
+				<< "\n";
+			DebugLog(out.str());
 
             if (m_state)
             {
@@ -173,6 +188,13 @@ namespace sd::direct
                         m_ring.header->lastProducerHeartbeatUs.load(std::memory_order_acquire);
                     const std::uint64_t staleLimitUs = static_cast<std::uint64_t>(m_config.staleTimeout.count()) * 1000ULL;
 
+                    if (producerHeartbeatUs != m_lastProducerHeartbeatUs)
+                    {
+                        m_lastProducerHeartbeatUs = producerHeartbeatUs;
+                        m_lastHeartbeatChangeUs = nowUs;
+                        m_staleLogged = false;
+                    }
+
                     // Heartbeat timeout -> stale-state detection algorithm.
                     if (producerHeartbeatUs == 0)
                     {
@@ -180,10 +202,34 @@ namespace sd::direct
                     }
                     else if ((nowUs - producerHeartbeatUs) > staleLimitUs)
                     {
-                        SetState(ConnectionState::Stale);
+                        const std::uint64_t heartbeatQuietUs = (m_lastHeartbeatChangeUs == 0)
+                            ? (nowUs - producerHeartbeatUs)
+                            : (nowUs - m_lastHeartbeatChangeUs);
+                        if (heartbeatQuietUs > staleLimitUs)
+                        {
+                            if (!m_staleLogged)
+                            {
+							std::ostringstream out;
+							out << "[DirectSubscriber] stale producerHeartbeatUs=" << producerHeartbeatUs
+								<< " nowUs=" << nowUs
+								<< " deltaUs=" << (nowUs - producerHeartbeatUs)
+								<< " staleLimitUs=" << staleLimitUs
+								<< " quietUs=" << heartbeatQuietUs
+								<< " instance=" << m_instanceId
+								<< "\n";
+							DebugLog(out.str());
+                                m_staleLogged = true;
+                            }
+                            SetState(ConnectionState::Stale);
+                        }
+                        else
+                        {
+                            SetState(ConnectionState::Connected);
+                        }
                     }
                     else
                     {
+                        m_staleLogged = false;
                         SetState(ConnectionState::Connected);
                     }
 
@@ -191,14 +237,12 @@ namespace sd::direct
                         m_ring.header->consumerInstanceId.exchange(m_instanceId, std::memory_order_acq_rel);
                     if (previousInstanceId != m_instanceId)
                     {
-                        const std::uint32_t writeIndex = m_ring.header->writeIndex.load(std::memory_order_acquire);
-					std::ostringstream out;
-					out << "[DirectSubscriber] consumer instance change old=" << previousInstanceId
+                        std::ostringstream out;
+					out << "[DirectSubscriber] consumer instance claim old=" << previousInstanceId
 						<< " new=" << m_instanceId
-						<< " writeIndex=" << writeIndex
+						<< " keepReadCursor=" << m_readCursor
 						<< "\n";
 					DebugLog(out.str());
-                        m_readCursor = writeIndex;
                     }
 
                     m_ring.header->lastConsumerHeartbeatUs.store(nowUs, std::memory_order_release);
@@ -227,6 +271,9 @@ namespace sd::direct
         std::atomic<std::uint64_t> m_lastSeq {0};
         std::atomic<std::uint64_t> m_droppedCount {0};
         std::uint64_t m_instanceId = 0;
+        std::uint64_t m_lastProducerHeartbeatUs = 0;
+        std::uint64_t m_lastHeartbeatChangeUs = 0;
+        bool m_staleLogged = false;
         std::uint32_t m_readCursor = 0;
         SharedMemoryRegion m_region;
         NamedEvent m_dataEvent;
