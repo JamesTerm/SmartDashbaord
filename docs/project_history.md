@@ -16,7 +16,7 @@ Curated milestone history for this repository.
 - Hardened Direct transport session handling:
   - subscriber path now uses independent read-cursor semantics instead of a single shared consumed cursor
   - UI delivery now batches queued transport updates onto the Qt thread instead of posting one queued lambda per update
-  - fixed harness tile placement for `Test/AutoChooser`, `TestMove`, `Timer`, and `Y_ft` to support repeatable visual verification
+  - fixed harness tile placement for `Test/AutonTest/AutoChooser`, `TestMove`, `Timer`, and `Y_ft` to support repeatable visual verification
 - Worked jointly with Robot_Simulation transport updates to improve repeated robot-restart behavior:
   - repeated single-dashboard runs are healthier
   - extra concurrent observers still expose race/session weaknesses, so multi-observer robustness remains a later transport-design task

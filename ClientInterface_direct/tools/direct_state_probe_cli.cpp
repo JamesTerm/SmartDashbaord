@@ -98,11 +98,11 @@ int main(int argc, char** argv)
         "Smart Waypoints"
     };
 
-    client.PutString("Test/AutoChooser/.type", "String Chooser");
-    client.PutStringArray("Test/AutoChooser/options", chooserOptions);
-    client.PutString("Test/AutoChooser/default", "Do Nothing");
-    client.PutString("Test/AutoChooser/active", "Just Move Forward");
-    client.PutString("Test/AutoChooser/selected", "Just Move Forward");
+    client.PutString("Test/AutonTest/AutoChooser/.type", "String Chooser");
+    client.PutStringArray("Test/AutonTest/AutoChooser/options", chooserOptions);
+    client.PutString("Test/AutonTest/AutoChooser/default", "Do Nothing");
+    client.PutString("Test/AutonTest/AutoChooser/active", "Just Move Forward");
+    client.PutString("Test/AutonTest/AutoChooser/selected", "Just Move Forward");
     client.PutDouble("TestMove", 3.5);
     client.FlushNow();
 
@@ -111,9 +111,9 @@ int main(int argc, char** argv)
     std::vector<std::string> observedOptions;
     double testMove = 0.0;
 
-    const bool gotType = WaitForString(client, "Test/AutoChooser/.type", chooserType, timeout);
-    const bool gotSelected = WaitForString(client, "Test/AutoChooser/selected", chooserSelected, timeout);
-    const bool gotOptions = WaitForStringArray(client, "Test/AutoChooser/options", observedOptions, timeout);
+    const bool gotType = WaitForString(client, "Test/AutonTest/AutoChooser/.type", chooserType, timeout);
+    const bool gotSelected = WaitForString(client, "Test/AutonTest/AutoChooser/selected", chooserSelected, timeout);
+    const bool gotOptions = WaitForStringArray(client, "Test/AutonTest/AutoChooser/options", observedOptions, timeout);
     const bool gotMove = WaitForDouble(client, "TestMove", testMove, timeout);
 
     std::cout << "probe.timeout_ms=" << timeout.count() << "\n";

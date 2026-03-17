@@ -54,7 +54,7 @@ namespace
 {
     bool IsHarnessFocusKey(const QString& key)
     {
-        return key == "Test/AutoChooser" || key == "TestMove" || key == "Timer" || key == "Y_ft";
+        return key == "Test/AutonTest" || key == "TestMove" || key == "Timer" || key == "Y_ft";
     }
 
     QString FormatReplayTimeUs(std::int64_t timeUs)
@@ -1047,6 +1047,11 @@ void MainWindow::OnVariableUpdateReceived(const QString& key, int valueType, con
     if (valueType == static_cast<int>(sd::direct::ValueType::String)
         || valueType == static_cast<int>(sd::direct::ValueType::StringArray))
     {
+        if (m_connectionConfig.kind == sd::transport::TransportKind::Direct && key == "AutonTest")
+        {
+            return;
+        }
+
         if (key.endsWith("/.type") && value.toString() == "String Chooser")
         {
             const QString chooserBase = key.left(key.length() - QString("/.type").length());
@@ -1055,6 +1060,7 @@ void MainWindow::OnVariableUpdateReceived(const QString& key, int valueType, con
             {
                 chooserTile->SetWidgetType("string.chooser");
                 chooserTile->SetStringChooserMode(true);
+                chooserTile->SetTitleText(BuildDisplayLabel(chooserBase));
             }
             return;
         }
@@ -1067,6 +1073,7 @@ void MainWindow::OnVariableUpdateReceived(const QString& key, int valueType, con
             {
                 chooserTile->SetWidgetType("string.chooser");
                 chooserTile->SetStringChooserMode(true);
+                chooserTile->SetTitleText(BuildDisplayLabel(chooserBase));
 
                 QStringList rawOptions;
                 if (value.canConvert<QStringList>())
@@ -1111,15 +1118,14 @@ void MainWindow::OnVariableUpdateReceived(const QString& key, int valueType, con
                 chooserTile->SetWidgetType("string.chooser");
                 chooserTile->SetStringChooserMode(true);
                 chooserTile->SetStringValue(value.toString());
+                chooserTile->SetTitleText(BuildDisplayLabel(chooserBase));
 
                 if (suffix == "/selected")
                 {
                     RememberedControlValue chooserRemembered;
                     chooserRemembered.valueType = static_cast<int>(sd::direct::ValueType::String);
                     chooserRemembered.value = value;
-                    chooserRemembered.isChooserSelected = true;
                     m_rememberedControlValues[chooserBase.toStdString()] = chooserRemembered;
-                    m_robotOwnedChooserKeys.insert(chooserBase.toStdString());
                 }
             }
 
@@ -1175,7 +1181,7 @@ void MainWindow::OnConnectionStateChanged(int state)
         // Reconnect handling: reset sequence gating when transport re-enters connected state.
         m_variableStore.ResetSequenceTracking();
 
-        PublishRememberedNonChooserControls();
+        PublishRememberedControlValues();
     }
 
     UpdateWindowConnectionText(state);
@@ -1207,70 +1213,16 @@ void MainWindow::PublishRememberedControlValues()
         }
         else if (remembered.valueType == static_cast<int>(sd::direct::ValueType::String))
         {
-            if (remembered.isChooserSelected)
+            const auto chooserIt = m_tiles.find(keyStd);
+            if (chooserIt != m_tiles.end() && chooserIt->second != nullptr && chooserIt->second->GetWidgetType() == "string.chooser")
             {
-                continue;
+                m_transport->PublishString(key + "/selected", remembered.value.toString());
             }
             else
             {
                 m_transport->PublishString(key, remembered.value.toString());
             }
         }
-    }
-}
-
-void MainWindow::PublishRememberedNonChooserControls()
-{
-    if (!m_transport)
-    {
-        return;
-    }
-
-    for (const auto& [keyStd, remembered] : m_rememberedControlValues)
-    {
-        const QString key = QString::fromStdString(keyStd);
-        if (key.isEmpty() || remembered.isChooserSelected)
-        {
-            continue;
-        }
-
-        if (remembered.valueType == static_cast<int>(sd::direct::ValueType::Bool))
-        {
-            m_transport->PublishBool(key, remembered.value.toBool());
-        }
-        else if (remembered.valueType == static_cast<int>(sd::direct::ValueType::Double))
-        {
-            m_transport->PublishDouble(key, remembered.value.toDouble());
-        }
-        else if (remembered.valueType == static_cast<int>(sd::direct::ValueType::String))
-        {
-            m_transport->PublishString(key, remembered.value.toString());
-        }
-    }
-}
-
-void MainWindow::PublishRememberedChooserSelections()
-{
-    if (!m_transport)
-    {
-        return;
-    }
-
-    for (const auto& keyStd : m_robotOwnedChooserKeys)
-    {
-        const auto it = m_rememberedControlValues.find(keyStd);
-        if (it == m_rememberedControlValues.end() || !it->second.isChooserSelected)
-        {
-            continue;
-        }
-
-        const QString key = QString::fromStdString(keyStd);
-        if (key.isEmpty())
-        {
-            continue;
-        }
-
-        m_transport->PublishString(key + "/selected", it->second.value.toString());
     }
 }
 
@@ -1454,7 +1406,7 @@ sd::widgets::VariableTile* MainWindow::GetOrCreateTile(const QString& key, sd::w
     }
     else
     {
-        if (key == "Test/AutoChooser")
+        if (key == "Test/AutonTest")
         {
             tile->setGeometry(24, 32, 320, 84);
         }
@@ -1506,6 +1458,11 @@ QString MainWindow::BuildDisplayLabel(const QString& key) const
     if (segments.isEmpty())
     {
         return key;
+    }
+
+    if (segments.size() >= 2 && segments.back() == "AutoChooser")
+    {
+        return segments[segments.size() - 2];
     }
 
     return segments.back();
@@ -1696,7 +1653,6 @@ void MainWindow::OnControlBoolEdited(const QString& key, bool value)
         RememberedControlValue remembered;
         remembered.valueType = static_cast<int>(sd::direct::ValueType::Bool);
         remembered.value = QVariant(value);
-        remembered.isChooserSelected = false;
         m_rememberedControlValues[key.toStdString()] = remembered;
     }
 
@@ -1732,7 +1688,6 @@ void MainWindow::OnControlDoubleEdited(const QString& key, double value)
         RememberedControlValue remembered;
         remembered.valueType = static_cast<int>(sd::direct::ValueType::Double);
         remembered.value = QVariant(value);
-        remembered.isChooserSelected = false;
         m_rememberedControlValues[key.toStdString()] = remembered;
     }
 
@@ -1749,9 +1704,7 @@ void MainWindow::OnControlStringEdited(const QString& key, const QString& value)
         RememberedControlValue remembered;
         remembered.valueType = static_cast<int>(sd::direct::ValueType::String);
         remembered.value = QVariant(value);
-        remembered.isChooserSelected = false;
         m_rememberedControlValues[key.toStdString()] = remembered;
-        m_robotOwnedChooserKeys.erase(key.toStdString());
     }
 
     if (m_transport)
@@ -1759,15 +1712,6 @@ void MainWindow::OnControlStringEdited(const QString& key, const QString& value)
         const auto chooserIt = m_tiles.find(key.toStdString());
         if (chooserIt != m_tiles.end() && chooserIt->second != nullptr && chooserIt->second->GetWidgetType() == "string.chooser")
         {
-            if (!key.isEmpty())
-            {
-                RememberedControlValue chooserRemembered;
-                chooserRemembered.valueType = static_cast<int>(sd::direct::ValueType::String);
-                chooserRemembered.value = QVariant(value);
-                chooserRemembered.isChooserSelected = true;
-                m_rememberedControlValues[key.toStdString()] = chooserRemembered;
-                m_robotOwnedChooserKeys.erase(key.toStdString());
-            }
             m_transport->PublishString(key + "/selected", value);
             return;
         }
@@ -2564,7 +2508,6 @@ void MainWindow::StartTransport()
                 {
                     remembered.valueType = static_cast<int>(sd::direct::ValueType::String);
                     remembered.value = QVariant(tile->GetStringValue());
-                    remembered.isChooserSelected = (tile->GetWidgetType() == "string.chooser");
                 }
                 m_rememberedControlValues[key.toStdString()] = remembered;
             }

@@ -45,7 +45,7 @@ These validate the foundation transport and widget paths first.
 
 Publish chooser metadata/value topics at one chooser base key.
 
-Base key example: `Test/AutoChooser`
+Base key example: `Test/AutonTest/AutoChooser`
 
 Required topics:
 
@@ -145,7 +145,7 @@ Recommended sequence:
 
 1. Use `tools/smartdashboard_process.py` to ensure exactly one SmartDashboard instance is running.
 2. Run `DirectStateProbeCli` to seed and verify setup-state keys such as:
-   - `Test/AutoChooser/*`
+   - `Test/AutonTest/AutoChooser/*`
    - `TestMove`
 3. Run `DriverStation_TransportSmoke.exe 10000` to exercise a deterministic 10-second auton session.
 4. If needed, run `DirectWatchCli` in parallel to capture passive transport timing.

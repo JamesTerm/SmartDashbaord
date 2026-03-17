@@ -81,19 +81,19 @@ int main(int argc, char** argv)
     };
 
     std::vector<sd::direct::SubscriptionToken> tokens;
-    tokens.push_back(client.SubscribeString("Test/AutoChooser/.type", [&](const std::string& value)
+    tokens.push_back(client.SubscribeString("Test/AutonTest/AutoChooser/.type", [&](const std::string& value)
     {
         LogLine(logFile, logMutex, logPrefix() + "chooser.type=" + value);
     }));
-    tokens.push_back(client.SubscribeString("Test/AutoChooser/selected", [&](const std::string& value)
+    tokens.push_back(client.SubscribeString("Test/AutonTest/AutoChooser/selected", [&](const std::string& value)
     {
         LogLine(logFile, logMutex, logPrefix() + "chooser.selected=" + value);
     }));
-    tokens.push_back(client.SubscribeString("Test/AutoChooser/active", [&](const std::string& value)
+    tokens.push_back(client.SubscribeString("Test/AutonTest/AutoChooser/active", [&](const std::string& value)
     {
         LogLine(logFile, logMutex, logPrefix() + "chooser.active=" + value);
     }));
-    tokens.push_back(client.SubscribeStringArray("Test/AutoChooser/options", [&](const std::vector<std::string>& value)
+    tokens.push_back(client.SubscribeStringArray("Test/AutonTest/AutoChooser/options", [&](const std::vector<std::string>& value)
     {
         LogLine(logFile, logMutex, logPrefix() + "chooser.options=" + JoinStrings(value));
     }));

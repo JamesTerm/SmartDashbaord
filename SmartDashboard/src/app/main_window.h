@@ -132,8 +132,6 @@ private:
     void RecordConnectionEvent(int state);
     bool IsRecordingTransportKind(sd::transport::TransportKind kind) const;
     void PublishRememberedControlValues();
-    void PublishRememberedNonChooserControls();
-    void PublishRememberedChooserSelections();
     void DebugLogUiEvent(const QString& line) const;
     void DrainPendingUiUpdates();
 
@@ -193,10 +191,8 @@ private:
     {
         int valueType = 3;
         QVariant value;
-        bool isChooserSelected = false;
     };
     std::unordered_map<std::string, RememberedControlValue> m_rememberedControlValues;
-    std::unordered_set<std::string> m_robotOwnedChooserKeys;
     mutable std::ofstream m_uiDebugLog;
     std::mutex m_pendingUiUpdatesMutex;
     QVector<sd::transport::VariableUpdate> m_pendingUiUpdates;
