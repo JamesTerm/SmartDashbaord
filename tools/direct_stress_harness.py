@@ -131,6 +131,9 @@ def main():
     truncate_logs()
     helper("restart")
 
+    # Ian: Numeric and chooser runs intentionally share one harness, so every
+    # probe invocation must carry the mode flag explicitly. Otherwise a chooser
+    # test can look like a numeric regression, or vice versa.
     watch = subprocess.Popen([str(SMARTDASHBOARD_WATCH), str(int((cycles * (enable_seconds + 3) + 10) * 1000)), str(WATCH_LOG)])
     ds = subprocess.Popen([str(DRIVERSTATION_EXE), "direct"])
 
@@ -208,6 +211,10 @@ def main():
             drive_seen = post_drive_count > pre_drive_count
             motion_seen = (pre_y is not None and post_y is not None and abs(post_y - pre_y) >= 0.25)
 
+            # Ian: Raw `Y_ft` snapshots can lag or reflect previous pose state,
+            # but a fresh MoveForward/DriveToLocation pair proves the robot saw
+            # the auton command chain for this cycle. Treat command-chain evidence
+            # as the primary truth and `Y_ft` as supporting telemetry.
             if not moveforward_seen or not drive_seen:
                 print(f"cycle={cycle} move_command_missing")
                 break

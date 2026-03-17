@@ -328,6 +328,9 @@ namespace sd::layout
                 continue;
             }
 
+            // Ian: Layout files store widget arrangement/config only. Do not
+            // restore live robot values from disk or the dashboard can overwrite
+            // current session state on startup.
             const QJsonObject geo = entry.value("geometry").toObject();
             WidgetLayoutEntry layoutEntry;
             layoutEntry.variableKey = variableKey;

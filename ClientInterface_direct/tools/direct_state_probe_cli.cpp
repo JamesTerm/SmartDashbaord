@@ -77,12 +77,18 @@ namespace
     {
         using namespace std::chrono_literals;
 
+        // Ian: Keep this as a short streaming window, not a single burst. The
+        // dashboard/robot pairing behaved differently when the helper exited too
+        // quickly, so this intentionally mimics a briefly alive owning client.
         const auto deadline = std::chrono::steady_clock::now() + duration;
         while (std::chrono::steady_clock::now() < deadline)
         {
             commandClient.PutDouble("TestMove", 3.5);
             if (seedChooser)
             {
+                // Ian: Chooser-mode smoke tests must not also populate numeric
+                // `AutonTest`, or the UI/harness can no longer tell which path is
+                // actually driving auton selection.
                 commandClient.PutString("Test/Auton_Selection/AutoChooser/selected", "Just Move Forward");
             }
             else
@@ -195,6 +201,9 @@ int main(int argc, char** argv)
     const bool gotAuton = seedChooser
         ? false
         : WaitForDouble(commandClient, "AutonTest", autonTest, timeout);
+
+    // Ian: In chooser mode, `AutonTest` staying absent is expected. Success is
+    // based on chooser selection plus `TestMove`, not on the numeric fallback.
     const bool gotType = WaitForString(telemetryClient, "Test/Auton_Selection/AutoChooser/.type", chooserType, timeout);
     const bool gotSelected = WaitForString(telemetryClient, "Test/Auton_Selection/AutoChooser/selected", chooserSelected, timeout);
     const bool gotOptions = WaitForStringArray(telemetryClient, "Test/Auton_Selection/AutoChooser/options", observedOptions, timeout);
