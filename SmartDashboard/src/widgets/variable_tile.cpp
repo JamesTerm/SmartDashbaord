@@ -1,5 +1,7 @@
 #include "widgets/variable_tile.h"
 
+#include "app/debug_log_paths.h"
+
 #include "widgets/line_plot_widget.h"
 #include "widgets/tile_control_widget.h"
 
@@ -37,7 +39,7 @@ namespace sd::widgets
     {
         void DebugTileLog(const QString& line)
         {
-            static std::ofstream log("direct_tile_debug_log.txt", std::ios::out | std::ios::trunc);
+            static std::ofstream log(sd::app::GetDebugLogPath("direct_tile_debug_log.txt").toStdString(), std::ios::out | std::ios::trunc);
             log << line.toStdString() << '\n';
             log.flush();
         }

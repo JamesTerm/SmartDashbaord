@@ -1,4 +1,5 @@
 import ctypes
+import os
 import subprocess
 import sys
 import time
@@ -23,7 +24,9 @@ def launch():
     if is_running():
         print("already_running")
         return 0
-    subprocess.Popen([APP_PATH], creationflags=0x00000008)
+    env = os.environ.copy()
+    env["SMARTDASHBOARD_WORKSPACE_ROOT"] = r"D:\code\SmartDashboard"
+    subprocess.Popen([APP_PATH], creationflags=0x00000008, env=env)
     deadline = time.time() + 10.0
     while time.time() < deadline:
         if is_running():

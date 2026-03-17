@@ -1,5 +1,7 @@
 #include "app/main_window.h"
 
+#include "app/debug_log_paths.h"
+
 #include "layout/layout_serializer.h"
 #include "sd_direct_types.h"
 #include "widgets/playback_timeline_widget.h"
@@ -266,7 +268,7 @@ namespace
 MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent)
 {
-    m_uiDebugLog.open("direct_ui_debug_log.txt", std::ios::out | std::ios::trunc);
+    m_uiDebugLog.open(sd::app::GetDebugLogPath("direct_ui_debug_log.txt").toStdString(), std::ios::out | std::ios::trunc);
     DebugLogUiEvent("MainWindow start");
 
     RefreshWindowTitle();
