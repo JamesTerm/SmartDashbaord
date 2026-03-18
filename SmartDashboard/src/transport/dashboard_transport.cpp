@@ -1,12 +1,16 @@
 #include "transport/dashboard_transport.h"
+#include "transport/dashboard_transport_plugin_api.h"
 
 #include "sd_direct_publisher.h"
 #include "sd_direct_subscriber.h"
 
+#include <QDir>
 #include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QCoreApplication>
+#include <QLibrary>
 #include <QVariant>
 
 #include <algorithm>
@@ -19,15 +23,11 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <set>
 #include <string>
 #include <thread>
 #include <unordered_map>
 #include <vector>
-
-#include <winsock2.h>
-#include <ws2tcpip.h>
-
-#pragma comment(lib, "Ws2_32.lib")
 
 namespace sd::transport
 {
@@ -271,654 +271,6 @@ namespace sd::transport
             ConnectionStateCallback m_onConnectionState;
             std::unordered_map<std::string, sd::direct::VariableUpdate> m_latestByKey;
             std::atomic<bool> m_connectedSeen {false};
-        };
-
-        class NetworkTablesDashboardTransport final : public IDashboardTransport
-        {
-        public:
-            explicit NetworkTablesDashboardTransport(ConnectionConfig config)
-                : m_config(std::move(config))
-            {
-            }
-
-            ~NetworkTablesDashboardTransport() override
-            {
-                Stop();
-            }
-
-            bool Start(VariableUpdateCallback onVariableUpdate, ConnectionStateCallback onConnectionState) override
-            {
-                std::lock_guard<std::mutex> lock(m_mutex);
-                m_onVariableUpdate = std::move(onVariableUpdate);
-                m_onConnectionState = std::move(onConnectionState);
-
-                if (m_running)
-                {
-                    return true;
-                }
-
-                if (!EnsureWinsockLocked())
-                {
-                    PublishStateUnlocked(ConnectionState::Disconnected);
-                    return false;
-                }
-
-                m_running = true;
-                PublishStateUnlocked(ConnectionState::Connecting);
-                m_worker = std::thread([this]() { RunClientLoop(); });
-                return true;
-            }
-
-            void Stop() override
-            {
-                {
-                    std::lock_guard<std::mutex> lock(m_mutex);
-                    if (!m_running)
-                    {
-                        return;
-                    }
-                    m_running = false;
-                }
-
-                CloseSocket();
-
-                if (m_worker.joinable())
-                {
-                    m_worker.join();
-                }
-
-                std::lock_guard<std::mutex> lock(m_mutex);
-                PublishStateUnlocked(ConnectionState::Disconnected);
-            }
-
-            bool PublishBool(const QString& key, bool value) override
-            {
-                return SendEntryAssignment(key.toStdString(), 0x00, [value](std::vector<std::uint8_t>& payload)
-                {
-                    payload.push_back(value ? 1u : 0u);
-                });
-            }
-
-            bool PublishDouble(const QString& key, double value) override
-            {
-                return SendEntryAssignment(key.toStdString(), 0x01, [value](std::vector<std::uint8_t>& payload)
-                {
-                    const std::uint64_t raw = std::bit_cast<std::uint64_t>(value);
-                    for (int shift = 56; shift >= 0; shift -= 8)
-                    {
-                        payload.push_back(static_cast<std::uint8_t>((raw >> shift) & 0xFFu));
-                    }
-                });
-            }
-
-            bool PublishString(const QString& key, const QString& value) override
-            {
-                return SendEntryAssignment(key.toStdString(), 0x02, [value](std::vector<std::uint8_t>& payload)
-                {
-                    const std::string bytes = value.toStdString();
-                    const std::size_t bounded = std::min<std::size_t>(bytes.size(), 65535u);
-                    WriteU16(payload, static_cast<std::uint16_t>(bounded));
-                    payload.insert(payload.end(), bytes.begin(), bytes.begin() + static_cast<std::ptrdiff_t>(bounded));
-                });
-            }
-
-        private:
-            struct EntryMeta
-            {
-                std::uint16_t id = 0;
-                std::uint16_t seq = 0;
-                std::uint8_t typeId = 0;
-                std::string wireKey;
-            };
-
-            static std::string NormalizeIncomingKey(const std::string& wireKey)
-            {
-                static const std::string prefix = "/SmartDashboard/";
-                if (wireKey.rfind(prefix, 0) == 0)
-                {
-                    return wireKey.substr(prefix.size());
-                }
-                return wireKey;
-            }
-
-            static std::string ToWireKey(const std::string& key)
-            {
-                static const std::string prefix = "/SmartDashboard/";
-                if (key.rfind(prefix, 0) == 0)
-                {
-                    return key;
-                }
-                return prefix + key;
-            }
-
-            static void WriteU16(std::vector<std::uint8_t>& out, std::uint16_t value)
-            {
-                out.push_back(static_cast<std::uint8_t>((value >> 8) & 0xFFu));
-                out.push_back(static_cast<std::uint8_t>(value & 0xFFu));
-            }
-
-            static bool ReadU16(const std::vector<std::uint8_t>& in, std::size_t& offset, std::uint16_t& out)
-            {
-                if (offset + 2 > in.size())
-                {
-                    return false;
-                }
-                out = static_cast<std::uint16_t>((static_cast<std::uint16_t>(in[offset]) << 8) | in[offset + 1]);
-                offset += 2;
-                return true;
-            }
-
-            static bool ReadExact(SOCKET socket, std::uint8_t* data, std::size_t size)
-            {
-                std::size_t total = 0;
-                while (total < size)
-                {
-                    const int count = recv(socket, reinterpret_cast<char*>(data + total), static_cast<int>(size - total), 0);
-                    if (count <= 0)
-                    {
-                        return false;
-                    }
-                    total += static_cast<std::size_t>(count);
-                }
-                return true;
-            }
-
-            static bool SendExact(SOCKET socket, const std::uint8_t* data, std::size_t size)
-            {
-                std::size_t total = 0;
-                while (total < size)
-                {
-                    const int sent = send(socket, reinterpret_cast<const char*>(data + total), static_cast<int>(size - total), 0);
-                    if (sent <= 0)
-                    {
-                        return false;
-                    }
-                    total += static_cast<std::size_t>(sent);
-                }
-                return true;
-            }
-
-            static bool ReadU16FromSocket(SOCKET socket, std::uint16_t& out)
-            {
-                std::array<std::uint8_t, 2> raw {};
-                if (!ReadExact(socket, raw.data(), raw.size()))
-                {
-                    return false;
-                }
-
-                std::size_t offset = 0;
-                const std::vector<std::uint8_t> temp(raw.begin(), raw.end());
-                return ReadU16(temp, offset, out);
-            }
-
-            void RunClientLoop()
-            {
-                while (IsRunning())
-                {
-                    if (!ConnectAndHandshake())
-                    {
-                        PublishState(ConnectionState::Disconnected);
-                        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-                        continue;
-                    }
-
-                    PublishState(ConnectionState::Connected);
-
-                    while (IsRunning())
-                    {
-                        if (!ProcessOneMessage())
-                        {
-                            break;
-                        }
-                    }
-
-                    CloseSocket();
-                    PublishState(ConnectionState::Disconnected);
-                    if (IsRunning())
-                    {
-                        std::this_thread::sleep_for(std::chrono::milliseconds(500));
-                    }
-                }
-            }
-
-            bool ConnectAndHandshake()
-            {
-                std::string host;
-                {
-                    std::lock_guard<std::mutex> lock(m_mutex);
-                    host = ResolveHostLocked();
-                }
-
-                addrinfo hints {};
-                hints.ai_family = AF_INET;
-                hints.ai_socktype = SOCK_STREAM;
-
-                addrinfo* result = nullptr;
-                if (getaddrinfo(host.c_str(), "1735", &hints, &result) != 0 || result == nullptr)
-                {
-                    return false;
-                }
-
-                SOCKET socket = ::socket(result->ai_family, result->ai_socktype, result->ai_protocol);
-                if (socket == INVALID_SOCKET)
-                {
-                    freeaddrinfo(result);
-                    return false;
-                }
-
-                const int connected = ::connect(socket, result->ai_addr, static_cast<int>(result->ai_addrlen));
-                freeaddrinfo(result);
-                if (connected != 0)
-                {
-                    closesocket(socket);
-                    return false;
-                }
-
-                {
-                    std::lock_guard<std::mutex> lock(m_mutex);
-                    m_socket = socket;
-                    m_keyToEntry.clear();
-                    m_idToKey.clear();
-                    m_nextEntryId = 30000;
-                }
-
-                std::vector<std::uint8_t> hello;
-                hello.push_back(0x01);
-                WriteU16(hello, 0x0200);
-                return SendExact(socket, hello.data(), hello.size());
-            }
-
-            bool ProcessOneMessage()
-            {
-                SOCKET socket = INVALID_SOCKET;
-                {
-                    std::lock_guard<std::mutex> lock(m_mutex);
-                    socket = m_socket;
-                }
-
-                if (socket == INVALID_SOCKET)
-                {
-                    return false;
-                }
-
-                std::uint8_t type = 0;
-                if (!ReadExact(socket, &type, 1))
-                {
-                    return false;
-                }
-
-                switch (type)
-                {
-                    case 0x00:
-                        return true;
-                    case 0x03:
-                        return true;
-                    case 0x02:
-                    {
-                        std::array<std::uint8_t, 2> protocol {};
-                        return ReadExact(socket, protocol.data(), protocol.size());
-                    }
-                    case 0x10:
-                        return HandleEntryAssignment(socket);
-                    case 0x11:
-                        return HandleFieldUpdate(socket);
-                    default:
-                        return false;
-                }
-            }
-
-            bool HandleEntryAssignment(SOCKET socket)
-            {
-                std::uint16_t keyLen = 0;
-                if (!ReadU16FromSocket(socket, keyLen))
-                {
-                    return false;
-                }
-
-                std::vector<std::uint8_t> keyBytes(keyLen);
-                if (keyLen > 0 && !ReadExact(socket, keyBytes.data(), keyBytes.size()))
-                {
-                    return false;
-                }
-
-                std::uint8_t valueType = 0;
-                if (!ReadExact(socket, &valueType, 1))
-                {
-                    return false;
-                }
-
-                std::uint16_t entryId = 0;
-                std::uint16_t seq = 0;
-                if (!ReadU16FromSocket(socket, entryId) || !ReadU16FromSocket(socket, seq))
-                {
-                    return false;
-                }
-
-                const std::string wireKey(keyBytes.begin(), keyBytes.end());
-                const std::string key = NormalizeIncomingKey(wireKey);
-                VariableUpdate update;
-                update.key = QString::fromStdString(key);
-                update.seq = seq;
-                update.valueType = static_cast<int>(ToDirectValueType(valueType));
-
-                if (!ReadTypedValue(socket, valueType, update.value))
-                {
-                    return false;
-                }
-
-                {
-                    std::lock_guard<std::mutex> lock(m_mutex);
-                    EntryMeta meta;
-                    meta.id = entryId;
-                    meta.seq = seq;
-                    meta.typeId = valueType;
-                    meta.wireKey = wireKey;
-                    m_keyToEntry[key] = meta;
-                    m_idToKey[entryId] = key;
-                }
-
-                PublishUpdate(update);
-                return true;
-            }
-
-            bool HandleFieldUpdate(SOCKET socket)
-            {
-                std::uint16_t entryId = 0;
-                std::uint16_t seq = 0;
-                if (!ReadU16FromSocket(socket, entryId) || !ReadU16FromSocket(socket, seq))
-                {
-                    return false;
-                }
-
-                std::uint8_t valueType = 0;
-                std::string key;
-                {
-                    std::lock_guard<std::mutex> lock(m_mutex);
-                    const auto idIt = m_idToKey.find(entryId);
-                    if (idIt == m_idToKey.end())
-                    {
-                        return false;
-                    }
-
-                    key = idIt->second;
-                    const auto keyIt = m_keyToEntry.find(key);
-                    if (keyIt == m_keyToEntry.end())
-                    {
-                        return false;
-                    }
-
-                    keyIt->second.seq = seq;
-                    valueType = keyIt->second.typeId;
-                }
-
-                VariableUpdate update;
-                update.key = QString::fromStdString(key);
-                update.seq = seq;
-                update.valueType = static_cast<int>(ToDirectValueType(valueType));
-
-                if (!ReadTypedValue(socket, valueType, update.value))
-                {
-                    return false;
-                }
-
-                PublishUpdate(update);
-                return true;
-            }
-
-            bool ReadTypedValue(SOCKET socket, std::uint8_t typeId, QVariant& outValue)
-            {
-                if (typeId == 0x00)
-                {
-                    std::uint8_t b = 0;
-                    if (!ReadExact(socket, &b, 1))
-                    {
-                        return false;
-                    }
-                    outValue = (b != 0);
-                    return true;
-                }
-
-                if (typeId == 0x01)
-                {
-                    std::array<std::uint8_t, 8> raw {};
-                    if (!ReadExact(socket, raw.data(), raw.size()))
-                    {
-                        return false;
-                    }
-
-                    std::uint64_t bits = 0;
-                    for (const std::uint8_t byte : raw)
-                    {
-                        bits = (bits << 8) | byte;
-                    }
-
-                    outValue = std::bit_cast<double>(bits);
-                    return true;
-                }
-
-                if (typeId == 0x02)
-                {
-                    std::uint16_t len = 0;
-                    if (!ReadU16FromSocket(socket, len))
-                    {
-                        return false;
-                    }
-
-                    std::vector<std::uint8_t> bytes(len);
-                    if (len > 0 && !ReadExact(socket, bytes.data(), bytes.size()))
-                    {
-                        return false;
-                    }
-
-                    outValue = QString::fromStdString(std::string(bytes.begin(), bytes.end()));
-                    return true;
-                }
-
-                // NT string array (0x12): 1-byte element count followed by
-                // repeated [u16 length + UTF-8 bytes] elements.
-                // We expose this as QStringList QVariant so chooser option
-                // metadata can be consumed without lossy string flattening.
-                if (typeId == 0x12)
-                {
-                    std::uint8_t elementCount = 0;
-                    if (!ReadExact(socket, &elementCount, 1))
-                    {
-                        return false;
-                    }
-
-                    QStringList values;
-                    values.reserve(static_cast<int>(elementCount));
-                    for (std::uint8_t i = 0; i < elementCount; ++i)
-                    {
-                        std::uint16_t len = 0;
-                        if (!ReadU16FromSocket(socket, len))
-                        {
-                            return false;
-                        }
-
-                        std::vector<std::uint8_t> bytes(len);
-                        if (len > 0 && !ReadExact(socket, bytes.data(), bytes.size()))
-                        {
-                            return false;
-                        }
-
-                        values.push_back(QString::fromStdString(std::string(bytes.begin(), bytes.end())));
-                    }
-
-                    outValue = values;
-                    return true;
-                }
-
-                return false;
-            }
-
-            sd::direct::ValueType ToDirectValueType(std::uint8_t ntType) const
-            {
-                switch (ntType)
-                {
-                    case 0x00:
-                        return sd::direct::ValueType::Bool;
-                    case 0x01:
-                        return sd::direct::ValueType::Double;
-                    case 0x02:
-                    default:
-                        return sd::direct::ValueType::String;
-                }
-            }
-
-            bool SendEntryAssignment(const std::string& key, std::uint8_t typeId, const std::function<void(std::vector<std::uint8_t>&)>& appendValue)
-            {
-                std::lock_guard<std::mutex> lock(m_mutex);
-                if (!m_running || m_socket == INVALID_SOCKET)
-                {
-                    return false;
-                }
-
-                EntryMeta meta;
-                auto it = m_keyToEntry.find(key);
-                bool isUpdate = false;
-                if (it == m_keyToEntry.end())
-                {
-                    meta.id = m_nextEntryId++;
-                    meta.seq = 0;
-                    meta.typeId = typeId;
-                    meta.wireKey = ToWireKey(key);
-                }
-                else
-                {
-                    meta = it->second;
-                    meta.typeId = typeId;
-                    if (meta.wireKey.empty())
-                    {
-                        meta.wireKey = ToWireKey(key);
-                    }
-                    isUpdate = true;
-                }
-
-                meta.seq = static_cast<std::uint16_t>(meta.seq + 1);
-                m_keyToEntry[key] = meta;
-                m_idToKey[meta.id] = key;
-
-                std::vector<std::uint8_t> packet;
-                if (isUpdate)
-                {
-                    packet.push_back(0x11);
-                    WriteU16(packet, meta.id);
-                    WriteU16(packet, meta.seq);
-                }
-                else
-                {
-                    packet.push_back(0x10);
-                    const std::size_t bounded = std::min<std::size_t>(meta.wireKey.size(), 65535u);
-                    WriteU16(packet, static_cast<std::uint16_t>(bounded));
-                    packet.insert(packet.end(), meta.wireKey.begin(), meta.wireKey.begin() + static_cast<std::ptrdiff_t>(bounded));
-                    packet.push_back(typeId);
-                    WriteU16(packet, meta.id);
-                    WriteU16(packet, meta.seq);
-                }
-                appendValue(packet);
-
-                return SendExact(m_socket, packet.data(), packet.size());
-            }
-
-            std::string ResolveHostLocked() const
-            {
-                if (m_config.ntUseTeam && m_config.ntTeam > 0)
-                {
-                    const int team = m_config.ntTeam;
-                    const int hi = team / 100;
-                    const int lo = team % 100;
-                    return "10." + std::to_string(hi) + "." + std::to_string(lo) + ".2";
-                }
-
-                const QString host = m_config.ntHost.trimmed();
-                if (!host.isEmpty())
-                {
-                    return host.toStdString();
-                }
-
-                return "127.0.0.1";
-            }
-
-            bool EnsureWinsockLocked()
-            {
-                if (m_winsockReady)
-                {
-                    return true;
-                }
-
-                WSADATA data {};
-                const int result = WSAStartup(MAKEWORD(2, 2), &data);
-                if (result != 0)
-                {
-                    return false;
-                }
-
-                m_winsockReady = true;
-                return true;
-            }
-
-            bool IsRunning()
-            {
-                std::lock_guard<std::mutex> lock(m_mutex);
-                return m_running;
-            }
-
-            void CloseSocket()
-            {
-                SOCKET socket = INVALID_SOCKET;
-                {
-                    std::lock_guard<std::mutex> lock(m_mutex);
-                    socket = m_socket;
-                    m_socket = INVALID_SOCKET;
-                }
-
-                if (socket != INVALID_SOCKET)
-                {
-                    shutdown(socket, SD_BOTH);
-                    closesocket(socket);
-                }
-            }
-
-            void PublishState(ConnectionState state)
-            {
-                std::lock_guard<std::mutex> lock(m_mutex);
-                PublishStateUnlocked(state);
-            }
-
-            void PublishStateUnlocked(ConnectionState state)
-            {
-                if (m_onConnectionState)
-                {
-                    m_onConnectionState(state);
-                }
-            }
-
-            void PublishUpdate(const VariableUpdate& update)
-            {
-                VariableUpdateCallback callback;
-                {
-                    std::lock_guard<std::mutex> lock(m_mutex);
-                    callback = m_onVariableUpdate;
-                }
-
-                if (callback)
-                {
-                    callback(update);
-                }
-            }
-
-            ConnectionConfig m_config;
-            std::mutex m_mutex;
-            bool m_running = false;
-            bool m_winsockReady = false;
-            SOCKET m_socket = INVALID_SOCKET;
-            std::thread m_worker;
-            VariableUpdateCallback m_onVariableUpdate;
-            ConnectionStateCallback m_onConnectionState;
-            std::uint16_t m_nextEntryId = 30000;
-            std::map<std::string, EntryMeta> m_keyToEntry;
-            std::map<std::uint16_t, std::string> m_idToKey;
         };
 
         class ReplayDashboardTransport final : public IDashboardTransport
@@ -1610,32 +962,531 @@ namespace sd::transport
         };
     }
 
+    namespace
+    {
+        ConnectionState ToConnectionState(int state)
+        {
+            switch (state)
+            {
+                case SD_TRANSPORT_CONNECTION_STATE_CONNECTING:
+                    return ConnectionState::Connecting;
+                case SD_TRANSPORT_CONNECTION_STATE_CONNECTED:
+                    return ConnectionState::Connected;
+                case SD_TRANSPORT_CONNECTION_STATE_STALE:
+                    return ConnectionState::Stale;
+                case SD_TRANSPORT_CONNECTION_STATE_DISCONNECTED:
+                default:
+                    return ConnectionState::Disconnected;
+            }
+        }
+
+        TransportDescriptor MakeDirectDescriptor()
+        {
+            TransportDescriptor descriptor;
+            descriptor.id = "direct";
+            descriptor.displayName = "Direct";
+            descriptor.kind = TransportKind::Direct;
+            descriptor.useShortDisplayKeys = true;
+            descriptor.supportsRecording = true;
+            descriptor.settingsProfileId = "direct";
+            descriptor.boolProperties.insert_or_assign(QString::fromUtf8(kTransportPropertySupportsChooser), true);
+            return descriptor;
+        }
+
+        TransportDescriptor MakeReplayDescriptor()
+        {
+            TransportDescriptor descriptor;
+            descriptor.id = "replay";
+            descriptor.displayName = "Replay";
+            descriptor.kind = TransportKind::Replay;
+            descriptor.useShortDisplayKeys = true;
+            descriptor.supportsPlayback = true;
+            descriptor.settingsProfileId = "replay";
+            return descriptor;
+        }
+
+        std::vector<ConnectionFieldDescriptor> MakeLegacyNtConnectionFields()
+        {
+            std::vector<ConnectionFieldDescriptor> fields;
+
+            ConnectionFieldDescriptor useTeamField;
+            useTeamField.id = QString::fromUtf8(kTransportFieldUseTeamNumber);
+            useTeamField.label = "Use team number";
+            useTeamField.type = ConnectionFieldType::Bool;
+            useTeamField.helpText = "Use FRC team-number resolution instead of a direct host/IP.";
+            useTeamField.defaultValue = true;
+            fields.push_back(useTeamField);
+
+            ConnectionFieldDescriptor teamField;
+            teamField.id = QString::fromUtf8(kTransportFieldTeamNumber);
+            teamField.label = "Team number";
+            teamField.type = ConnectionFieldType::Int;
+            teamField.helpText = "Used when team-number resolution is enabled.";
+            teamField.defaultValue = 0;
+            teamField.intMinimum = 0;
+            teamField.intMaximum = 99999;
+            fields.push_back(teamField);
+
+            ConnectionFieldDescriptor hostField;
+            hostField.id = QString::fromUtf8(kTransportFieldHost);
+            hostField.label = "Host / IP";
+            hostField.type = ConnectionFieldType::String;
+            hostField.helpText = "Used when connecting directly by host name or IP address.";
+            hostField.defaultValue = "127.0.0.1";
+            fields.push_back(hostField);
+
+            ConnectionFieldDescriptor clientNameField;
+            clientNameField.id = QString::fromUtf8(kTransportFieldClientName);
+            clientNameField.label = "Client name";
+            clientNameField.type = ConnectionFieldType::String;
+            clientNameField.helpText = "Name reported by the dashboard client to the transport ecosystem.";
+            clientNameField.defaultValue = "SmartDashboardApp";
+            fields.push_back(clientNameField);
+
+            return fields;
+        }
+
+        std::vector<ConnectionFieldDescriptor> ConvertPluginConnectionFields(
+            const sd_transport_plugin_descriptor_v1* pluginDescriptor,
+            const QString& settingsProfileId
+        )
+        {
+            if (pluginDescriptor == nullptr || pluginDescriptor->get_connection_fields == nullptr)
+            {
+                if (settingsProfileId == "legacy-nt")
+                {
+                    return MakeLegacyNtConnectionFields();
+                }
+
+                return {};
+            }
+
+            size_t count = 0;
+            const sd_transport_connection_field_descriptor_v1* fields = pluginDescriptor->get_connection_fields(&count);
+            std::vector<ConnectionFieldDescriptor> converted;
+            if (fields == nullptr || count == 0)
+            {
+                return converted;
+            }
+
+            converted.reserve(count);
+            for (size_t i = 0; i < count; ++i)
+            {
+                const sd_transport_connection_field_descriptor_v1& source = fields[i];
+                if (source.field_id == nullptr || source.label == nullptr)
+                {
+                    continue;
+                }
+
+                ConnectionFieldDescriptor field;
+                field.id = QString::fromUtf8(source.field_id);
+                field.label = QString::fromUtf8(source.label);
+                field.helpText = QString::fromUtf8(source.help_text != nullptr ? source.help_text : "");
+                switch (source.field_type)
+                {
+                    case SD_TRANSPORT_CONNECTION_FIELD_TYPE_BOOL:
+                        field.type = ConnectionFieldType::Bool;
+                        field.defaultValue = (source.default_bool_value != 0);
+                        break;
+                    case SD_TRANSPORT_CONNECTION_FIELD_TYPE_INT:
+                        field.type = ConnectionFieldType::Int;
+                        field.defaultValue = source.default_int_value;
+                        field.intMinimum = source.int_minimum;
+                        field.intMaximum = source.int_maximum;
+                        break;
+                    case SD_TRANSPORT_CONNECTION_FIELD_TYPE_STRING:
+                    default:
+                        field.type = ConnectionFieldType::String;
+                        field.defaultValue = QString::fromUtf8(source.default_string_value != nullptr ? source.default_string_value : "");
+                        break;
+                }
+                converted.push_back(field);
+            }
+
+            return converted;
+        }
+
+        bool QueryPluginBoolProperty(
+            const sd_transport_plugin_descriptor_v1* pluginDescriptor,
+            const char* propertyName,
+            bool defaultValue
+        )
+        {
+            if (pluginDescriptor == nullptr || pluginDescriptor->get_bool_property == nullptr || propertyName == nullptr)
+            {
+                return defaultValue;
+            }
+
+            return pluginDescriptor->get_bool_property(propertyName, defaultValue ? 1 : 0) != 0;
+        }
+
+        class PluginDashboardTransport final : public IDashboardTransport
+        {
+        public:
+            PluginDashboardTransport(const sd_transport_plugin_descriptor_v1* descriptor, ConnectionConfig config)
+                : m_descriptor(descriptor)
+                , m_config(std::move(config))
+            {
+            }
+
+            ~PluginDashboardTransport() override
+            {
+                Stop();
+                DestroyInstance();
+            }
+
+            bool Start(VariableUpdateCallback onVariableUpdate, ConnectionStateCallback onConnectionState) override
+            {
+                m_onVariableUpdate = std::move(onVariableUpdate);
+                m_onConnectionState = std::move(onConnectionState);
+
+                if (m_descriptor == nullptr || m_descriptor->transport_api == nullptr || m_descriptor->transport_api->start == nullptr)
+                {
+                    return false;
+                }
+
+                if (m_instance == nullptr)
+                {
+                    if (m_descriptor->transport_api->create == nullptr)
+                    {
+                        return false;
+                    }
+                    m_instance = m_descriptor->transport_api->create();
+                }
+
+                if (m_instance == nullptr)
+                {
+                    return false;
+                }
+
+                m_transportIdUtf8 = m_config.transportId.toUtf8();
+                m_pluginSettingsJsonUtf8 = m_config.pluginSettingsJson.toUtf8();
+                m_ntHostUtf8 = m_config.ntHost.toUtf8();
+                m_ntClientNameUtf8 = m_config.ntClientName.toUtf8();
+                m_replayFilePathUtf8 = m_config.replayFilePath.toUtf8();
+
+                sd_transport_connection_config_v1 pluginConfig {};
+                pluginConfig.transport_id = m_transportIdUtf8.constData();
+                pluginConfig.plugin_settings_json = m_pluginSettingsJsonUtf8.constData();
+                pluginConfig.nt_host = m_ntHostUtf8.constData();
+                pluginConfig.nt_team = m_config.ntTeam;
+                pluginConfig.nt_use_team = m_config.ntUseTeam ? 1 : 0;
+                pluginConfig.nt_client_name = m_ntClientNameUtf8.constData();
+                pluginConfig.replay_file_path = m_replayFilePathUtf8.constData();
+
+                sd_transport_callbacks_v1 callbacks {};
+                callbacks.user_data = this;
+                callbacks.on_variable_update = &PluginDashboardTransport::OnPluginVariableUpdate;
+                callbacks.on_connection_state = &PluginDashboardTransport::OnPluginConnectionState;
+
+                return m_descriptor->transport_api->start(m_instance, &pluginConfig, &callbacks) != 0;
+            }
+
+            void Stop() override
+            {
+                if (m_instance != nullptr && m_descriptor != nullptr && m_descriptor->transport_api != nullptr && m_descriptor->transport_api->stop != nullptr)
+                {
+                    m_descriptor->transport_api->stop(m_instance);
+                }
+            }
+
+            bool PublishBool(const QString& key, bool value) override
+            {
+                if (m_instance == nullptr || m_descriptor == nullptr || m_descriptor->transport_api == nullptr || m_descriptor->transport_api->publish_bool == nullptr)
+                {
+                    return false;
+                }
+
+                const QByteArray keyUtf8 = key.toUtf8();
+                return m_descriptor->transport_api->publish_bool(m_instance, keyUtf8.constData(), value ? 1 : 0) != 0;
+            }
+
+            bool PublishDouble(const QString& key, double value) override
+            {
+                if (m_instance == nullptr || m_descriptor == nullptr || m_descriptor->transport_api == nullptr || m_descriptor->transport_api->publish_double == nullptr)
+                {
+                    return false;
+                }
+
+                const QByteArray keyUtf8 = key.toUtf8();
+                return m_descriptor->transport_api->publish_double(m_instance, keyUtf8.constData(), value) != 0;
+            }
+
+            bool PublishString(const QString& key, const QString& value) override
+            {
+                if (m_instance == nullptr || m_descriptor == nullptr || m_descriptor->transport_api == nullptr || m_descriptor->transport_api->publish_string == nullptr)
+                {
+                    return false;
+                }
+
+                const QByteArray keyUtf8 = key.toUtf8();
+                const QByteArray valueUtf8 = value.toUtf8();
+                return m_descriptor->transport_api->publish_string(m_instance, keyUtf8.constData(), valueUtf8.constData()) != 0;
+            }
+
+        private:
+            static void OnPluginVariableUpdate(
+                void* userData,
+                const char* key,
+                const sd_transport_value_v1* value,
+                uint64_t seq
+            )
+            {
+                auto* self = static_cast<PluginDashboardTransport*>(userData);
+                if (self == nullptr || self->m_onVariableUpdate == nullptr || key == nullptr || value == nullptr)
+                {
+                    return;
+                }
+
+                VariableUpdate update;
+                update.key = QString::fromUtf8(key);
+                update.seq = seq;
+
+                switch (value->type)
+                {
+                    case SD_TRANSPORT_VALUE_TYPE_BOOL:
+                        update.valueType = static_cast<int>(sd::direct::ValueType::Bool);
+                        update.value = (value->bool_value != 0);
+                        break;
+                    case SD_TRANSPORT_VALUE_TYPE_DOUBLE:
+                        update.valueType = static_cast<int>(sd::direct::ValueType::Double);
+                        update.value = value->double_value;
+                        break;
+                    case SD_TRANSPORT_VALUE_TYPE_STRING_ARRAY:
+                    {
+                        update.valueType = static_cast<int>(sd::direct::ValueType::StringArray);
+                        QStringList values;
+                        for (size_t i = 0; i < value->string_array_count; ++i)
+                        {
+                            const char* item = value->string_array_items != nullptr ? value->string_array_items[i] : nullptr;
+                            values.push_back(QString::fromUtf8(item != nullptr ? item : ""));
+                        }
+                        update.value = values;
+                        break;
+                    }
+                    case SD_TRANSPORT_VALUE_TYPE_STRING:
+                    default:
+                        update.valueType = static_cast<int>(sd::direct::ValueType::String);
+                        update.value = QString::fromUtf8(value->string_value != nullptr ? value->string_value : "");
+                        break;
+                }
+
+                self->m_onVariableUpdate(update);
+            }
+
+            static void OnPluginConnectionState(void* userData, int state)
+            {
+                auto* self = static_cast<PluginDashboardTransport*>(userData);
+                if (self == nullptr || self->m_onConnectionState == nullptr)
+                {
+                    return;
+                }
+
+                self->m_onConnectionState(ToConnectionState(state));
+            }
+
+            void DestroyInstance()
+            {
+                if (m_instance != nullptr && m_descriptor != nullptr && m_descriptor->transport_api != nullptr && m_descriptor->transport_api->destroy != nullptr)
+                {
+                    m_descriptor->transport_api->destroy(m_instance);
+                    m_instance = nullptr;
+                }
+            }
+
+            const sd_transport_plugin_descriptor_v1* m_descriptor = nullptr;
+            ConnectionConfig m_config;
+            sd_transport_instance_v1 m_instance = nullptr;
+            VariableUpdateCallback m_onVariableUpdate;
+            ConnectionStateCallback m_onConnectionState;
+            QByteArray m_transportIdUtf8;
+            QByteArray m_pluginSettingsJsonUtf8;
+            QByteArray m_ntHostUtf8;
+            QByteArray m_ntClientNameUtf8;
+            QByteArray m_replayFilePathUtf8;
+        };
+    }
+
+    struct DashboardTransportRegistry::Impl
+    {
+        struct PluginEntry
+        {
+            TransportDescriptor descriptor;
+            std::unique_ptr<QLibrary> library;
+            const sd_transport_plugin_descriptor_v1* pluginDescriptor = nullptr;
+        };
+
+        std::vector<TransportDescriptor> descriptors;
+        std::vector<PluginEntry> plugins;
+
+        Impl()
+        {
+            descriptors.push_back(MakeDirectDescriptor());
+            descriptors.push_back(MakeReplayDescriptor());
+            LoadPlugins();
+        }
+
+        void LoadPlugins()
+        {
+            const QString appDirPath = QCoreApplication::applicationDirPath();
+            if (appDirPath.trimmed().isEmpty())
+            {
+                return;
+            }
+
+            QDir pluginDir(appDirPath + "/plugins");
+            if (!pluginDir.exists())
+            {
+                return;
+            }
+
+            const QStringList entries = pluginDir.entryList(QDir::Files);
+            std::set<QString> seenIds;
+            for (const QString& entry : entries)
+            {
+                auto library = std::make_unique<QLibrary>(pluginDir.absoluteFilePath(entry));
+                if (!library->load())
+                {
+                    continue;
+                }
+
+                auto getPlugin = reinterpret_cast<sd_get_transport_plugin_v1_fn>(library->resolve("SdGetTransportPluginV1"));
+                if (getPlugin == nullptr)
+                {
+                    continue;
+                }
+
+                const sd_transport_plugin_descriptor_v1* pluginDescriptor = getPlugin();
+                if (pluginDescriptor == nullptr)
+                {
+                    continue;
+                }
+                if (pluginDescriptor->plugin_api_version != SD_TRANSPORT_PLUGIN_API_VERSION_1)
+                {
+                    continue;
+                }
+                if (pluginDescriptor->plugin_id == nullptr || pluginDescriptor->display_name == nullptr || pluginDescriptor->transport_api == nullptr)
+                {
+                    continue;
+                }
+
+                const QString pluginId = QString::fromUtf8(pluginDescriptor->plugin_id).trimmed();
+                if (pluginId.isEmpty() || seenIds.contains(pluginId))
+                {
+                    continue;
+                }
+
+                seenIds.insert(pluginId);
+
+                PluginEntry plugin;
+                plugin.pluginDescriptor = pluginDescriptor;
+                plugin.library = std::move(library);
+                plugin.descriptor.id = pluginId;
+                plugin.descriptor.displayName = QString::fromUtf8(pluginDescriptor->display_name);
+                plugin.descriptor.kind = TransportKind::Plugin;
+                plugin.descriptor.useShortDisplayKeys = (pluginDescriptor->flags & SD_TRANSPORT_PLUGIN_FLAG_USE_SHORT_DISPLAY_KEYS) != 0u;
+                plugin.descriptor.supportsRecording = (pluginDescriptor->flags & SD_TRANSPORT_PLUGIN_FLAG_SUPPORTS_RECORDING) != 0u;
+                plugin.descriptor.supportsPlayback = false;
+                plugin.descriptor.settingsProfileId = QString::fromUtf8(
+                    pluginDescriptor->settings_profile_id != nullptr ? pluginDescriptor->settings_profile_id : pluginDescriptor->plugin_id
+                );
+                plugin.descriptor.connectionFields = ConvertPluginConnectionFields(pluginDescriptor, plugin.descriptor.settingsProfileId);
+                plugin.descriptor.boolProperties.insert_or_assign(
+                    QString::fromUtf8(kTransportPropertySupportsChooser),
+                    QueryPluginBoolProperty(pluginDescriptor, SD_TRANSPORT_PROPERTY_SUPPORTS_CHOOSER, false)
+                );
+                plugin.descriptor.boolProperties.insert_or_assign(
+                    QString::fromUtf8(kTransportPropertySupportsMultiClient),
+                    QueryPluginBoolProperty(pluginDescriptor, SD_TRANSPORT_PROPERTY_SUPPORTS_MULTI_CLIENT, false)
+                );
+                descriptors.push_back(plugin.descriptor);
+                plugins.push_back(std::move(plugin));
+            }
+        }
+
+        const TransportDescriptor* FindDescriptor(const QString& transportId) const
+        {
+            for (const TransportDescriptor& descriptor : descriptors)
+            {
+                if (descriptor.id == transportId)
+                {
+                    return &descriptor;
+                }
+            }
+
+            return nullptr;
+        }
+
+        const PluginEntry* FindPlugin(const QString& transportId) const
+        {
+            for (const PluginEntry& plugin : plugins)
+            {
+                if (plugin.descriptor.id == transportId)
+                {
+                    return &plugin;
+                }
+            }
+
+            return nullptr;
+        }
+    };
+
+    DashboardTransportRegistry::DashboardTransportRegistry()
+        : m_impl(std::make_unique<Impl>())
+    {
+    }
+
+    DashboardTransportRegistry::~DashboardTransportRegistry() = default;
+
+    const std::vector<TransportDescriptor>& DashboardTransportRegistry::GetAvailableTransports() const
+    {
+        return m_impl->descriptors;
+    }
+
+    const TransportDescriptor* DashboardTransportRegistry::FindTransport(const QString& transportId) const
+    {
+        return m_impl->FindDescriptor(transportId);
+    }
+
+    std::unique_ptr<IDashboardTransport> DashboardTransportRegistry::CreateTransport(const ConnectionConfig& config) const
+    {
+        const QString transportId = config.transportId.trimmed().isEmpty() ? QStringLiteral("direct") : config.transportId.trimmed();
+        const TransportDescriptor* descriptor = FindTransport(transportId);
+        if (descriptor == nullptr)
+        {
+            return nullptr;
+        }
+
+        if (descriptor->kind == TransportKind::Replay)
+        {
+            return std::make_unique<ReplayDashboardTransport>(config);
+        }
+
+        if (descriptor->kind == TransportKind::Direct)
+        {
+            return std::make_unique<DirectDashboardTransport>();
+        }
+
+        const Impl::PluginEntry* plugin = m_impl->FindPlugin(transportId);
+        if (plugin == nullptr)
+        {
+            return nullptr;
+        }
+
+        return std::make_unique<PluginDashboardTransport>(plugin->pluginDescriptor, config);
+    }
+
     QString ToDisplayString(TransportKind kind)
     {
         switch (kind)
         {
             case TransportKind::Replay:
                 return "Replay";
-            case TransportKind::NetworkTables:
-                return "NetworkTables";
+            case TransportKind::Plugin:
+                return "Plugin";
             case TransportKind::Direct:
             default:
                 return "Direct";
         }
-    }
-
-    std::unique_ptr<IDashboardTransport> CreateDashboardTransport(const ConnectionConfig& config)
-    {
-        if (config.kind == TransportKind::Replay)
-        {
-            return std::make_unique<ReplayDashboardTransport>(config);
-        }
-
-        if (config.kind == TransportKind::NetworkTables)
-        {
-            return std::make_unique<NetworkTablesDashboardTransport>(config);
-        }
-
-        return std::make_unique<DirectDashboardTransport>();
     }
 }

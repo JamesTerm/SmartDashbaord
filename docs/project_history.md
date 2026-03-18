@@ -7,6 +7,50 @@ Curated milestone history for this repository.
 - Keep milestone sections in descending chronological order (newest first) so recent changes are immediately visible.
 - Historical branch/status wording in older entries is time-bound; read each section as a snapshot from that date.
 
+## 2026-03-18 - Legacy NT plugin boundary and transport settings schema completed
+
+- Completed the first real compatibility-plugin slice instead of leaving it as a scaffold:
+  - `Legacy NT` now runs as a real optional plugin discovered from `plugins/`
+  - the old built-in NT transport client was removed from the core app
+  - the plugin now owns the legacy NT socket/connect/publish/receive behavior behind the versioned C ABI.
+- Transport plugin ABI and host contract were expanded in a controlled way:
+  - added heavily documented, Doxygen-style teaching comments to the transport ABI and host transport headers
+  - added extensible shared capability/property queries (for example chooser support)
+  - added transport-declared connection field schemas so plugins can describe connection requirements without owning Qt UI.
+- Connection UX was refactored to fit the new architecture:
+  - replaced hardcoded NT menu actions with a generic host-rendered `Transport Settings...` dialog
+  - settings dialog now renders transport-specific bool/int/string fields from descriptor metadata
+  - transport selection/status text now clearly shows the currently selected transport.
+- Product/design docs were realigned to this architecture:
+  - `Direct` and `Replay` remain native core transports
+  - compatibility ecosystems are optional plugins with one plugin per ecosystem
+  - `Legacy NT` is now the stable compatibility baseline while future Shuffleboard-oriented additions remain additive work above that baseline.
+- Product framing now explicitly reflects selective inspiration and transition strategy:
+  - README/requirements language now says the project studies ideas from tools like `Shuffleboard`, `Glass`, and `Elastic` without trying to copy another dashboard wholesale
+  - README now explains the plugin strategy as a transitional way to support many teams while leaving room for a future native generic transport plugin designed around SmartDashboard's own goals.
+
+## 2026-03-18 - Transport plugin foundation direction started
+
+- Recorded a new compatibility-architecture direction for future growth:
+  - keep `Direct` and `Replay` built into the core dashboard
+  - move legacy/interoperability ecosystems to optional transport plugins discovered from `plugins/`
+  - prefer one plugin per ecosystem (`Legacy NT`, future bridges) instead of bundling multiple compatibility stacks into one shared plugin.
+- Rationale captured across requirements/design discussion:
+  - teams should be able to keep existing robot-code publishing patterns and deploy only the bridge relevant to their current ecosystem
+  - the app should feel tailored to the team's chosen stack instead of presenting every compatibility mode by default
+  - plugin boundaries reinforce architectural discipline and prevent compatibility helpers from bleeding into core app assumptions
+  - the repository now has an explicit teaching goal around versioned C-style plugin interfaces and why they are often chosen for long-term binary survivability.
+- Initial foundation slice started in code:
+  - transport selection is being refactored around transport descriptors/ids instead of a fixed baked-in enum list
+  - top-level CMake now has optional plugin build toggles (`SMARTDASHBOARD_BUILD_PLUGIN_LEGACY_NT`)
+  - a first `plugins/LegacyNtTransport` project was added as the starting plugin-hosting shape for future work.
+- Refined product-roadmap language in `docs/requirements.md` so future feature growth is evaluated against SmartDashboard's own identity rather than against any outside dashboard product:
+  - added an explicit planning filter to borrow ideas selectively instead of imitating another tool
+  - reorganized priority framing into `Need`, `Want`, and `Dream`
+  - kept migration essentials, live-dashboard baseline behavior, chooser support, and compatibility-plugin architecture in the `Need` bucket
+  - placed replay, stronger plotting, and a few practical operational additions in `Want`
+  - left deeper analytics, broad specialty widgets, and major UX polish in `Dream`.
+
 ## 2026-03-17 - Direct survive restart fix and remembered-control recovery
 
 - Restored the Direct dashboard-survive path for Robot_Simulation pairing without changing the compatibility baseline:

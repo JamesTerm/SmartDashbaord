@@ -21,6 +21,8 @@ Build an educational, community-friendly C++ dashboard prototype for FRC that de
   - prioritize features that help teams during normal robot development and match-day use
   - avoid deep analytics work unless it clearly supports real team workflows
   - prefer compatibility and migration ease over purity of internal implementation
+  - evaluate outside tools for ideas, but only adopt feature directions that fit this product's own identity
+  - study popular dashboards (`Shuffleboard`, `Glass`, `Elastic`, and similar tools) for workflow lessons, but avoid cloning another product's feature surface or branding story
 
 ## Adoption principle
 
@@ -116,45 +118,90 @@ Build an educational, community-friendly C++ dashboard prototype for FRC that de
   - timeline model exposing current time, duration, and playback speed
   - UI-ready integration points for future playback controls (without coupling UI to data source type)
 
-## Prioritized product checklist
+## Need / Want / Dream
 
-Order these from most important to least important unless a later item becomes a hard dependency for an earlier one.
+Use these buckets to keep roadmap discussions grounded in product identity.
+
+- `Need`
+  - adoption blockers, migration essentials, and daily-driver basics
+  - if these are missing, teams will hesitate to switch or will bounce off quickly
+- `Want`
+  - high-value improvements and differentiators that strengthen the product once the baseline is dependable
+  - these should improve real workflows, but are not allowed to destabilize the foundation
+- `Dream`
+  - interesting future ideas, larger specialty surfaces, or ambitious analysis/polish work
+  - these stay intentionally deprioritized until the product is already trusted for everyday use
+
+### Need
 
 1. **Compatibility first**
    - Teams can leave robot code as-is, or very nearly as-is, when adopting this dashboard.
    - Existing `SmartDashboard`/`Shuffleboard`/`NetworkTables` publishing workflows are supported directly or through a clear adapter/translation layer.
    - Acceptance: a team can connect an existing robot project with little or no code churn and see expected values/widgets.
 
-2. **Strong `Shuffleboard`-class live dashboard baseline**
+2. **Strong live dashboard baseline**
    - Reliable live telemetry, clear connection state, practical writable controls, and stable layout workflows.
    - Acceptance: teams can use the dashboard confidently during regular robot development and testing.
 
 3. **NetworkTables interoperability and migration smoothness**
    - NetworkTables behavior should feel solid enough that teams do not see this dashboard as a special-case tool.
    - Acceptance: common FRC keys and update patterns behave as teams expect.
+   - Architecture direction: legacy ecosystem compatibility should be packaged as optional per-ecosystem transport plugins so teams can keep robot code patterns while deploying only the bridge they need.
+   - Current baseline: `Legacy NT` is the first real compatibility plugin and should remain the stable comparison oracle while broader Shuffleboard-oriented additions are layered carefully on top.
 
-4. **High-value widget coverage**
+4. **High-value everyday widget coverage**
    - Prioritize the widgets teams most commonly need before adding niche analysis surfaces.
-   - Include graph/plot support that satisfies normal `Shuffleboard`-class day-to-day telemetry visibility needs.
+   - Include graph/plot support that satisfies normal day-to-day telemetry visibility needs.
+   - Include `SendableChooser`-class support as a compatibility requirement.
 
-5. **Enhanced multi-trace plotting**
+5. **Dependable migration and operator workflow**
+   - Layout/edit/save/load behavior, reconnect handling, and operator-controlled value survival should feel trustworthy.
+   - Acceptance: a normal team can accomplish everyday dashboard tasks without first asking what is missing.
+
+### Want
+
+1. **Replay as a differentiator**
+   - Keep recording/replay and timeline analysis improving, but in service of practical team debugging rather than tool sprawl.
+   - Acceptance: replay remains a clear reason to choose this dashboard over older baseline tools, not a separate product direction.
+
+2. **Enhanced multi-trace plotting**
    - After basic graph compatibility is solid, add a stronger plot experience that can show multiple related signals together when that meaningfully improves debugging.
-   - This remains a personal priority for product usefulness, but should be treated as enhancement work beyond minimum `Shuffleboard`-class plotting coverage.
    - Acceptance: users can inspect several related signals in one plotting surface without losing readability.
 
-6. **Replay as a differentiator**
-   - Keep recording/replay and timeline analysis improving, but in service of practical team debugging rather than tool sprawl.
-   - Acceptance: replay remains a clear reason to choose this dashboard over `Shuffleboard`, not a separate product direction.
+3. **High-value operational additions**
+   - Add practical features that directly support common team workflows once the foundation is stable.
+   - Current likely candidates:
+     - camera stream support
+     - lightweight alerts/notifications
+     - a few more visual control variants where they materially improve migration comfort
 
-7. **Deeper analytics only when justified**
+### Dream
+
+1. **Deeper analytics only when justified**
    - Add advanced analysis helpers only when they clearly help normal team workflows.
    - Acceptance: each addition saves real time during incident review instead of adding novelty.
+
+2. **Broader specialty widget surfaces**
+   - Explore richer FRC-specific views only after core adoption is healthy.
+   - Examples:
+     - field/mechanism-style views
+     - command/subsystem-oriented panels
+     - other specialty semantic widgets that are useful but not foundational
+
+3. **Major UX polish layers**
+   - Consider broader visual/design-system sophistication only after the product is already trusted for reliability and workflow fit.
 
 ## Foundation before enabling NetworkTables broadly
 
 Treat this as the readiness gate before presenting NetworkTables support as a core team-facing feature.
 
 - **Must-have before broad NT rollout**
+  - Compatibility transport architecture stays optional and ecosystem-scoped:
+    - `Direct` and `Replay` remain built into the core app
+    - legacy/interoperability transports are discoverable plugins loaded from `plugins/`
+    - each plugin owns its own compatibility scope, reconnect semantics, and multi-client story unless the core contract explicitly guarantees more
+    - plugin ABI should prefer a small versioned C interface so examples remain teachable and binary compatibility is easier to preserve across builds
+    - plugin settings UI should be host-rendered from transport-declared field metadata rather than by embedding transport-specific Qt UI into the plugin boundary
   - Existing common scalar widgets feel complete for normal team use:
     - bool indicators/text/control
     - numeric text/bar/slider/dial

@@ -22,6 +22,7 @@ qt_add_executable(SmartDashboardApp WIN32
     src/layout/layout_serializer.cpp
     src/transport/dashboard_transport.h
     src/transport/dashboard_transport.cpp
+    src/transport/dashboard_transport_plugin_api.h
     src/widgets/variable_tile.h
     src/widgets/variable_tile.cpp
     src/widgets/line_plot_widget.h
