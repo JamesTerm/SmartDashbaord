@@ -34,6 +34,7 @@
 #include <QSettings>
 #include <QStringList>
 #include <QStatusBar>
+#include <QThread>
 #include <QToolButton>
 #include <QTimer>
 #include <QVariant>
@@ -258,9 +259,6 @@ namespace
 MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent)
 {
-    m_uiDebugLog.open(sd::app::GetDebugLogPath("direct_ui_debug_log.txt").toStdString(), std::ios::out | std::ios::trunc);
-    DebugLogUiEvent("MainWindow start");
-
     RefreshWindowTitle();
     resize(1200, 800);
 
@@ -1000,13 +998,7 @@ MainWindow::~MainWindow()
 
 void MainWindow::DebugLogUiEvent(const QString& line) const
 {
-    if (!m_uiDebugLog.is_open())
-    {
-        return;
-    }
-
-    m_uiDebugLog << line.toStdString() << '\n';
-    m_uiDebugLog.flush();
+    static_cast<void>(line);
 }
 
 void MainWindow::DrainPendingUiUpdates()
@@ -1085,8 +1077,6 @@ void MainWindow::OnSetMoveResizeMode()
 
 void MainWindow::OnVariableUpdateReceived(const QString& key, int valueType, const QVariant& value, quint64 seq)
 {
-    DebugLogUiEvent(QString("update key=%1 type=%2 seq=%3").arg(key).arg(valueType).arg(seq));
-
     if (valueType == static_cast<int>(sd::direct::ValueType::String)
         || valueType == static_cast<int>(sd::direct::ValueType::StringArray))
     {
@@ -1266,8 +1256,6 @@ void MainWindow::OnVariableUpdateReceived(const QString& key, int valueType, con
 
 void MainWindow::OnConnectionStateChanged(int state)
 {
-    DebugLogUiEvent(QString("connection state=%1").arg(state));
-
     m_connectionState = state;
 
     const int connected = static_cast<int>(sd::transport::ConnectionState::Connected);
@@ -2515,6 +2503,12 @@ void MainWindow::StartTransport()
     const bool started = m_transport->Start(
         [this](const sd::transport::VariableUpdate& update)
         {
+            if (QThread::currentThread() == thread())
+            {
+                OnVariableUpdateReceived(update.key, update.valueType, update.value, static_cast<quint64>(update.seq));
+                return;
+            }
+
             bool scheduleDrain = false;
             {
                 std::lock_guard<std::mutex> lock(m_pendingUiUpdatesMutex);
