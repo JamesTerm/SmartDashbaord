@@ -73,7 +73,6 @@ private slots:
     void OnConnectTransport();
     void OnDisconnectTransport();
     void OnUseDirectTransport();
-    void OnUseNetworkTablesTransport();
     void OnUseReplayTransport();
     void OnToggleTelemetryFeature();
     void OnSetNtHost();
@@ -137,6 +136,10 @@ private:
     void PublishRememberedControlValues();
     void DebugLogUiEvent(const QString& line) const;
     void DrainPendingUiUpdates();
+    void SelectTransport(const QString& transportId);
+    const sd::transport::TransportDescriptor* GetSelectedTransportDescriptor() const;
+    bool CurrentTransportUsesShortDisplayKeys() const;
+    bool CurrentTransportUsesLegacyNtSettings() const;
 
     QWidget* m_canvas = nullptr;
     QLabel* m_statusLabel = nullptr;
@@ -150,8 +153,9 @@ private:
     QAction* m_connectTransportAction = nullptr;
     QAction* m_disconnectTransportAction = nullptr;
     QAction* m_useDirectTransportAction = nullptr;
-    QAction* m_useNetworkTablesTransportAction = nullptr;
     QAction* m_useReplayTransportAction = nullptr;
+    QAction* m_ntSetHostAction = nullptr;
+    QAction* m_ntSetTeamAction = nullptr;
     QAction* m_telemetryFeatureViewAction = nullptr;
     QAction* m_replayControlsViewAction = nullptr;
     QAction* m_replayTimelineViewAction = nullptr;
@@ -189,7 +193,9 @@ private:
     LayoutMap m_savedLayoutByKey;
     sd::model::VariableStore m_variableStore;
     sd::transport::ConnectionConfig m_connectionConfig;
+    sd::transport::DashboardTransportRegistry m_transportRegistry;
     std::unique_ptr<sd::transport::IDashboardTransport> m_transport;
+    std::vector<QAction*> m_pluginTransportActions;
     struct RememberedControlValue
     {
         int valueType = 3;

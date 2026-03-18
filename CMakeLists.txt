@@ -14,6 +14,12 @@ endif()
 
 include(CTest)
 
+option(SMARTDASHBOARD_BUILD_PLUGIN_LEGACY_NT "Build legacy NetworkTables transport plugin" ON)
+
 add_subdirectory(SmartDashboard_Interface_direct)
 add_subdirectory(ClientInterface_direct)
 add_subdirectory(SmartDashboard)
+
+if(SMARTDASHBOARD_BUILD_PLUGIN_LEGACY_NT)
+    add_subdirectory(plugins/LegacyNtTransport)
+endif()

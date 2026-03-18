@@ -1,12 +1,16 @@
 #include "transport/dashboard_transport.h"
+#include "transport/dashboard_transport_plugin_api.h"
 
 #include "sd_direct_publisher.h"
 #include "sd_direct_subscriber.h"
 
+#include <QDir>
 #include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QCoreApplication>
+#include <QLibrary>
 #include <QVariant>
 
 #include <algorithm>
@@ -19,6 +23,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <set>
 #include <string>
 #include <thread>
 #include <unordered_map>
@@ -1610,32 +1615,406 @@ namespace sd::transport
         };
     }
 
+    namespace
+    {
+        ConnectionState ToConnectionState(int state)
+        {
+            switch (state)
+            {
+                case SD_TRANSPORT_CONNECTION_STATE_CONNECTING:
+                    return ConnectionState::Connecting;
+                case SD_TRANSPORT_CONNECTION_STATE_CONNECTED:
+                    return ConnectionState::Connected;
+                case SD_TRANSPORT_CONNECTION_STATE_STALE:
+                    return ConnectionState::Stale;
+                case SD_TRANSPORT_CONNECTION_STATE_DISCONNECTED:
+                default:
+                    return ConnectionState::Disconnected;
+            }
+        }
+
+        TransportDescriptor MakeDirectDescriptor()
+        {
+            TransportDescriptor descriptor;
+            descriptor.id = "direct";
+            descriptor.displayName = "Direct";
+            descriptor.kind = TransportKind::Direct;
+            descriptor.useShortDisplayKeys = true;
+            descriptor.supportsRecording = true;
+            descriptor.settingsProfileId = "direct";
+            return descriptor;
+        }
+
+        TransportDescriptor MakeReplayDescriptor()
+        {
+            TransportDescriptor descriptor;
+            descriptor.id = "replay";
+            descriptor.displayName = "Replay";
+            descriptor.kind = TransportKind::Replay;
+            descriptor.useShortDisplayKeys = true;
+            descriptor.supportsPlayback = true;
+            descriptor.settingsProfileId = "replay";
+            return descriptor;
+        }
+
+        class PluginDashboardTransport final : public IDashboardTransport
+        {
+        public:
+            PluginDashboardTransport(const sd_transport_plugin_descriptor_v1* descriptor, ConnectionConfig config)
+                : m_descriptor(descriptor)
+                , m_config(std::move(config))
+            {
+            }
+
+            ~PluginDashboardTransport() override
+            {
+                Stop();
+                DestroyInstance();
+            }
+
+            bool Start(VariableUpdateCallback onVariableUpdate, ConnectionStateCallback onConnectionState) override
+            {
+                m_onVariableUpdate = std::move(onVariableUpdate);
+                m_onConnectionState = std::move(onConnectionState);
+
+                if (m_descriptor == nullptr || m_descriptor->transport_api == nullptr || m_descriptor->transport_api->start == nullptr)
+                {
+                    return false;
+                }
+
+                if (m_instance == nullptr)
+                {
+                    if (m_descriptor->transport_api->create == nullptr)
+                    {
+                        return false;
+                    }
+                    m_instance = m_descriptor->transport_api->create();
+                }
+
+                if (m_instance == nullptr)
+                {
+                    return false;
+                }
+
+                m_transportIdUtf8 = m_config.transportId.toUtf8();
+                m_pluginSettingsJsonUtf8 = m_config.pluginSettingsJson.toUtf8();
+                m_ntHostUtf8 = m_config.ntHost.toUtf8();
+                m_ntClientNameUtf8 = m_config.ntClientName.toUtf8();
+                m_replayFilePathUtf8 = m_config.replayFilePath.toUtf8();
+
+                sd_transport_connection_config_v1 pluginConfig {};
+                pluginConfig.transport_id = m_transportIdUtf8.constData();
+                pluginConfig.plugin_settings_json = m_pluginSettingsJsonUtf8.constData();
+                pluginConfig.nt_host = m_ntHostUtf8.constData();
+                pluginConfig.nt_team = m_config.ntTeam;
+                pluginConfig.nt_use_team = m_config.ntUseTeam ? 1 : 0;
+                pluginConfig.nt_client_name = m_ntClientNameUtf8.constData();
+                pluginConfig.replay_file_path = m_replayFilePathUtf8.constData();
+
+                sd_transport_callbacks_v1 callbacks {};
+                callbacks.user_data = this;
+                callbacks.on_variable_update = &PluginDashboardTransport::OnPluginVariableUpdate;
+                callbacks.on_connection_state = &PluginDashboardTransport::OnPluginConnectionState;
+
+                return m_descriptor->transport_api->start(m_instance, &pluginConfig, &callbacks) != 0;
+            }
+
+            void Stop() override
+            {
+                if (m_instance != nullptr && m_descriptor != nullptr && m_descriptor->transport_api != nullptr && m_descriptor->transport_api->stop != nullptr)
+                {
+                    m_descriptor->transport_api->stop(m_instance);
+                }
+            }
+
+            bool PublishBool(const QString& key, bool value) override
+            {
+                if (m_instance == nullptr || m_descriptor == nullptr || m_descriptor->transport_api == nullptr || m_descriptor->transport_api->publish_bool == nullptr)
+                {
+                    return false;
+                }
+
+                const QByteArray keyUtf8 = key.toUtf8();
+                return m_descriptor->transport_api->publish_bool(m_instance, keyUtf8.constData(), value ? 1 : 0) != 0;
+            }
+
+            bool PublishDouble(const QString& key, double value) override
+            {
+                if (m_instance == nullptr || m_descriptor == nullptr || m_descriptor->transport_api == nullptr || m_descriptor->transport_api->publish_double == nullptr)
+                {
+                    return false;
+                }
+
+                const QByteArray keyUtf8 = key.toUtf8();
+                return m_descriptor->transport_api->publish_double(m_instance, keyUtf8.constData(), value) != 0;
+            }
+
+            bool PublishString(const QString& key, const QString& value) override
+            {
+                if (m_instance == nullptr || m_descriptor == nullptr || m_descriptor->transport_api == nullptr || m_descriptor->transport_api->publish_string == nullptr)
+                {
+                    return false;
+                }
+
+                const QByteArray keyUtf8 = key.toUtf8();
+                const QByteArray valueUtf8 = value.toUtf8();
+                return m_descriptor->transport_api->publish_string(m_instance, keyUtf8.constData(), valueUtf8.constData()) != 0;
+            }
+
+        private:
+            static void OnPluginVariableUpdate(
+                void* userData,
+                const char* key,
+                const sd_transport_value_v1* value,
+                uint64_t seq
+            )
+            {
+                auto* self = static_cast<PluginDashboardTransport*>(userData);
+                if (self == nullptr || self->m_onVariableUpdate == nullptr || key == nullptr || value == nullptr)
+                {
+                    return;
+                }
+
+                VariableUpdate update;
+                update.key = QString::fromUtf8(key);
+                update.seq = seq;
+
+                switch (value->type)
+                {
+                    case SD_TRANSPORT_VALUE_TYPE_BOOL:
+                        update.valueType = static_cast<int>(sd::direct::ValueType::Bool);
+                        update.value = (value->bool_value != 0);
+                        break;
+                    case SD_TRANSPORT_VALUE_TYPE_DOUBLE:
+                        update.valueType = static_cast<int>(sd::direct::ValueType::Double);
+                        update.value = value->double_value;
+                        break;
+                    case SD_TRANSPORT_VALUE_TYPE_STRING_ARRAY:
+                    {
+                        update.valueType = static_cast<int>(sd::direct::ValueType::StringArray);
+                        QStringList values;
+                        for (size_t i = 0; i < value->string_array_count; ++i)
+                        {
+                            const char* item = value->string_array_items != nullptr ? value->string_array_items[i] : nullptr;
+                            values.push_back(QString::fromUtf8(item != nullptr ? item : ""));
+                        }
+                        update.value = values;
+                        break;
+                    }
+                    case SD_TRANSPORT_VALUE_TYPE_STRING:
+                    default:
+                        update.valueType = static_cast<int>(sd::direct::ValueType::String);
+                        update.value = QString::fromUtf8(value->string_value != nullptr ? value->string_value : "");
+                        break;
+                }
+
+                self->m_onVariableUpdate(update);
+            }
+
+            static void OnPluginConnectionState(void* userData, int state)
+            {
+                auto* self = static_cast<PluginDashboardTransport*>(userData);
+                if (self == nullptr || self->m_onConnectionState == nullptr)
+                {
+                    return;
+                }
+
+                self->m_onConnectionState(ToConnectionState(state));
+            }
+
+            void DestroyInstance()
+            {
+                if (m_instance != nullptr && m_descriptor != nullptr && m_descriptor->transport_api != nullptr && m_descriptor->transport_api->destroy != nullptr)
+                {
+                    m_descriptor->transport_api->destroy(m_instance);
+                    m_instance = nullptr;
+                }
+            }
+
+            const sd_transport_plugin_descriptor_v1* m_descriptor = nullptr;
+            ConnectionConfig m_config;
+            sd_transport_instance_v1 m_instance = nullptr;
+            VariableUpdateCallback m_onVariableUpdate;
+            ConnectionStateCallback m_onConnectionState;
+            QByteArray m_transportIdUtf8;
+            QByteArray m_pluginSettingsJsonUtf8;
+            QByteArray m_ntHostUtf8;
+            QByteArray m_ntClientNameUtf8;
+            QByteArray m_replayFilePathUtf8;
+        };
+    }
+
+    struct DashboardTransportRegistry::Impl
+    {
+        struct PluginEntry
+        {
+            TransportDescriptor descriptor;
+            std::unique_ptr<QLibrary> library;
+            const sd_transport_plugin_descriptor_v1* pluginDescriptor = nullptr;
+        };
+
+        std::vector<TransportDescriptor> descriptors;
+        std::vector<PluginEntry> plugins;
+
+        Impl()
+        {
+            descriptors.push_back(MakeDirectDescriptor());
+            descriptors.push_back(MakeReplayDescriptor());
+            LoadPlugins();
+        }
+
+        void LoadPlugins()
+        {
+            const QString appDirPath = QCoreApplication::applicationDirPath();
+            if (appDirPath.trimmed().isEmpty())
+            {
+                return;
+            }
+
+            QDir pluginDir(appDirPath + "/plugins");
+            if (!pluginDir.exists())
+            {
+                return;
+            }
+
+            const QStringList entries = pluginDir.entryList(QDir::Files);
+            std::set<QString> seenIds;
+            for (const QString& entry : entries)
+            {
+                auto library = std::make_unique<QLibrary>(pluginDir.absoluteFilePath(entry));
+                if (!library->load())
+                {
+                    continue;
+                }
+
+                auto getPlugin = reinterpret_cast<sd_get_transport_plugin_v1_fn>(library->resolve("SdGetTransportPluginV1"));
+                if (getPlugin == nullptr)
+                {
+                    continue;
+                }
+
+                const sd_transport_plugin_descriptor_v1* pluginDescriptor = getPlugin();
+                if (pluginDescriptor == nullptr)
+                {
+                    continue;
+                }
+                if (pluginDescriptor->plugin_api_version != SD_TRANSPORT_PLUGIN_API_VERSION_1)
+                {
+                    continue;
+                }
+                if (pluginDescriptor->plugin_id == nullptr || pluginDescriptor->display_name == nullptr || pluginDescriptor->transport_api == nullptr)
+                {
+                    continue;
+                }
+
+                const QString pluginId = QString::fromUtf8(pluginDescriptor->plugin_id).trimmed();
+                if (pluginId.isEmpty() || seenIds.contains(pluginId))
+                {
+                    continue;
+                }
+
+                seenIds.insert(pluginId);
+
+                PluginEntry plugin;
+                plugin.pluginDescriptor = pluginDescriptor;
+                plugin.library = std::move(library);
+                plugin.descriptor.id = pluginId;
+                plugin.descriptor.displayName = QString::fromUtf8(pluginDescriptor->display_name);
+                plugin.descriptor.kind = TransportKind::Plugin;
+                plugin.descriptor.useShortDisplayKeys = (pluginDescriptor->flags & SD_TRANSPORT_PLUGIN_FLAG_USE_SHORT_DISPLAY_KEYS) != 0u;
+                plugin.descriptor.supportsRecording = (pluginDescriptor->flags & SD_TRANSPORT_PLUGIN_FLAG_SUPPORTS_RECORDING) != 0u;
+                plugin.descriptor.supportsPlayback = false;
+                plugin.descriptor.settingsProfileId = QString::fromUtf8(
+                    pluginDescriptor->settings_profile_id != nullptr ? pluginDescriptor->settings_profile_id : pluginDescriptor->plugin_id
+                );
+                descriptors.push_back(plugin.descriptor);
+                plugins.push_back(std::move(plugin));
+            }
+        }
+
+        const TransportDescriptor* FindDescriptor(const QString& transportId) const
+        {
+            for (const TransportDescriptor& descriptor : descriptors)
+            {
+                if (descriptor.id == transportId)
+                {
+                    return &descriptor;
+                }
+            }
+
+            return nullptr;
+        }
+
+        const PluginEntry* FindPlugin(const QString& transportId) const
+        {
+            for (const PluginEntry& plugin : plugins)
+            {
+                if (plugin.descriptor.id == transportId)
+                {
+                    return &plugin;
+                }
+            }
+
+            return nullptr;
+        }
+    };
+
+    DashboardTransportRegistry::DashboardTransportRegistry()
+        : m_impl(std::make_unique<Impl>())
+    {
+    }
+
+    DashboardTransportRegistry::~DashboardTransportRegistry() = default;
+
+    const std::vector<TransportDescriptor>& DashboardTransportRegistry::GetAvailableTransports() const
+    {
+        return m_impl->descriptors;
+    }
+
+    const TransportDescriptor* DashboardTransportRegistry::FindTransport(const QString& transportId) const
+    {
+        return m_impl->FindDescriptor(transportId);
+    }
+
+    std::unique_ptr<IDashboardTransport> DashboardTransportRegistry::CreateTransport(const ConnectionConfig& config) const
+    {
+        const QString transportId = config.transportId.trimmed().isEmpty() ? QStringLiteral("direct") : config.transportId.trimmed();
+        const TransportDescriptor* descriptor = FindTransport(transportId);
+        if (descriptor == nullptr)
+        {
+            return nullptr;
+        }
+
+        if (descriptor->kind == TransportKind::Replay)
+        {
+            return std::make_unique<ReplayDashboardTransport>(config);
+        }
+
+        if (descriptor->kind == TransportKind::Direct)
+        {
+            return std::make_unique<DirectDashboardTransport>();
+        }
+
+        const Impl::PluginEntry* plugin = m_impl->FindPlugin(transportId);
+        if (plugin == nullptr)
+        {
+            return nullptr;
+        }
+
+        return std::make_unique<PluginDashboardTransport>(plugin->pluginDescriptor, config);
+    }
+
     QString ToDisplayString(TransportKind kind)
     {
         switch (kind)
         {
             case TransportKind::Replay:
                 return "Replay";
-            case TransportKind::NetworkTables:
-                return "NetworkTables";
+            case TransportKind::Plugin:
+                return "Plugin";
             case TransportKind::Direct:
             default:
                 return "Direct";
         }
-    }
-
-    std::unique_ptr<IDashboardTransport> CreateDashboardTransport(const ConnectionConfig& config)
-    {
-        if (config.kind == TransportKind::Replay)
-        {
-            return std::make_unique<ReplayDashboardTransport>(config);
-        }
-
-        if (config.kind == TransportKind::NetworkTables)
-        {
-            return std::make_unique<NetworkTablesDashboardTransport>(config);
-        }
-
-        return std::make_unique<DirectDashboardTransport>();
     }
 }

@@ -10,6 +10,7 @@ Build a focused C++ dashboard inspired by WPILib SmartDashboard, but intentional
 - Let users choose/change widget type per variable
 - Let users move/arrange widgets and save/load layout
 - Use direct transport as the baseline and preserve a clean adapter boundary for optional NetworkTables support
+- Keep compatibility ecosystems (`Legacy NT`, future Elastic-style bridges, etc.) as optional transport plugins rather than baking every legacy stack into the core executable
 
 This document defines scope, architecture, first-iteration boundaries, and implementation-ready decisions.
 
@@ -34,6 +35,37 @@ This document defines scope, architecture, first-iteration boundaries, and imple
 - LiveWindow/test mode parity
 - Send-to-robot controls/buttons (can be added later)
 - Full NetworkTables feature parity (protocol details, tools integration, and long-tail topic/property options)
+
+## Transport plugin direction
+
+The dashboard should distinguish between:
+
+- **Built-in transports**
+  - `Direct`
+  - `Replay`
+
+- **Optional compatibility transports**
+  - shipped as separate DLLs in `plugins/`
+  - discovered at app startup so the `Connection` menu reflects only what is actually deployed
+  - one plugin per ecosystem/bridge so teams can keep the app feeling tailored to their current stack instead of carrying every compatibility mode all the time
+
+### Why this split
+
+- Keeps the product story clear: native dashboard first, compatibility bridges second.
+- Forces cleaner boundaries so compatibility code does not leak helper behavior into the core app.
+- Creates a teaching-friendly example of real plugin loading and ABI design for students.
+- Lets each ecosystem bridge own its own constraints (for example multi-client support) behind the common transport contract.
+
+### ABI direction
+
+For plugin-facing transport boundaries, prefer a small versioned **C interface**:
+
+- exported entry point returns a versioned plugin descriptor
+- descriptor exposes metadata (`id`, display name, capability flags)
+- transport instances use opaque handles plus function tables
+- configuration crosses the boundary as plain C structs / strings
+
+This is intentionally conservative. The goal is long-lived binary survivability and a teachable example of why many production plugin systems avoid exposing raw C++ ABI across DLL boundaries.
 
 ## Project Structure (Solution)
 

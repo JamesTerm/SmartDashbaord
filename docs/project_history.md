@@ -7,6 +7,28 @@ Curated milestone history for this repository.
 - Keep milestone sections in descending chronological order (newest first) so recent changes are immediately visible.
 - Historical branch/status wording in older entries is time-bound; read each section as a snapshot from that date.
 
+## 2026-03-18 - Transport plugin foundation direction started
+
+- Recorded a new compatibility-architecture direction for future growth:
+  - keep `Direct` and `Replay` built into the core dashboard
+  - move legacy/interoperability ecosystems to optional transport plugins discovered from `plugins/`
+  - prefer one plugin per ecosystem (`Legacy NT`, future bridges) instead of bundling multiple compatibility stacks into one shared plugin.
+- Rationale captured across requirements/design discussion:
+  - teams should be able to keep existing robot-code publishing patterns and deploy only the bridge relevant to their current ecosystem
+  - the app should feel tailored to the team's chosen stack instead of presenting every compatibility mode by default
+  - plugin boundaries reinforce architectural discipline and prevent compatibility helpers from bleeding into core app assumptions
+  - the repository now has an explicit teaching goal around versioned C-style plugin interfaces and why they are often chosen for long-term binary survivability.
+- Initial foundation slice started in code:
+  - transport selection is being refactored around transport descriptors/ids instead of a fixed baked-in enum list
+  - top-level CMake now has optional plugin build toggles (`SMARTDASHBOARD_BUILD_PLUGIN_LEGACY_NT`)
+  - a first `plugins/LegacyNtTransport` project was added as the starting plugin-hosting shape for future work.
+- Refined product-roadmap language in `docs/requirements.md` so future feature growth is evaluated against SmartDashboard's own identity rather than against any outside dashboard product:
+  - added an explicit planning filter to borrow ideas selectively instead of imitating another tool
+  - reorganized priority framing into `Need`, `Want`, and `Dream`
+  - kept migration essentials, live-dashboard baseline behavior, chooser support, and compatibility-plugin architecture in the `Need` bucket
+  - placed replay, stronger plotting, and a few practical operational additions in `Want`
+  - left deeper analytics, broad specialty widgets, and major UX polish in `Dream`.
+
 ## 2026-03-17 - Direct survive restart fix and remembered-control recovery
 
 - Restored the Direct dashboard-survive path for Robot_Simulation pairing without changing the compatibility baseline:

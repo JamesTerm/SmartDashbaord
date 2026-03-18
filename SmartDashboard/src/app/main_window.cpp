@@ -7,6 +7,7 @@
 #include "widgets/playback_timeline_widget.h"
 
 #include <QAction>
+#include <QActionGroup>
 #include <QApplication>
 #include <QComboBox>
 #include <QCloseEvent>
@@ -344,30 +345,57 @@ MainWindow::MainWindow(QWidget* parent)
     statusBar()->addPermanentWidget(m_playbackWindowStatusLabel);
 
     QMenu* connectionMenu = menuBar()->addMenu("&Connection");
+    auto* transportActionGroup = new QActionGroup(this);
+    transportActionGroup->setExclusive(true);
     m_connectTransportAction = connectionMenu->addAction("Connect");
     m_disconnectTransportAction = connectionMenu->addAction("Disconnect");
     connectionMenu->addSeparator();
     m_useDirectTransportAction = connectionMenu->addAction("Use Direct transport");
     m_useDirectTransportAction->setCheckable(true);
-    m_useNetworkTablesTransportAction = connectionMenu->addAction("Use NetworkTables transport");
-    m_useNetworkTablesTransportAction->setCheckable(true);
+    m_useDirectTransportAction->setData(QStringLiteral("direct"));
+    transportActionGroup->addAction(m_useDirectTransportAction);
+
+    for (const sd::transport::TransportDescriptor& descriptor : m_transportRegistry.GetAvailableTransports())
+    {
+        if (descriptor.id == "direct" || descriptor.id == "replay")
+        {
+            continue;
+        }
+
+        QAction* action = connectionMenu->addAction(QString("Use %1 transport").arg(descriptor.displayName));
+        action->setCheckable(true);
+        action->setData(descriptor.id);
+        transportActionGroup->addAction(action);
+        m_pluginTransportActions.push_back(action);
+        connect(
+            action,
+            &QAction::triggered,
+            this,
+            [this, descriptorId = descriptor.id]()
+            {
+                SelectTransport(descriptorId);
+            }
+        );
+    }
+
     m_useReplayTransportAction = connectionMenu->addAction("Use Replay transport");
     m_useReplayTransportAction->setCheckable(true);
+    m_useReplayTransportAction->setData(QStringLiteral("replay"));
+    transportActionGroup->addAction(m_useReplayTransportAction);
     connectionMenu->addSeparator();
     m_ntUseTeamAction = connectionMenu->addAction("NT: Use team number");
     m_ntUseTeamAction->setCheckable(true);
-    QAction* ntSetHostAction = connectionMenu->addAction("NT: Set host...");
-    QAction* ntSetTeamAction = connectionMenu->addAction("NT: Set team...");
+    m_ntSetHostAction = connectionMenu->addAction("NT: Set host...");
+    m_ntSetTeamAction = connectionMenu->addAction("NT: Set team...");
 
     connect(m_connectTransportAction, &QAction::triggered, this, &MainWindow::OnConnectTransport);
     connect(m_disconnectTransportAction, &QAction::triggered, this, &MainWindow::OnDisconnectTransport);
     connect(m_useDirectTransportAction, &QAction::triggered, this, &MainWindow::OnUseDirectTransport);
-    connect(m_useNetworkTablesTransportAction, &QAction::triggered, this, &MainWindow::OnUseNetworkTablesTransport);
     connect(m_useReplayTransportAction, &QAction::triggered, this, &MainWindow::OnUseReplayTransport);
     connect(m_telemetryFeatureViewAction, &QAction::triggered, this, &MainWindow::OnToggleTelemetryFeature);
     connect(m_ntUseTeamAction, &QAction::triggered, this, &MainWindow::OnToggleNtUseTeam);
-    connect(ntSetHostAction, &QAction::triggered, this, &MainWindow::OnSetNtHost);
-    connect(ntSetTeamAction, &QAction::triggered, this, &MainWindow::OnSetNtTeam);
+    connect(m_ntSetHostAction, &QAction::triggered, this, &MainWindow::OnSetNtHost);
+    connect(m_ntSetTeamAction, &QAction::triggered, this, &MainWindow::OnSetNtTeam);
 
     m_telemetryControlsPanel = new QWidget(this);
     auto* playbackLayout = new QHBoxLayout(m_telemetryControlsPanel);
@@ -872,14 +900,37 @@ MainWindow::MainWindow(QWidget* parent)
     connect(m_replayMarkerList, &QListWidget::itemClicked, this, &MainWindow::OnReplayMarkerActivated);
 
     QSettings settings("SmartDashboard", "SmartDashboardApp");
-    m_connectionConfig.kind = static_cast<sd::transport::TransportKind>(
-        settings.value("connection/transportKind", static_cast<int>(sd::transport::TransportKind::Direct)).toInt()
-    );
+    const int persistedKindValue = settings.value("connection/transportKind", static_cast<int>(sd::transport::TransportKind::Direct)).toInt();
+    m_connectionConfig.kind = static_cast<sd::transport::TransportKind>(persistedKindValue);
+    m_connectionConfig.transportId = settings.value("connection/transportId").toString().trimmed();
+    if (m_connectionConfig.transportId.isEmpty())
+    {
+        if (persistedKindValue == 2)
+        {
+            m_connectionConfig.transportId = "replay";
+        }
+        else if (persistedKindValue == 1)
+        {
+            m_connectionConfig.transportId = "legacy-nt";
+        }
+        else
+        {
+            m_connectionConfig.transportId = "direct";
+        }
+    }
     m_connectionConfig.ntHost = settings.value("connection/ntHost", "127.0.0.1").toString();
     m_connectionConfig.ntTeam = settings.value("connection/ntTeam", 0).toInt();
     m_connectionConfig.ntUseTeam = settings.value("connection/ntUseTeam", true).toBool();
     m_connectionConfig.ntClientName = settings.value("connection/ntClientName", "SmartDashboardApp").toString();
     m_connectionConfig.replayFilePath = settings.value("connection/replayFilePath").toString();
+    if (GetSelectedTransportDescriptor() == nullptr)
+    {
+        SelectTransport("direct");
+    }
+    else
+    {
+        m_connectionConfig.kind = GetSelectedTransportDescriptor()->kind;
+    }
     m_telemetryFeatureEnabled = settings.value("telemetry/enabled", true).toBool();
     m_recordRequested = settings.value("telemetry/recordEnabled", false).toBool();
     m_replayControlsPreferredVisible = settings.value("replay/controlsVisible", true).toBool();
@@ -1490,10 +1541,7 @@ sd::widgets::VariableTile* MainWindow::GetOrCreateTile(const QString& key, sd::w
 
 QString MainWindow::BuildDisplayLabel(const QString& key) const
 {
-    if (
-        m_connectionConfig.kind != sd::transport::TransportKind::Direct
-        && m_connectionConfig.kind != sd::transport::TransportKind::Replay
-    )
+    if (!CurrentTransportUsesShortDisplayKeys())
     {
         return key;
     }
@@ -2004,48 +2052,7 @@ void MainWindow::OnDisconnectTransport()
 
 void MainWindow::OnUseDirectTransport()
 {
-    const bool kindChanged = m_connectionConfig.kind != sd::transport::TransportKind::Direct;
-    if (kindChanged && m_transport != nullptr)
-    {
-        StopTransport();
-        UpdateWindowConnectionText(static_cast<int>(sd::transport::ConnectionState::Disconnected));
-    }
-
-    m_connectionConfig.kind = sd::transport::TransportKind::Direct;
-    for (const auto& [_, tile] : m_tiles)
-    {
-        if (tile != nullptr)
-        {
-            tile->SetTitleText(BuildDisplayLabel(tile->GetKey()));
-        }
-    }
-    ApplyTransportMenuChecks();
-    PersistConnectionSettings();
-    UpdateWindowConnectionText(m_connectionState);
-    UpdatePlaybackUiState();
-}
-
-void MainWindow::OnUseNetworkTablesTransport()
-{
-    const bool kindChanged = m_connectionConfig.kind != sd::transport::TransportKind::NetworkTables;
-    if (kindChanged && m_transport != nullptr)
-    {
-        StopTransport();
-        UpdateWindowConnectionText(static_cast<int>(sd::transport::ConnectionState::Disconnected));
-    }
-
-    m_connectionConfig.kind = sd::transport::TransportKind::NetworkTables;
-    for (const auto& [_, tile] : m_tiles)
-    {
-        if (tile != nullptr)
-        {
-            tile->SetTitleText(BuildDisplayLabel(tile->GetKey()));
-        }
-    }
-    ApplyTransportMenuChecks();
-    PersistConnectionSettings();
-    UpdateWindowConnectionText(m_connectionState);
-    UpdatePlaybackUiState();
+    SelectTransport("direct");
 }
 
 void MainWindow::OnUseReplayTransport()
@@ -2055,25 +2062,7 @@ void MainWindow::OnUseReplayTransport()
         return;
     }
 
-    const bool kindChanged = m_connectionConfig.kind != sd::transport::TransportKind::Replay;
-    if (kindChanged && m_transport != nullptr)
-    {
-        StopTransport();
-        UpdateWindowConnectionText(static_cast<int>(sd::transport::ConnectionState::Disconnected));
-    }
-
-    m_connectionConfig.kind = sd::transport::TransportKind::Replay;
-    for (const auto& [_, tile] : m_tiles)
-    {
-        if (tile != nullptr)
-        {
-            tile->SetTitleText(BuildDisplayLabel(tile->GetKey()));
-        }
-    }
-    ApplyTransportMenuChecks();
-    PersistConnectionSettings();
-    UpdateWindowConnectionText(m_connectionState);
-    UpdatePlaybackUiState();
+    SelectTransport("replay");
 
     if (!m_connectionConfig.replayFilePath.trimmed().isEmpty())
     {
@@ -2107,14 +2096,7 @@ void MainWindow::OnToggleTelemetryFeature()
         StopSessionRecording();
         if (m_connectionConfig.kind == sd::transport::TransportKind::Replay)
         {
-            m_connectionConfig.kind = sd::transport::TransportKind::Direct;
-            for (const auto& [_, tile] : m_tiles)
-            {
-                if (tile != nullptr)
-                {
-                    tile->SetTitleText(BuildDisplayLabel(tile->GetKey()));
-                }
-            }
+            SelectTransport("direct");
 
             if (hadTransport)
             {
@@ -2196,10 +2178,7 @@ void MainWindow::OnOpenReplayFile()
     }
 
     m_connectionConfig.replayFilePath = selected;
-    m_connectionConfig.kind = sd::transport::TransportKind::Replay;
-    ApplyTransportMenuChecks();
-    PersistConnectionSettings();
-    UpdateWindowConnectionText(m_connectionState);
+    SelectTransport("replay");
     StartTransport();
 }
 
@@ -2378,25 +2357,38 @@ void MainWindow::OnClearReplayBookmarks()
 void MainWindow::ApplyTransportMenuChecks()
 {
     const bool replayMode = m_connectionConfig.kind == sd::transport::TransportKind::Replay;
+    const bool usesLegacyNtSettings = CurrentTransportUsesLegacyNtSettings();
 
     if (m_useDirectTransportAction != nullptr)
     {
-        m_useDirectTransportAction->setChecked(m_connectionConfig.kind == sd::transport::TransportKind::Direct);
+        m_useDirectTransportAction->setChecked(m_connectionConfig.transportId == "direct");
     }
 
-    if (m_useNetworkTablesTransportAction != nullptr)
+    for (QAction* action : m_pluginTransportActions)
     {
-        m_useNetworkTablesTransportAction->setChecked(m_connectionConfig.kind == sd::transport::TransportKind::NetworkTables);
+        if (action != nullptr)
+        {
+            action->setChecked(action->data().toString() == m_connectionConfig.transportId);
+        }
     }
 
     if (m_useReplayTransportAction != nullptr)
     {
-        m_useReplayTransportAction->setChecked(m_connectionConfig.kind == sd::transport::TransportKind::Replay);
+        m_useReplayTransportAction->setChecked(m_connectionConfig.transportId == "replay");
     }
 
     if (m_ntUseTeamAction != nullptr)
     {
         m_ntUseTeamAction->setChecked(m_connectionConfig.ntUseTeam);
+        m_ntUseTeamAction->setEnabled(usesLegacyNtSettings);
+    }
+    if (m_ntSetHostAction != nullptr)
+    {
+        m_ntSetHostAction->setEnabled(usesLegacyNtSettings);
+    }
+    if (m_ntSetTeamAction != nullptr)
+    {
+        m_ntSetTeamAction->setEnabled(usesLegacyNtSettings);
     }
 
     if (m_useReplayTransportAction != nullptr)
@@ -2424,6 +2416,7 @@ void MainWindow::PersistConnectionSettings() const
 {
     QSettings settings("SmartDashboard", "SmartDashboardApp");
     settings.setValue("connection/transportKind", static_cast<int>(m_connectionConfig.kind));
+    settings.setValue("connection/transportId", m_connectionConfig.transportId);
     settings.setValue("connection/ntHost", m_connectionConfig.ntHost);
     settings.setValue("connection/ntTeam", m_connectionConfig.ntTeam);
     settings.setValue("connection/ntUseTeam", m_connectionConfig.ntUseTeam);
@@ -2505,7 +2498,13 @@ void MainWindow::StartTransport()
     StopTransport();
     StartSessionRecording();
 
-    m_transport = sd::transport::CreateDashboardTransport(m_connectionConfig);
+    const sd::transport::TransportDescriptor* descriptor = GetSelectedTransportDescriptor();
+    if (descriptor != nullptr)
+    {
+        m_connectionConfig.kind = descriptor->kind;
+    }
+
+    m_transport = m_transportRegistry.CreateTransport(m_connectionConfig);
     if (!m_transport)
     {
         StopSessionRecording();
@@ -3398,5 +3397,61 @@ void MainWindow::RecordConnectionEvent(int state)
 
 bool MainWindow::IsRecordingTransportKind(sd::transport::TransportKind kind) const
 {
-    return kind == sd::transport::TransportKind::Direct || kind == sd::transport::TransportKind::NetworkTables;
+    static_cast<void>(kind);
+    const sd::transport::TransportDescriptor* descriptor = GetSelectedTransportDescriptor();
+    return descriptor != nullptr && descriptor->supportsRecording;
+}
+
+void MainWindow::SelectTransport(const QString& transportId)
+{
+    const sd::transport::TransportDescriptor* descriptor = m_transportRegistry.FindTransport(transportId);
+    if (descriptor == nullptr)
+    {
+        return;
+    }
+
+    const bool changed = m_connectionConfig.transportId != descriptor->id;
+    if (changed && m_transport != nullptr)
+    {
+        StopTransport();
+        UpdateWindowConnectionText(static_cast<int>(sd::transport::ConnectionState::Disconnected));
+    }
+
+    m_connectionConfig.transportId = descriptor->id;
+    m_connectionConfig.kind = descriptor->kind;
+
+    for (const auto& [_, tile] : m_tiles)
+    {
+        if (tile != nullptr)
+        {
+            tile->SetTitleText(BuildDisplayLabel(tile->GetKey()));
+        }
+    }
+
+    ApplyTransportMenuChecks();
+    PersistConnectionSettings();
+    UpdateWindowConnectionText(m_connectionState);
+    UpdatePlaybackUiState();
+}
+
+const sd::transport::TransportDescriptor* MainWindow::GetSelectedTransportDescriptor() const
+{
+    return m_transportRegistry.FindTransport(m_connectionConfig.transportId);
+}
+
+bool MainWindow::CurrentTransportUsesShortDisplayKeys() const
+{
+    const sd::transport::TransportDescriptor* descriptor = GetSelectedTransportDescriptor();
+    return descriptor != nullptr && descriptor->useShortDisplayKeys;
+}
+
+bool MainWindow::CurrentTransportUsesLegacyNtSettings() const
+{
+    const sd::transport::TransportDescriptor* descriptor = GetSelectedTransportDescriptor();
+    if (descriptor == nullptr)
+    {
+        return false;
+    }
+
+    return descriptor->settingsProfileId == "legacy-nt";
 }
