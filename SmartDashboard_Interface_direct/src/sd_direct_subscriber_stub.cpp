@@ -62,6 +62,17 @@ namespace sd::direct
                 ? m_ring.header->writeIndex.load(std::memory_order_acquire)
                 : 0;
 
+            if (m_ring.header != nullptr)
+            {
+                // Ian: The telemetry publisher uses `consumerReadIndex` for ring
+                // free-space accounting. Keep the shared cursor aligned with the
+                // subscriber's local drain cursor from the moment we attach, or a
+                // long-lived dashboard session can eventually look "stuck" after
+                // enough telemetry because the producer still thinks old bytes are
+                // unread even though the UI has already consumed them.
+                m_ring.header->consumerReadIndex.store(m_readCursor, std::memory_order_release);
+            }
+
             bool eventCreated = false;
             if (!m_dataEvent.OpenOrCreateAutoReset(m_config.dataEventName, eventCreated))
             {
@@ -245,6 +256,7 @@ namespace sd::direct
 					DebugLog(out.str());
                     }
 
+                    m_ring.header->consumerReadIndex.store(m_readCursor, std::memory_order_release);
                     m_ring.header->lastConsumerHeartbeatUs.store(nowUs, std::memory_order_release);
                     m_droppedCount.store(m_ring.header->droppedCount.load(std::memory_order_acquire));
                 }
