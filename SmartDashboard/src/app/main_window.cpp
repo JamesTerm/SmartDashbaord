@@ -20,6 +20,9 @@
 #include <QHBoxLayout>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QDialog>
+#include <QDialogButtonBox>
+#include <QFormLayout>
 #include <QLabel>
 #include <QMessageBox>
 #include <QMenu>
@@ -38,6 +41,8 @@
 #include <QToolButton>
 #include <QTimer>
 #include <QVariant>
+#include <QCheckBox>
+#include <QSpinBox>
 #include <QVBoxLayout>
 #include <QWidgetAction>
 #include <QWidget>
@@ -381,19 +386,14 @@ MainWindow::MainWindow(QWidget* parent)
     m_useReplayTransportAction->setData(QStringLiteral("replay"));
     transportActionGroup->addAction(m_useReplayTransportAction);
     connectionMenu->addSeparator();
-    m_ntUseTeamAction = connectionMenu->addAction("NT: Use team number");
-    m_ntUseTeamAction->setCheckable(true);
-    m_ntSetHostAction = connectionMenu->addAction("NT: Set host...");
-    m_ntSetTeamAction = connectionMenu->addAction("NT: Set team...");
+    m_editTransportSettingsAction = connectionMenu->addAction("Transport Settings...");
 
     connect(m_connectTransportAction, &QAction::triggered, this, &MainWindow::OnConnectTransport);
     connect(m_disconnectTransportAction, &QAction::triggered, this, &MainWindow::OnDisconnectTransport);
     connect(m_useDirectTransportAction, &QAction::triggered, this, &MainWindow::OnUseDirectTransport);
     connect(m_useReplayTransportAction, &QAction::triggered, this, &MainWindow::OnUseReplayTransport);
     connect(m_telemetryFeatureViewAction, &QAction::triggered, this, &MainWindow::OnToggleTelemetryFeature);
-    connect(m_ntUseTeamAction, &QAction::triggered, this, &MainWindow::OnToggleNtUseTeam);
-    connect(m_ntSetHostAction, &QAction::triggered, this, &MainWindow::OnSetNtHost);
-    connect(m_ntSetTeamAction, &QAction::triggered, this, &MainWindow::OnSetNtTeam);
+    connect(m_editTransportSettingsAction, &QAction::triggered, this, &MainWindow::OnEditTransportSettings);
 
     m_telemetryControlsPanel = new QWidget(this);
     auto* playbackLayout = new QHBoxLayout(m_telemetryControlsPanel);
@@ -920,7 +920,9 @@ MainWindow::MainWindow(QWidget* parent)
     m_connectionConfig.ntTeam = settings.value("connection/ntTeam", 0).toInt();
     m_connectionConfig.ntUseTeam = settings.value("connection/ntUseTeam", true).toBool();
     m_connectionConfig.ntClientName = settings.value("connection/ntClientName", "SmartDashboardApp").toString();
+    m_connectionConfig.pluginSettingsJson = settings.value("connection/pluginSettingsJson").toString();
     m_connectionConfig.replayFilePath = settings.value("connection/replayFilePath").toString();
+    SyncConnectionConfigFromPluginSettingsJson();
     if (GetSelectedTransportDescriptor() == nullptr)
     {
         SelectTransport("direct");
@@ -1553,9 +1555,11 @@ void MainWindow::UpdateWindowConnectionText(int state)
     m_connectionState = state;
     RefreshWindowTitle();
 
+    const QString transportName = GetSelectedTransportDisplayName();
+
     if (m_connectionConfig.kind == sd::transport::TransportKind::Replay)
     {
-        m_statusLabel->setText("Replay");
+        m_statusLabel->setText(QString("Transport: %1").arg(transportName));
         return;
     }
 
@@ -1573,7 +1577,7 @@ void MainWindow::UpdateWindowConnectionText(int state)
         stateText = "Stale";
     }
 
-    m_statusLabel->setText(QString("State: %1").arg(stateText));
+    m_statusLabel->setText(QString("Transport: %1 | State: %2").arg(transportName, stateText));
 }
 
 void MainWindow::LoadWindowGeometry()
@@ -1986,24 +1990,29 @@ QString MainWindow::GetLayoutTitleSegment() const
 
 void MainWindow::RefreshWindowTitle()
 {
+    const QString transportName = GetSelectedTransportDisplayName();
     QString connectionText = "Disconnected";
     if (m_connectionConfig.kind == sd::transport::TransportKind::Replay)
     {
         const QString replayFile = m_connectionConfig.replayFilePath.trimmed();
         const QString replayName = replayFile.isEmpty() ? "no file selected" : QFileInfo(replayFile).fileName();
-        connectionText = QString("Replay (%1)").arg(replayName);
+        connectionText = QString("%1 (%2)").arg(transportName, replayName);
     }
     else if (m_connectionState == static_cast<int>(sd::transport::ConnectionState::Connecting))
     {
-        connectionText = "Connecting";
+        connectionText = QString("%1 - Connecting").arg(transportName);
     }
     else if (m_connectionState == static_cast<int>(sd::transport::ConnectionState::Connected))
     {
-        connectionText = "Connected";
+        connectionText = QString("%1 - Connected").arg(transportName);
     }
     else if (m_connectionState == static_cast<int>(sd::transport::ConnectionState::Stale))
     {
-        connectionText = "Stale";
+        connectionText = QString("%1 - Stale").arg(transportName);
+    }
+    else
+    {
+        connectionText = QString("%1 - Disconnected").arg(transportName);
     }
 
     const QString layoutName = GetLayoutTitleSegment();
@@ -2098,57 +2107,98 @@ void MainWindow::OnToggleTelemetryFeature()
     UpdatePlaybackUiState();
 }
 
-void MainWindow::OnSetNtHost()
+void MainWindow::OnEditTransportSettings()
 {
-    bool ok = false;
-    const QString value = QInputDialog::getText(
-        this,
-        "NetworkTables Host",
-        "Enter NT host/IP:",
-        QLineEdit::Normal,
-        m_connectionConfig.ntHost,
-        &ok
-    );
-
-    if (!ok || value.trimmed().isEmpty())
+    const sd::transport::TransportDescriptor* descriptor = GetSelectedTransportDescriptor();
+    if (descriptor == nullptr || !descriptor->HasConnectionFields())
     {
         return;
     }
 
-    m_connectionConfig.ntHost = value.trimmed();
-    m_connectionConfig.ntUseTeam = false;
-    ApplyTransportMenuChecks();
-    PersistConnectionSettings();
-}
+    QDialog dialog(this);
+    dialog.setWindowTitle(QString("%1 Settings").arg(descriptor->displayName));
 
-void MainWindow::OnSetNtTeam()
-{
-    bool ok = false;
-    const int team = QInputDialog::getInt(
-        this,
-        "NetworkTables Team",
-        "Enter team number:",
-        m_connectionConfig.ntTeam,
-        0,
-        99999,
-        1,
-        &ok
-    );
+    auto* layout = new QVBoxLayout(&dialog);
+    auto* formLayout = new QFormLayout();
+    layout->addLayout(formLayout);
 
-    if (!ok)
+    std::vector<std::pair<QString, QWidget*>> editors;
+    editors.reserve(descriptor->connectionFields.size());
+
+    for (const sd::transport::ConnectionFieldDescriptor& field : descriptor->connectionFields)
+    {
+        QWidget* editor = nullptr;
+        const QVariant currentValue = GetConnectionFieldValue(field);
+
+        switch (field.type)
+        {
+            case sd::transport::ConnectionFieldType::Bool:
+            {
+                auto* checkBox = new QCheckBox(&dialog);
+                checkBox->setChecked(currentValue.toBool());
+                editor = checkBox;
+                break;
+            }
+            case sd::transport::ConnectionFieldType::Int:
+            {
+                auto* spinBox = new QSpinBox(&dialog);
+                spinBox->setMinimum(field.intMinimum);
+                spinBox->setMaximum(field.intMaximum);
+                spinBox->setValue(currentValue.toInt());
+                editor = spinBox;
+                break;
+            }
+            case sd::transport::ConnectionFieldType::String:
+            default:
+            {
+                auto* lineEdit = new QLineEdit(currentValue.toString(), &dialog);
+                editor = lineEdit;
+                break;
+            }
+        }
+
+        if (editor == nullptr)
+        {
+            continue;
+        }
+
+        if (!field.helpText.trimmed().isEmpty())
+        {
+            editor->setToolTip(field.helpText);
+        }
+
+        formLayout->addRow(field.label + ':', editor);
+        editors.push_back({field.id, editor});
+    }
+
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    layout->addWidget(buttons);
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+
+    if (dialog.exec() != QDialog::Accepted)
     {
         return;
     }
 
-    m_connectionConfig.ntTeam = team;
-    m_connectionConfig.ntUseTeam = true;
-    ApplyTransportMenuChecks();
-    PersistConnectionSettings();
-}
+    for (const auto& [fieldId, editor] : editors)
+    {
+        if (auto* checkBox = qobject_cast<QCheckBox*>(editor))
+        {
+            SetConnectionFieldValue(fieldId, checkBox->isChecked());
+        }
+        else if (auto* spinBox = qobject_cast<QSpinBox*>(editor))
+        {
+            SetConnectionFieldValue(fieldId, spinBox->value());
+        }
+        else if (auto* lineEdit = qobject_cast<QLineEdit*>(editor))
+        {
+            SetConnectionFieldValue(fieldId, lineEdit->text().trimmed());
+        }
+    }
 
-void MainWindow::OnToggleNtUseTeam()
-{
-    m_connectionConfig.ntUseTeam = m_ntUseTeamAction != nullptr && m_ntUseTeamAction->isChecked();
+    SyncConnectionConfigToPluginSettingsJson();
+    ApplyTransportMenuChecks();
     PersistConnectionSettings();
 }
 
@@ -2345,7 +2395,7 @@ void MainWindow::OnClearReplayBookmarks()
 void MainWindow::ApplyTransportMenuChecks()
 {
     const bool replayMode = m_connectionConfig.kind == sd::transport::TransportKind::Replay;
-    const bool usesLegacyNtSettings = CurrentTransportUsesLegacyNtSettings();
+    const sd::transport::TransportDescriptor* descriptor = GetSelectedTransportDescriptor();
 
     if (m_useDirectTransportAction != nullptr)
     {
@@ -2365,18 +2415,14 @@ void MainWindow::ApplyTransportMenuChecks()
         m_useReplayTransportAction->setChecked(m_connectionConfig.transportId == "replay");
     }
 
-    if (m_ntUseTeamAction != nullptr)
+    if (m_editTransportSettingsAction != nullptr)
     {
-        m_ntUseTeamAction->setChecked(m_connectionConfig.ntUseTeam);
-        m_ntUseTeamAction->setEnabled(usesLegacyNtSettings);
-    }
-    if (m_ntSetHostAction != nullptr)
-    {
-        m_ntSetHostAction->setEnabled(usesLegacyNtSettings);
-    }
-    if (m_ntSetTeamAction != nullptr)
-    {
-        m_ntSetTeamAction->setEnabled(usesLegacyNtSettings);
+        m_editTransportSettingsAction->setEnabled(!replayMode && descriptor != nullptr && descriptor->HasConnectionFields());
+        m_editTransportSettingsAction->setText(
+            descriptor != nullptr && descriptor->HasConnectionFields()
+                ? QString("%1 Settings...").arg(descriptor->displayName)
+                : QStringLiteral("Transport Settings...")
+        );
     }
 
     if (m_useReplayTransportAction != nullptr)
@@ -2409,6 +2455,7 @@ void MainWindow::PersistConnectionSettings() const
     settings.setValue("connection/ntTeam", m_connectionConfig.ntTeam);
     settings.setValue("connection/ntUseTeam", m_connectionConfig.ntUseTeam);
     settings.setValue("connection/ntClientName", m_connectionConfig.ntClientName);
+    settings.setValue("connection/pluginSettingsJson", m_connectionConfig.pluginSettingsJson);
     settings.setValue("connection/replayFilePath", m_connectionConfig.replayFilePath);
     settings.setValue("telemetry/enabled", m_telemetryFeatureEnabled);
     settings.setValue("telemetry/recordEnabled", m_recordRequested);
@@ -3413,6 +3460,10 @@ void MainWindow::SelectTransport(const QString& transportId)
 
     m_connectionConfig.transportId = descriptor->id;
     m_connectionConfig.kind = descriptor->kind;
+    if (descriptor->kind == sd::transport::TransportKind::Plugin)
+    {
+        SyncConnectionConfigFromPluginSettingsJson();
+    }
 
     for (const auto& [_, tile] : m_tiles)
     {
@@ -3431,6 +3482,17 @@ void MainWindow::SelectTransport(const QString& transportId)
 const sd::transport::TransportDescriptor* MainWindow::GetSelectedTransportDescriptor() const
 {
     return m_transportRegistry.FindTransport(m_connectionConfig.transportId);
+}
+
+QString MainWindow::GetSelectedTransportDisplayName() const
+{
+    const sd::transport::TransportDescriptor* descriptor = GetSelectedTransportDescriptor();
+    if (descriptor == nullptr || descriptor->displayName.trimmed().isEmpty())
+    {
+        return QStringLiteral("Unknown");
+    }
+
+    return descriptor->displayName;
 }
 
 bool MainWindow::CurrentTransportUsesShortDisplayKeys() const
@@ -3459,4 +3521,120 @@ bool MainWindow::CurrentTransportSupportsChooser() const
     }
 
     return descriptor->GetBoolProperty(QString::fromUtf8(sd::transport::kTransportPropertySupportsChooser), false);
+}
+
+QVariant MainWindow::GetConnectionFieldValue(const sd::transport::ConnectionFieldDescriptor& field) const
+{
+    if (field.id == QString::fromUtf8(sd::transport::kTransportFieldHost))
+    {
+        return m_connectionConfig.ntHost;
+    }
+    if (field.id == QString::fromUtf8(sd::transport::kTransportFieldTeamNumber))
+    {
+        return m_connectionConfig.ntTeam;
+    }
+    if (field.id == QString::fromUtf8(sd::transport::kTransportFieldUseTeamNumber))
+    {
+        return m_connectionConfig.ntUseTeam;
+    }
+    if (field.id == QString::fromUtf8(sd::transport::kTransportFieldClientName))
+    {
+        return m_connectionConfig.ntClientName;
+    }
+
+    if (!m_connectionConfig.pluginSettingsJson.trimmed().isEmpty())
+    {
+        const QJsonDocument document = QJsonDocument::fromJson(m_connectionConfig.pluginSettingsJson.toUtf8());
+        if (document.isObject())
+        {
+            const QJsonValue value = document.object().value(field.id);
+            if (!value.isUndefined())
+            {
+                return value.toVariant();
+            }
+        }
+    }
+
+    return field.defaultValue;
+}
+
+void MainWindow::SetConnectionFieldValue(const QString& fieldId, const QVariant& value)
+{
+    if (fieldId == QString::fromUtf8(sd::transport::kTransportFieldHost))
+    {
+        m_connectionConfig.ntHost = value.toString();
+        return;
+    }
+    if (fieldId == QString::fromUtf8(sd::transport::kTransportFieldTeamNumber))
+    {
+        m_connectionConfig.ntTeam = value.toInt();
+        return;
+    }
+    if (fieldId == QString::fromUtf8(sd::transport::kTransportFieldUseTeamNumber))
+    {
+        m_connectionConfig.ntUseTeam = value.toBool();
+        return;
+    }
+    if (fieldId == QString::fromUtf8(sd::transport::kTransportFieldClientName))
+    {
+        m_connectionConfig.ntClientName = value.toString();
+        return;
+    }
+
+    QJsonObject object;
+    if (!m_connectionConfig.pluginSettingsJson.trimmed().isEmpty())
+    {
+        const QJsonDocument document = QJsonDocument::fromJson(m_connectionConfig.pluginSettingsJson.toUtf8());
+        if (document.isObject())
+        {
+            object = document.object();
+        }
+    }
+
+    object.insert(fieldId, QJsonValue::fromVariant(value));
+    m_connectionConfig.pluginSettingsJson = QString::fromUtf8(QJsonDocument(object).toJson(QJsonDocument::Compact));
+}
+
+void MainWindow::SyncConnectionConfigToPluginSettingsJson()
+{
+    QJsonObject object;
+    object.insert(QString::fromUtf8(sd::transport::kTransportFieldHost), m_connectionConfig.ntHost);
+    object.insert(QString::fromUtf8(sd::transport::kTransportFieldTeamNumber), m_connectionConfig.ntTeam);
+    object.insert(QString::fromUtf8(sd::transport::kTransportFieldUseTeamNumber), m_connectionConfig.ntUseTeam);
+    object.insert(QString::fromUtf8(sd::transport::kTransportFieldClientName), m_connectionConfig.ntClientName);
+    m_connectionConfig.pluginSettingsJson = QString::fromUtf8(QJsonDocument(object).toJson(QJsonDocument::Compact));
+}
+
+void MainWindow::SyncConnectionConfigFromPluginSettingsJson()
+{
+    if (m_connectionConfig.pluginSettingsJson.trimmed().isEmpty())
+    {
+        SyncConnectionConfigToPluginSettingsJson();
+        return;
+    }
+
+    const QJsonDocument document = QJsonDocument::fromJson(m_connectionConfig.pluginSettingsJson.toUtf8());
+    if (!document.isObject())
+    {
+        SyncConnectionConfigToPluginSettingsJson();
+        return;
+    }
+
+    const QJsonObject object = document.object();
+    if (object.contains(QString::fromUtf8(sd::transport::kTransportFieldHost)))
+    {
+        m_connectionConfig.ntHost = object.value(QString::fromUtf8(sd::transport::kTransportFieldHost)).toString(m_connectionConfig.ntHost);
+    }
+    if (object.contains(QString::fromUtf8(sd::transport::kTransportFieldTeamNumber)))
+    {
+        m_connectionConfig.ntTeam = object.value(QString::fromUtf8(sd::transport::kTransportFieldTeamNumber)).toInt(m_connectionConfig.ntTeam);
+    }
+    if (object.contains(QString::fromUtf8(sd::transport::kTransportFieldUseTeamNumber)))
+    {
+        m_connectionConfig.ntUseTeam = object.value(QString::fromUtf8(sd::transport::kTransportFieldUseTeamNumber)).toBool(m_connectionConfig.ntUseTeam);
+    }
+    if (object.contains(QString::fromUtf8(sd::transport::kTransportFieldClientName)))
+    {
+        m_connectionConfig.ntClientName = object.value(QString::fromUtf8(sd::transport::kTransportFieldClientName)).toString(m_connectionConfig.ntClientName);
+    }
 }

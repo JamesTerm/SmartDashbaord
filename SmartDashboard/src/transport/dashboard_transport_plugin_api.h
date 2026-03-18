@@ -62,6 +62,18 @@ static const char SD_TRANSPORT_PROPERTY_SUPPORTS_CHOOSER[] = "supports_chooser";
 /// @brief Shared property-name constant for multi-client support.
 static const char SD_TRANSPORT_PROPERTY_SUPPORTS_MULTI_CLIENT[] = "supports_multi_client";
 
+/// @brief Shared settings field id for host or IP address.
+static const char SD_TRANSPORT_FIELD_HOST[] = "host";
+
+/// @brief Shared settings field id for team number.
+static const char SD_TRANSPORT_FIELD_TEAM_NUMBER[] = "team_number";
+
+/// @brief Shared settings field id for whether team-number resolution is enabled.
+static const char SD_TRANSPORT_FIELD_USE_TEAM_NUMBER[] = "use_team_number";
+
+/// @brief Shared settings field id for a client/display name.
+static const char SD_TRANSPORT_FIELD_CLIENT_NAME[] = "client_name";
+
 /// @brief Capability flags reported by a plugin descriptor.
 ///
 /// These flags let the host adjust UI and expectations without hardcoding
@@ -205,6 +217,57 @@ typedef void* sd_transport_instance_v1;
 ///
 /// @note Unknown properties should return `default_value` unchanged.
 typedef int (*sd_transport_get_bool_property_v1_fn)(const char* property_name, int default_value);
+
+/// @brief Supported host-rendered connection field types.
+enum sd_transport_connection_field_type_v1
+{
+    SD_TRANSPORT_CONNECTION_FIELD_TYPE_BOOL = 1,
+    SD_TRANSPORT_CONNECTION_FIELD_TYPE_INT = 2,
+    SD_TRANSPORT_CONNECTION_FIELD_TYPE_STRING = 3
+};
+
+/// @brief Plugin-described host-rendered connection/settings field.
+///
+/// This lets a plugin describe its connection requirements while keeping UI
+/// ownership in the host application.
+struct sd_transport_connection_field_descriptor_v1
+{
+    /// @brief Stable field id used in persisted settings.
+    const char* field_id;
+
+    /// @brief Human-readable label shown in the host dialog.
+    const char* label;
+
+    /// @brief Field type from `sd_transport_connection_field_type_v1`.
+    uint32_t field_type;
+
+    /// @brief Optional help text shown to the user.
+    const char* help_text;
+
+    /// @brief Default bool value for bool fields.
+    int default_bool_value;
+
+    /// @brief Default int value for int fields.
+    int default_int_value;
+
+    /// @brief Default UTF-8 string value for string fields.
+    const char* default_string_value;
+
+    /// @brief Minimum value for int fields.
+    int int_minimum;
+
+    /// @brief Maximum value for int fields.
+    int int_maximum;
+};
+
+/// @brief Optional field-schema callback for host-rendered connection settings.
+///
+/// @param out_count
+/// Receives the number of field descriptors returned.
+/// @return
+/// Pointer to a stable array of field descriptors, or null when the transport
+/// has no custom connection fields.
+typedef const struct sd_transport_connection_field_descriptor_v1* (*sd_transport_get_connection_fields_v1_fn)(size_t* out_count);
 
 /// @brief Callback used by the plugin to deliver a variable update.
 ///
@@ -361,6 +424,9 @@ struct sd_transport_plugin_descriptor_v1
     /// flag bits for every future capability. A null pointer means "use host
     /// defaults for all bool properties".
     sd_transport_get_bool_property_v1_fn get_bool_property;
+
+    /// @brief Optional host-rendered connection field schema callback.
+    sd_transport_get_connection_fields_v1_fn get_connection_fields;
 
     /// @brief Pointer to the plugin's runtime function table.
     const struct sd_transport_api_v1* transport_api;

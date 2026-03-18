@@ -12,9 +12,16 @@ target_include_directories(LegacyNtTransportPlugin
 target_compile_definitions(LegacyNtTransportPlugin
     PRIVATE
         SD_TRANSPORT_PLUGIN_EXPORTS=1
+        WIN32_LEAN_AND_MEAN=1
+        NOMINMAX=1
 )
 
 target_compile_features(LegacyNtTransportPlugin PRIVATE cxx_std_20)
+
+target_link_libraries(LegacyNtTransportPlugin
+    PRIVATE
+        ws2_32
+)
 
 set_target_properties(LegacyNtTransportPlugin PROPERTIES
     OUTPUT_NAME "SmartDashboardTransport_LegacyNt"

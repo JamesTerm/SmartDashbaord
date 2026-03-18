@@ -29,12 +29,55 @@ namespace sd::transport
 {
     inline constexpr const char* kTransportPropertySupportsChooser = "supports_chooser";
     inline constexpr const char* kTransportPropertySupportsMultiClient = "supports_multi_client";
+    inline constexpr const char* kTransportFieldHost = "host";
+    inline constexpr const char* kTransportFieldTeamNumber = "team_number";
+    inline constexpr const char* kTransportFieldUseTeamNumber = "use_team_number";
+    inline constexpr const char* kTransportFieldClientName = "client_name";
 
     /// @brief Shared transport property names used by host-side code.
     ///
     /// These constants mirror the plugin ABI property names so the rest of the
     /// dashboard can ask transport descriptors about optional capabilities
     /// without scattering raw string literals throughout the UI.
+
+    /// @brief Supported field types for host-rendered transport settings.
+    ///
+    /// The host intentionally owns settings UI rendering so plugins do not need
+    /// to pass Qt widgets or C++ objects across the ABI boundary.
+    enum class ConnectionFieldType
+    {
+        Bool,
+        Int,
+        String
+    };
+
+    /// @brief Host-rendered connection/settings field descriptor.
+    ///
+    /// These fields describe transport-specific connection inputs such as host,
+    /// team number, serial port, or client name.
+    struct ConnectionFieldDescriptor
+    {
+        /// @brief Stable field id used in persisted settings JSON.
+        QString id;
+
+        /// @brief Human-readable label shown in the settings dialog.
+        QString label;
+
+        /// @brief Supported field type.
+        ConnectionFieldType type = ConnectionFieldType::String;
+
+        /// @brief Optional help text shown to explain the field.
+        QString helpText;
+
+        /// @brief Default value used when no persisted value exists.
+        QVariant defaultValue;
+
+        /// @brief Lower bound for integer fields.
+        int intMinimum = 0;
+
+        /// @brief Upper bound for integer fields.
+        int intMaximum = 99999;
+    };
 
     /// @brief Broad transport categories known to the dashboard host.
     ///
@@ -146,6 +189,9 @@ namespace sd::transport
         /// @brief Settings-profile identifier used to gate settings/UI behavior.
         QString settingsProfileId;
 
+        /// @brief Host-rendered connection/settings fields for this transport.
+        std::vector<ConnectionFieldDescriptor> connectionFields;
+
         /// @brief Extensible boolean property overrides keyed by shared string id.
         std::map<QString, bool> boolProperties;
 
@@ -162,6 +208,12 @@ namespace sd::transport
             }
 
             return it->second;
+        }
+
+        /// @brief Return true when the transport exposes configurable settings fields.
+        bool HasConnectionFields() const
+        {
+            return !connectionFields.empty();
         }
     };
 

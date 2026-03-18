@@ -75,9 +75,7 @@ private slots:
     void OnUseDirectTransport();
     void OnUseReplayTransport();
     void OnToggleTelemetryFeature();
-    void OnSetNtHost();
-    void OnSetNtTeam();
-    void OnToggleNtUseTeam();
+    void OnEditTransportSettings();
     void OnOpenReplayFile();
     void OnRecordToggled(bool checked);
     void OnPlaybackRewindToStart();
@@ -138,9 +136,14 @@ private:
     void DrainPendingUiUpdates();
     void SelectTransport(const QString& transportId);
     const sd::transport::TransportDescriptor* GetSelectedTransportDescriptor() const;
+    QString GetSelectedTransportDisplayName() const;
     bool CurrentTransportUsesShortDisplayKeys() const;
     bool CurrentTransportUsesLegacyNtSettings() const;
     bool CurrentTransportSupportsChooser() const;
+    QVariant GetConnectionFieldValue(const sd::transport::ConnectionFieldDescriptor& field) const;
+    void SetConnectionFieldValue(const QString& fieldId, const QVariant& value);
+    void SyncConnectionConfigToPluginSettingsJson();
+    void SyncConnectionConfigFromPluginSettingsJson();
 
     QWidget* m_canvas = nullptr;
     QLabel* m_statusLabel = nullptr;
@@ -155,13 +158,11 @@ private:
     QAction* m_disconnectTransportAction = nullptr;
     QAction* m_useDirectTransportAction = nullptr;
     QAction* m_useReplayTransportAction = nullptr;
-    QAction* m_ntSetHostAction = nullptr;
-    QAction* m_ntSetTeamAction = nullptr;
+    QAction* m_editTransportSettingsAction = nullptr;
     QAction* m_telemetryFeatureViewAction = nullptr;
     QAction* m_replayControlsViewAction = nullptr;
     QAction* m_replayTimelineViewAction = nullptr;
     QAction* m_replayMarkersViewAction = nullptr;
-    QAction* m_ntUseTeamAction = nullptr;
     QAction* m_openReplayFileAction = nullptr;
     QWidget* m_telemetryControlsPanel = nullptr;
     QPushButton* m_recordButton = nullptr;
