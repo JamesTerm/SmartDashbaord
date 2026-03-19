@@ -28,9 +28,9 @@ set_target_properties(LegacyNtTransportPlugin PROPERTIES
 )
 
 add_custom_command(TARGET LegacyNtTransportPlugin POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:SmartDashboardApp>/plugins"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:SmartDashboardApp>"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "$<TARGET_FILE:LegacyNtTransportPlugin>"
-            "$<TARGET_FILE_DIR:SmartDashboardApp>/plugins/$<TARGET_FILE_NAME:LegacyNtTransportPlugin>"
+            "$<TARGET_FILE_DIR:SmartDashboardApp>/$<TARGET_FILE_NAME:LegacyNtTransportPlugin>"
     COMMENT "Copying legacy NT plugin next to SmartDashboardApp"
 )

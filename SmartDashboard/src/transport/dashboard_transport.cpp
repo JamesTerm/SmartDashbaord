@@ -1334,17 +1334,40 @@ namespace sd::transport
                 return;
             }
 
+            QStringList entries;
             QDir pluginDir(appDirPath + "/plugins");
-            if (!pluginDir.exists())
+            if (pluginDir.exists())
+            {
+                entries.append(pluginDir.entryList(QDir::Files));
+            }
+
+            // Ian: Transport plugins are our own app-side DLLs, not Qt's
+            // framework plugins. Keep searching the historical app-local path
+            // first, but also allow DLLs placed directly beside the app so
+            // SmartDashboard can coexist with Qt's own `plugins/` directory.
+            QDir appDir(appDirPath);
+            const QStringList appLocalEntries = appDir.entryList(QStringList() << "SmartDashboardTransport_*.dll", QDir::Files);
+            for (const QString& entry : appLocalEntries)
+            {
+                if (!entries.contains(entry))
+                {
+                    entries.push_back(entry);
+                }
+            }
+
+            if (entries.isEmpty())
             {
                 return;
             }
 
-            const QStringList entries = pluginDir.entryList(QDir::Files);
             std::set<QString> seenIds;
             for (const QString& entry : entries)
             {
-                auto library = std::make_unique<QLibrary>(pluginDir.absoluteFilePath(entry));
+                const QString candidatePath = pluginDir.exists() && pluginDir.exists(entry)
+                    ? pluginDir.absoluteFilePath(entry)
+                    : appDir.absoluteFilePath(entry);
+
+                auto library = std::make_unique<QLibrary>(candidatePath);
                 if (!library->load())
                 {
                     continue;

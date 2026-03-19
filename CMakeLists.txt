@@ -29,8 +29,20 @@ if(SMARTDASHBOARD_BUILD_PLUGIN_NATIVE_LINK)
     add_subdirectory(plugins/NativeLinkTransport)
 endif()
 
+# Ian: These transport plugins deploy themselves with POST_BUILD copy steps.
+# Make the app/test targets depend on the plugin targets so a normal
+# `SmartDashboardApp` rebuild also rebuilds and redeploys the enabled plugins,
+# instead of silently leaving the runtime plugins directory stale.
+if(TARGET SmartDashboardApp AND TARGET LegacyNtTransportPlugin)
+    add_dependencies(SmartDashboardApp LegacyNtTransportPlugin)
+endif()
+
 if(TARGET SmartDashboardApp AND TARGET NativeLinkTransportPlugin)
     add_dependencies(SmartDashboardApp NativeLinkTransportPlugin)
+endif()
+
+if(BUILD_TESTING AND TARGET SmartDashboard_tests AND TARGET LegacyNtTransportPlugin)
+    add_dependencies(SmartDashboard_tests LegacyNtTransportPlugin)
 endif()
 
 if(BUILD_TESTING AND TARGET SmartDashboard_tests AND TARGET NativeLinkTransportPlugin)

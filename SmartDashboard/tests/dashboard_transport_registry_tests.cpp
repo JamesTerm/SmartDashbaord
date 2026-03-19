@@ -35,8 +35,7 @@ TEST(DashboardTransportRegistryTests, NativeLinkPluginIsDiscoverableWhenPresentN
 
     const QString appDir = QCoreApplication::applicationDirPath();
     ASSERT_FALSE(appDir.trimmed().isEmpty());
-    EXPECT_TRUE(QDir(appDir + "/plugins").exists());
-    EXPECT_TRUE(QFileInfo::exists(appDir + "/plugins/SmartDashboardTransport_NativeLink.dll"));
+    EXPECT_TRUE(QFileInfo::exists(appDir + "/SmartDashboardTransport_NativeLink.dll"));
 
     sd::transport::DashboardTransportRegistry registry;
     const sd::transport::TransportDescriptor* descriptor = registry.FindTransport("native-link");

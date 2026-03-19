@@ -38,10 +38,10 @@ set_target_properties(NativeLinkTransportPlugin PROPERTIES
 )
 
 add_custom_command(TARGET NativeLinkTransportPlugin POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:SmartDashboardApp>/plugins"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:SmartDashboardApp>"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "$<TARGET_FILE:NativeLinkTransportPlugin>"
-            "$<TARGET_FILE_DIR:SmartDashboardApp>/plugins/$<TARGET_FILE_NAME:NativeLinkTransportPlugin>"
+            "$<TARGET_FILE_DIR:SmartDashboardApp>/$<TARGET_FILE_NAME:NativeLinkTransportPlugin>"
     COMMENT "Copying Native Link plugin next to SmartDashboardApp"
 )
 
