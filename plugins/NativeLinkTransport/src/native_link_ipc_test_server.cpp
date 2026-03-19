@@ -226,6 +226,7 @@ namespace sd::nativelink::testsupport
                 && slot.lastHeartbeatUs.load(std::memory_order_acquire) != 0
                 && slot.clientId[0] != '\0';
         }
+
     }
 
     struct NativeLinkIpcTestServer::Impl
@@ -528,10 +529,29 @@ namespace sd::nativelink::testsupport
                     continue;
                 }
 
-                const std::uint64_t heartbeatAgeUs = nowUs - lastHeartbeatUs;
+                // Ian: The server snapshots `nowUs` once per scan, but clients can
+                // refresh their heartbeat concurrently afterward. Clamp the age at
+                // zero instead of letting unsigned underflow turn a healthy client
+                // into a bogus multi-year stale timeout.
+                // Ian: `nowUs` is sampled once per scan, but the client refreshes
+                // `lastHeartbeatUs` concurrently. If the client wins that race,
+                // unsigned subtraction would underflow and make a healthy client
+                // look instantly stale, clearing its slot and creating a fake
+                // startup/restart race. Clamp the age at zero instead.
+                const std::uint64_t heartbeatAgeUs = nowUs >= lastHeartbeatUs
+                    ? (nowUs - lastHeartbeatUs)
+                    : 0;
                 if (heartbeatAgeUs > 5000000ULL)
                 {
                     core.DisconnectClient(clientId);
+                    memset(slot.clientId, 0, sizeof(slot.clientId));
+                    slot.lastHeartbeatUs.store(0, std::memory_order_release);
+                    slot.snapshotCompleteSessionId.store(0, std::memory_order_release);
+                    slot.lastAckedSequence.store(0, std::memory_order_release);
+                    slot.serverWriteIndex.store(0, std::memory_order_release);
+                    slot.clientReadIndex.store(0, std::memory_order_release);
+                    slot.clientWriteSequence.store(0, std::memory_order_release);
+                    memset(&slot.clientWriteMessage, 0, sizeof(slot.clientWriteMessage));
                     slot.clientTag.store(0, std::memory_order_release);
                     continue;
                 }

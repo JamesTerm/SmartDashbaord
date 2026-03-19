@@ -243,6 +243,7 @@ namespace sd::nativelink
         {
             return slot.snapshotCompleteSessionId.load(std::memory_order_acquire) != 0;
         }
+
     }
 
     struct NativeLinkIpcClient::Impl
@@ -325,6 +326,8 @@ namespace sd::nativelink
                 if (slot.clientTag.compare_exchange_strong(expected, clientTag, std::memory_order_acq_rel))
                 {
                     slotIndex = i;
+                    memset(slot.clientId, 0, sizeof(slot.clientId));
+                    slot.lastHeartbeatUs.store(0, std::memory_order_release);
                     slot.snapshotCompleteSessionId.store(0, std::memory_order_release);
                     slot.lastAckedSequence.store(0, std::memory_order_release);
                     slot.serverWriteIndex.store(0, std::memory_order_release);
@@ -370,6 +373,13 @@ namespace sd::nativelink
             {
                 ipc::SharedClientSlot& slot = shared->clients[slotIndex];
                 memset(slot.clientId, 0, sizeof(slot.clientId));
+                slot.lastHeartbeatUs.store(0, std::memory_order_release);
+                slot.snapshotCompleteSessionId.store(0, std::memory_order_release);
+                slot.lastAckedSequence.store(0, std::memory_order_release);
+                slot.serverWriteIndex.store(0, std::memory_order_release);
+                slot.clientReadIndex.store(0, std::memory_order_release);
+                slot.clientWriteSequence.store(0, std::memory_order_release);
+                memset(&slot.clientWriteMessage, 0, sizeof(slot.clientWriteMessage));
                 slot.clientTag.store(0, std::memory_order_release);
                 shared->clientCount.fetch_sub(1, std::memory_order_acq_rel);
             }
@@ -468,6 +478,8 @@ namespace sd::nativelink
                     break;
                 }
 
+                ipc::SharedClientSlot& slot = shared->clients[slotIndex];
+
                 const std::uint64_t lastHeartbeatUs = shared->lastServerHeartbeatUs.load(std::memory_order_acquire);
                 const std::uint64_t nowUs = GetSteadyNowUs();
                 const bool serverLooksAlive = lastHeartbeatUs != 0
@@ -491,7 +503,6 @@ namespace sd::nativelink
 
                 DrainMessages();
 
-                ipc::SharedClientSlot& slot = shared->clients[slotIndex];
                 MaybePublishConnected(slot);
                 slot.lastHeartbeatUs.store(nowUs, std::memory_order_release);
                 WaitForSingleObject(heartbeatEvent.Get(), config.waitTimeoutMs);
@@ -608,6 +619,11 @@ namespace sd::nativelink
     NativeLinkIpcClient::~NativeLinkIpcClient()
     {
         delete m_impl;
+    }
+
+    bool NativeLinkIpcClient::IsConnected() const
+    {
+        return m_impl != nullptr && m_impl->connected.load(std::memory_order_acquire);
     }
 
     bool NativeLinkIpcClient::Start(const Config& config, UpdateCallback onUpdate, ConnectionStateCallback onConnectionState)

@@ -182,12 +182,14 @@ Use this follow-up check after the startup smoke.
 2. Run:
    - `python tools/native_link_shared_state_probe.py`
 3. Expected result:
-   - helper reports `native_link_shared_state_probe=ok`
-   - both dashboard instance logs show `transport_start id=native-link`
-   - both dashboard instance logs show the same initial retained values for chooser selection and `TestMove`
-   - both dashboard instance logs also show the shared cross-process `TestMove = 3.5` update
+    - helper reports `native_link_shared_state_probe=ok`
+    - both dashboard instance logs show `transport_start id=native-link`
+    - both dashboard instance logs show the same retained authority-seeded values for chooser selection and `TestMove`
+    - with the current simulator smoke authority, those retained values should include `Test/Auton_Selection/AutoChooser/selected = Just Move Forward` and `TestMove = 3.5`
 
 This no longer uses the old SmartDashboard-owned in-process authority scaffold. It now depends on a real authoritative Native Link server already running on the selected channel (normally `Robot_Simulation` in Native Link mode), and it validates that two real SmartDashboard processes observe the same retained/shared server state.
+
+The helper now auto-starts `D:\code\Robot_Simulation\build-vcpkg\bin\Debug\DriverStation_TransportSmoke.exe` when it is available locally, so a standard dev-machine probe run does not need a separately launched simulator authority first.
 
 Current practical note:
 

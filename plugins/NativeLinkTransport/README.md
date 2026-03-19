@@ -240,6 +240,61 @@ That later real-process validation should stay capability-gated: SmartDashboard'
 
 The next semantic gap to close after multi-client fan-out is command handling: explicit ack/reject feedback and hard guarantees that command topics do not replay across reconnects.
 
+## Carrier roadmap
+
+The current real IPC path uses local shared memory + named events as the v1
+carrier. That remains valuable, but it should not be treated as the only or
+final transport medium.
+
+Planned direction:
+
+- keep one Native Link protocol/semantic contract above the carrier layer
+- preserve the current shared-memory + named-events carrier as a diagnostic and
+  local-reference backend
+- add a TCP carrier as the intended long-term general-purpose backend
+- make carrier selection runtime-configurable for debugging and reproduction,
+  with optional compile-time guards if needed later.
+
+Recommended carrier phases:
+
+1. freeze the current shared-memory carrier as the reference implementation for
+   local startup/restart debugging
+2. extract a clearer carrier boundary so protocol/session semantics are shared
+   above both backends
+3. implement localhost TCP under the same snapshot/session/lease contract
+4. run the same focused Native Link tests against both carriers
+5. promote TCP to the default production carrier once parity is proven
+6. keep shared memory available as the simpler diagnostic hot-swap path.
+
+### Why keep the shared-memory carrier
+
+- it is easier to reason about during ordering bugs
+- it already has focused startup/restart coverage in this branch
+- it gives us a simpler isolation path when a future TCP bug appears and we
+  need to answer "is the bug in Native Link semantics or only in the medium?"
+
+### Suggested carrier-selection shape
+
+Preferred long-term shape:
+
+- runtime plugin setting such as `{"carrier":"tcp"}` or `{"carrier":"shm"}`
+- simulator-side selection mirrors the same carrier choice
+- optional compile-time guards may still exist (`NATIVE_LINK_ENABLE_TCP_CARRIER`,
+  `NATIVE_LINK_ENABLE_SHM_CARRIER`), but runtime choice is more useful for
+  reproduction and diagnostics.
+
+### Finish / merge expectations
+
+Native Link should be considered ready to merge back toward `main` only when:
+
+- the focused restart/registry/client test slice is stable
+- the paired real-process shared-state probe is stable
+- Robot_Simulation Native Link tests stay green
+- command/event no-replay behavior is locked down
+- lease/ownership behavior is deterministic and diagnosable
+- the shared-memory carrier is preserved as a diagnostic backend even if TCP is
+  promoted as the default carrier.
+
 On the SmartDashboard host side, the first enabling step for later real two-process validation is now clear: startup should keep single-instance enforcement by default, but accept an explicit multi-instance testing flag only when the selected transport advertises multi-client support.
 
 There is now also a first real Native Link plugin scaffold behind the C ABI. It currently advertises chooser + multi-client support, registers a small default topic set, accepts host publishes into the in-memory core, and is intentionally narrow: enough for SmartDashboard discovery/build validation without claiming the full transport runtime is finished.

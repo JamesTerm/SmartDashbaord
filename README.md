@@ -153,7 +153,7 @@ Native Link shared-state smoke:
 
 - configure first with `cmake -S . -B build -DSMARTDASHBOARD_BUILD_PLUGIN_NATIVE_LINK=ON`
 - `python tools/native_link_shared_state_probe.py`
-- This verifies that two real SmartDashboard processes both start on `native-link` and observe the same initial retained state in their UI debug logs.
+- This verifies that two real SmartDashboard processes both start on `native-link` and observe the same simulator-authoritative retained state in their UI debug logs.
 
 Optional sample publisher:
 

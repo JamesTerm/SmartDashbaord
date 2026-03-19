@@ -3,10 +3,12 @@
 #include "native_link_ipc_client.h"
 #include "transport/dashboard_transport_plugin_api.h"
 
+#include <chrono>
 #include <cstdint>
 #include <memory>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -206,14 +208,32 @@ namespace
             }
         );
 
-        instance->running = started;
         if (!started)
         {
+            instance->running = false;
             instance->client.reset();
             return 0;
         }
 
-        return 1;
+        // Ian: The plugin start contract should only report success once the real
+        // IPC client has actually crossed into the authority-owned live session.
+        // Returning success as soon as the mapping opens lets higher layers fire
+        // remembered publishes into a transport that is still mid-handshake.
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(2000);
+        while (std::chrono::steady_clock::now() < deadline)
+        {
+            if (instance->client->IsConnected())
+            {
+                instance->running = true;
+                return 1;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+
+        instance->client->Stop();
+        instance->client.reset();
+        instance->running = false;
+        return 0;
     }
 
     void StopNativeLink(sd_transport_instance_v1 instanceHandle)

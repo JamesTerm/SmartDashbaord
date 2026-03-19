@@ -219,20 +219,43 @@ namespace sd::nativelink
             }
         ));
 
+        ASSERT_TRUE(WaitForCondition([&mutex, &states]()
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+            for (int state : states)
+            {
+                if (state == kConnectionStateConnected)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }, 2000));
+
         server.RestartSession();
 
         EXPECT_TRUE(WaitForCondition([&mutex, &states]()
         {
             std::lock_guard<std::mutex> lock(mutex);
-            int connectedCount = 0;
+            bool sawReconnect = false;
+            bool sawConnectingAfterFirstConnect = false;
+            bool sawFirstConnect = false;
             for (int state : states)
             {
                 if (state == kConnectionStateConnected)
                 {
-                    ++connectedCount;
+                    if (sawConnectingAfterFirstConnect)
+                    {
+                        sawReconnect = true;
+                    }
+                    sawFirstConnect = true;
+                }
+                else if (sawFirstConnect)
+                {
+                    sawConnectingAfterFirstConnect = true;
                 }
             }
-            return connectedCount >= 2;
+            return sawReconnect;
         }, 2000));
 
         ASSERT_TRUE(client.Publish("TestMove", TopicValue::Double(4.5)));

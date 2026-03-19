@@ -22,6 +22,40 @@ Curated milestone history for this repository.
   - the carrier/layout cleanup is worth keeping and `Robot_Simulation` Native Link unit coverage still passes
   - but SmartDashboard real IPC startup/restart ordering is still not fully deterministic
   - the remaining blocker is still concentrated in the SmartDashboard client handshake / `Connected` transition path rather than in the old in-memory scaffold.
+- Follow-up finding from the next debugging pass:
+  - one real stale-disconnect bug was in the SmartDashboard IPC test authority itself: heartbeat age could unsigned-underflow when the client refreshed its heartbeat after the server sampled `nowUs`
+  - that false stale path could clear a healthy client slot and masquerade as a deeper startup race
+  - the underflow is now fixed and documented, but SmartDashboard still has a separate remaining client-side handshake issue because some runs never reach a durable `Connected` state even after that fix.
+- Follow-up stabilization result from the next pass:
+  - the SmartDashboard plugin start path was still returning success too early, before the real IPC client had actually finished snapshot->live handshake with the simulator-owned authority
+  - `NativeLinkTransportPlugin` now waits for the client to report connected before host startup continues, which closes the remaining host-side replay/startup race in the registry/runtime slice
+  - the focused Native Link SmartDashboard slice is now passing repeatedly in local stress (`20x` loop of `ctest -C Debug -R "NativeLinkIpcClientTests|DashboardTransportRegistryTests"`).
+- Current boundary after that stabilization:
+  - focused SmartDashboard and Robot_Simulation Native Link automated checks are green
+  - but the older two-real-dashboard shared-state probe still does not complete end-to-end against the current real IPC path, so paired app-level validation needs another pass before being treated as fully confirmed.
+  - the first follow-up cleanup on that probe was to realign it with simulator-owned authority truth (`Just Move Forward`, `TestMove=3.5`) instead of the old dashboard-local scaffold defaults; the helper assertion is now corrected, but the real app-level retained-update gap still remains.
+- Follow-up paired-validation fix:
+  - the real two-dashboard helper was still launching both SmartDashboard processes with the same persisted Native Link client identity, which undercut the intended many-client proof against the simulator-owned authority
+  - the helper now rewrites the persisted client name between launches and auto-starts the local `DriverStation_TransportSmoke.exe` authority when available
+  - after those helper fixes, the real two-dashboard shared-state probe now passes locally.
+  - a final repeatability hardening pass also taught the helper to wait for retained-update markers, not just for the UI log files to exist, which removed a second-dashboard log-flush race in repeated probe runs.
+
+## 2026-03-19 - Native Link stabilization and carrier roadmap
+
+- Stabilized the SmartDashboard-side real IPC startup/restart path enough for the focused Native Link test slice to pass repeatedly.
+- Fixed the paired real-process shared-state probe by:
+  - aligning it with simulator-authoritative retained values
+  - auto-starting the local `DriverStation_TransportSmoke.exe` authority
+  - giving the two dashboard processes distinct logical client identities
+  - waiting for retained-update markers rather than only for non-empty UI logs.
+- Local validation now includes:
+  - repeated focused SmartDashboard Native Link `ctest` loops
+  - repeated paired two-dashboard shared-state probe loops
+  - green Robot_Simulation Native Link unit tests.
+- Roadmap decision captured in docs/notes:
+  - keep shared memory + named events as the diagnostic/reference carrier
+  - add TCP later as the intended long-term default carrier
+  - preserve one Native Link protocol/semantic contract above both carriers so bugs can be isolated by swapping mediums instead of rewriting behavior.
 
 ## 2026-03-18 - Native Link design baseline captured
 

@@ -28,6 +28,7 @@ namespace sd::nativelink
         void Stop();
 
         bool Publish(const std::string& topicPath, const TopicValue& value);
+        bool IsConnected() const;
 
     private:
         struct Impl;

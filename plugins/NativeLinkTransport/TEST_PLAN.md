@@ -139,6 +139,31 @@ Current SmartDashboard-side note:
 5. two dashboards competing for a leased writable control
 6. passive watcher added during stress loop.
 
+## Carrier parity plan
+
+Native Link should eventually validate the same semantics against more than one
+carrier.
+
+Target carriers:
+
+- `shm`: local shared memory + named events
+- `tcp`: localhost TCP as the intended long-term general-purpose backend
+
+Parity expectations:
+
+- the same snapshot/session/lease semantics must pass against both carriers
+- focused restart/registry/client tests should be runnable per carrier
+- paired real-process shared-state smoke should remain available per carrier
+- any failure that reproduces on one carrier but not the other should be called
+  out as either a semantic bug or a carrier-specific bug.
+
+Diagnostic policy:
+
+- keep `shm` as the simpler hot-swappable diagnostic carrier even after `tcp`
+  becomes the default
+- use `shm` as the reference path when isolating new ordering/reconnect bugs in
+  `tcp`.
+
 ## Acceptance signal for first implementation slice
 
 Do not treat Native Link v1 as ready until these all pass:

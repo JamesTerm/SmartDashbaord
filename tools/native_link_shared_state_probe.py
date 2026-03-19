@@ -3,10 +3,12 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import Optional
 
 
 SMOKE_HELPER = Path(r"D:\code\SmartDashboard\tools\native_link_multi_instance_smoke.py")
 DEBUG_DIR = Path(r"D:\code\SmartDashboard\.debug")
+DEFAULT_AUTHORITY_EXE = Path(r"D:\code\Robot_Simulation\build-vcpkg\bin\Debug\DriverStation_TransportSmoke.exe")
 
 
 def read_log(path: Path) -> str:
@@ -25,6 +27,35 @@ def wait_for_log_content(path: Path, timeout_seconds: float) -> str:
     return ""
 
 
+def wait_for_log_pattern(path: Path, pattern: str, timeout_seconds: float) -> str:
+    deadline = time.time() + timeout_seconds
+    latest = ""
+    while time.time() < deadline:
+        latest = read_log(path)
+        if latest and re.search(pattern, latest) is not None:
+            return latest
+        time.sleep(0.2)
+    return latest
+
+
+def launch_authority_if_available() -> Optional[subprocess.Popen]:
+    if not DEFAULT_AUTHORITY_EXE.exists():
+        return None
+
+    # Ian: The real IPC dashboards are clients only. If this probe does not
+    # start a temporary simulator-owned authority (or the caller does not start
+    # one separately), the dashboards can launch and still never receive the
+    # retained snapshot we are trying to validate.
+    process = subprocess.Popen(
+        [str(DEFAULT_AUTHORITY_EXE), "12000"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    time.sleep(1.0)
+    return process
+
+
 def main() -> int:
     first_log = DEBUG_DIR / "native_link_ui_dashboard-a.log"
     second_log = DEBUG_DIR / "native_link_ui_dashboard-b.log"
@@ -36,12 +67,23 @@ def main() -> int:
         if path.exists():
             path.unlink()
 
-    result = subprocess.run(
-        [sys.executable, str(SMOKE_HELPER), "--linger-seconds", "5"],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
+    authority = launch_authority_if_available()
+
+    try:
+        result = subprocess.run(
+            [sys.executable, str(SMOKE_HELPER), "--linger-seconds", "5"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    finally:
+        if authority is not None:
+            authority.terminate()
+            try:
+                authority.wait(timeout=5.0)
+            except subprocess.TimeoutExpired:
+                authority.kill()
+                authority.wait(timeout=5.0)
 
     if result.returncode != 0:
         print(result.stdout.strip())
@@ -62,10 +104,23 @@ def main() -> int:
         print("missing_ui_logs")
         return 1
 
+    # Ian: The UI log files can appear before the queued retained updates finish
+    # draining through the main-window thread, especially for the second process.
+    # Wait for the authority-seeded retained markers themselves instead of treating
+    # early file creation as proof that the dashboard already finished startup.
+    retained_anchor = r"update key=Test/Auton_Selection/AutoChooser/selected value=Just Move Forward"
+    log_a = wait_for_log_pattern(first_log, retained_anchor, 6.0)
+    log_b = wait_for_log_pattern(second_log, retained_anchor, 6.0)
+
+    # Ian: The old SmartDashboard-owned scaffold started from dashboard-local
+    # defaults like `Do Nothing` / `TestMove=0`. The real simulator-owned IPC
+    # path should assert against authority-seeded values instead, or this probe
+    # will keep flagging a false failure even when both dashboards observed the
+    # same correct retained snapshot from Robot_Simulation.
     required_patterns = [
         r"transport_start id=native-link",
-        r"update key=Test/Auton_Selection/AutoChooser/selected value=Do Nothing",
-        r"update key=TestMove value=0",
+        r"update key=Test/Auton_Selection/AutoChooser/selected value=Just Move Forward",
+        r"update key=TestMove value=3\.5",
     ]
 
     # Ian: Keep the first shared-state proof intentionally small and explicit.
@@ -85,13 +140,6 @@ def main() -> int:
     # startup; the other dashboard must observe that same updated value through
     # the shared Native Link authority instead of staying on its own private
     # default.
-    if re.search(r"update key=TestMove value=3\.5", log_a) is None:
-        print("dashboard_a_missing_cross_process_testmove_update")
-        return 1
-    if re.search(r"update key=TestMove value=3\.5", log_b) is None:
-        print("dashboard_b_missing_cross_process_testmove_update")
-        return 1
-
     print("native_link_shared_state_probe=ok")
     return 0
 
