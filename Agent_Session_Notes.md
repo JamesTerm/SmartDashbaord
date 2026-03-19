@@ -100,6 +100,49 @@
   - important caveat for the next session: that shared authority is still an early SmartDashboard-side scaffold for `native-link-default`, not the final external/shared transport architecture; keep it as a validation bridge, not as proof that the long-term transport design is finished
   - build-default strategy is now aligned with the future merge plan: `SMARTDASHBOARD_BUILD_PLUGIN_NATIVE_LINK` should stay `OFF` by default so `main` can absorb the architecture/test work without exposing unfinished plugin behavior; enable it explicitly on the feature branch when validating Native Link
   - future merge strategy for this line of work: when we are ready to start the separate `Robot_Simulation` branch, squash-merge the SmartDashboard Native Link work into `main` but keep the new plugin disabled in project build settings so `main` stays stable without exposing unfinished plugin behavior
+  - newest Native Link slice replaced the SmartDashboard-side in-memory `native-link-default` authority scaffold with a real shared-memory + named-events client/server bridge shape in `plugins/NativeLinkTransport/`:
+    - new shared carrier contract header lives at `plugins/NativeLinkTransport/include/native_link_ipc_protocol.h`
+    - SmartDashboard plugin now starts a real IPC client (`native_link_ipc_client.*`) instead of creating an in-process authority in `native_link_transport_plugin.cpp`
+    - focused IPC harness server for SmartDashboard-side tests lives at `plugins/NativeLinkTransport/src/native_link_ipc_test_server.cpp`; it mirrors the simulator-owned v1 carrier enough for plugin/runtime validation without pretending the dashboard owns authority
+    - important `Ian:` cross-process lesson now captured in the test server: do not treat `clientTag != 0` as a fully initialized client slot before `clientId` + first heartbeat are visible, or the server can race and invalidate half-initialized clients before snapshot delivery
+  - current Native Link automated status is mixed and this is the main blocker for the next session:
+    - core tests still pass
+    - focused isolated IPC tests and focused registry runtime smoke can pass
+    - but the full combined Native Link/registry `ctest` slice is still flaky/failing in some runs because the real IPC client/server handshake around initial snapshot/live readiness and post-start publish timing is not yet deterministic enough
+    - especially watch `NativeLinkIpcClientTests.DashboardPublishReachesAuthoritativeServer` and `DashboardTransportRegistryTests.NativeLinkPluginTransportStartsAndPublishesInitialState`; they expose remaining startup-order races in the SmartDashboard-side validation harness even after replacing the in-memory bridge
+    - do not update docs/testing claims to say the new real IPC path is fully stable until that full-suite flake is fixed
+  - latest checkpoint findings on this branch:
+    - tried hardening the shared carrier by aligning the mapped atomics properly and removing the packed-layout dependency; that change is now in both repos and should stay because packed atomics were a bad foundation for further debugging
+    - also split snapshot bookkeeping from write-ack intent in the carrier shape by adding `snapshotCompleteSessionId`, but the SmartDashboard client/test harness startup race is still not fully resolved
+    - current remaining failure pattern is still SmartDashboard-side: the client sometimes never reports `Connected` / never observes the post-restart reconnect, and first dashboard publishes can still miss the authoritative server in `NativeLinkIpcClientTests.DashboardPublishReachesAuthoritativeServer`, `NativeLinkIpcClientTests.DashboardPublishSucceedsAfterServerSessionRestart`, and `DashboardTransportRegistryTests.NativeLinkPluginTransportStartsAndPublishesInitialState`
+    - focused Robot_Simulation Native Link unit tests still pass after the protocol/layout updates (`robot_unit_tests.exe --gtest_filter=*NativeLink*`)
+    - likely next debugging target: inspect the SmartDashboard IPC client worker/connection-state path around `snapshotPhase`, `MaybePublishConnected`, and repeated `SetEvent`/heartbeat handling rather than continuing to only adjust tests
+  - follow-up finding after deeper tracing:
+    - one real bug was present in the SmartDashboard test server: `heartbeatAgeUs = nowUs - lastHeartbeatUs` could unsigned-underflow when the client refreshed heartbeat after the server sampled `nowUs`, which made the server falsely stale-disconnect a healthy client and clear its slot
+    - fixed that by clamping the server-side heartbeat age at zero when `lastHeartbeatUs > nowUs`; keep the same guard in mind for the simulator-owned authority path too
+    - that underflow bug explained some earlier mid-test slot clears, but it was not the only issue; after the fix, the combined SmartDashboard IPC/registry slice still flakes/fails because the client sometimes never reaches a durable `Connected` state in the first place
+    - current next target remains the SmartDashboard IPC client startup/restart handshake itself rather than more carrier changes
+  - latest stabilization pass result:
+    - the plugin-owned SmartDashboard transport startup path was still reporting success too early; waiting for `NativeLinkIpcClient::IsConnected()` before returning plugin `start()` success closed the host-side replay/startup race that was still breaking the registry slice
+    - the restart test itself also needed to validate the documented reconnect pattern (`Connected -> reconnect transition -> Connected`) instead of assuming two bare `Connected` notifications with no intervening state
+    - after those updates, the focused SmartDashboard Native Link slice is currently green and survived a 20x repeat loop: `ctest --output-on-failure -C Debug -R "NativeLinkIpcClientTests|DashboardTransportRegistryTests"`
+    - Robot_Simulation Native Link unit tests still pass after the paired authority-side guard changes
+  - app-level paired validation attempt from these checkpoints is still incomplete:
+    - `tools/native_link_shared_state_probe.py` still fails in the current real-process path because the per-instance UI logs only reach `transport_start id=native-link` and never record the expected retained updates yet
+    - that means the focused automated IPC/registry slice is green, but the two-real-dashboard + real authority smoke helper is not yet proving end-to-end retained state delivery
+    - a likely next debugging angle is whether the helper is still configuring the right channel/authority assumptions for the new real IPC path, plus whether `DriverStation_TransportSmoke.exe` is actually staying alive as the expected authority during the probe window
+    - one concrete cleanup from this pass: the helper was still asserting the old SmartDashboard-scaffold defaults (`Do Nothing`, `TestMove=0`) instead of the simulator-owned authority seed (`Just Move Forward`, `TestMove=3.5`); that expectation is now corrected in `tools/native_link_shared_state_probe.py`
+    - even after fixing the probe expectation, the real-process helper still only records `transport_start id=native-link` in the per-instance UI logs, so the remaining gap is real retained-update delivery/observation during the app-level probe, not just a stale assertion
+  - latest paired app-level probe result:
+    - the missing second-dashboard retained updates were caused by the helper still launching both real SmartDashboard processes with the same persisted Native Link client identity; that let the simulator-owned authority treat them as one logical client, so the probe was not exercising true two-client fan-out
+    - `tools/native_link_multi_instance_smoke.py` now rewrites the persisted Native Link client name between launches (`dashboard-a`, then `dashboard-b`) and `tools/native_link_shared_state_probe.py` now auto-starts `DriverStation_TransportSmoke.exe` when available locally
+    - with those helper fixes, the paired real-process probe now passes locally: `python tools/native_link_shared_state_probe.py` reports `native_link_shared_state_probe=ok`
+    - one more helper hardening pass was needed for repeatability: the probe originally treated "log file exists" as if it meant retained startup updates had already drained through the UI thread, but repeated runs showed the second dashboard can lag slightly and create a false failure even though it catches up moments later
+    - `tools/native_link_shared_state_probe.py` now waits for the retained chooser marker itself instead of only waiting for non-empty log files; after that timing fix, the paired real-process probe passed 10/10 repeated runs locally
+    - another real probe race showed up during broader merge-readiness validation: the helper was tearing down the temporary authority as soon as the launcher returned, before the second dashboard had always finished draining retained startup state; keeping the authority alive until after retained-marker checks fixed that flake, and the paired probe again passed 10/10 repeats locally
+  - roadmap note for follow-on sessions:
+    - keep the current shared-memory + named-events carrier as the simpler diagnostic/reference backend even after adding TCP
+    - planned direction is one Native Link protocol above multiple carriers, with TCP becoming the intended long-term default only after parity against the current focused slice and paired real-process probe is proven
 
 ## Known constraints / active considerations
 

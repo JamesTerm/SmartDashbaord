@@ -10,15 +10,15 @@ PROCESS_NAME = "SmartDashboardApp.exe"
 REGISTRY_KEY = r"HKCU\Software\SmartDashboard\SmartDashboardApp\connection"
 
 
-def configure_native_link_settings() -> None:
+def configure_native_link_settings(client_name: str) -> None:
     # Ian: This smoke helper is supposed to exercise Native Link startup, not
     # whatever transport the last manual run happened to leave in settings.
     # Force the persisted selection first so the result means something.
     settings = [
         ("transportKind", "REG_DWORD", "1"),
         ("transportId", "REG_SZ", "native-link"),
-        ("ntClientName", "REG_SZ", "NativeLinkSmoke"),
-        ("pluginSettingsJson", "REG_SZ", '{"client_name":"NativeLinkSmoke"}'),
+        ("ntClientName", "REG_SZ", client_name),
+        ("pluginSettingsJson", "REG_SZ", '{"client_name":"' + client_name + '"}'),
     ]
 
     for name, reg_type, value in settings:
@@ -92,9 +92,12 @@ def main() -> int:
         print(f"missing_app={APP_PATH}")
         return 2
 
+    # Ian: Clean up any old helper leftovers first. The process-count checks in
+    # this smoke are only meaningful when they describe the instances launched by
+    # the current run rather than dashboards left behind by a previous probe.
     close_all()
     try:
-        configure_native_link_settings()
+        configure_native_link_settings("dashboard-a")
     except RuntimeError as exc:
         print(str(exc))
         return 1
@@ -102,6 +105,18 @@ def main() -> int:
     first = launch_instance("dashboard-a", allow_multi_instance=False)
     if not wait_for_instance_count(1, 10.0):
         print("first_launch_failed")
+        close_all()
+        return 1
+
+    try:
+        # Ian: Real Native Link is multi-client, not multi-window-on-one-client.
+        # Give each dashboard process its own logical client name before launch
+        # or the simulator authority can legitimately collapse them into one
+        # client identity and the probe stops proving true fan-out.
+        configure_native_link_settings("dashboard-b")
+    except RuntimeError as exc:
+        print(str(exc))
+        first.poll()
         close_all()
         return 1
 
