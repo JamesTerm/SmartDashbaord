@@ -41,6 +41,15 @@ Curated milestone history for this repository.
   - SHM remains explicitly selectable for internal diagnostics/support only
   - added environment-driven runtime proof via
     `tools/native_link_tcp_runtime_probe.py`.
+- Updated the SmartDashboard Native Link settings dialog shape to feel familiar
+  for students moving from Legacy NT workflows:
+  - `Use team number`
+  - `Team number`
+  - `Host / IP`
+  - `Client name`
+  - the dialog still does not expose SHM/TCP as a normal user-facing carrier
+    choice; transport defaults remain TCP unless a developer override says
+    otherwise.
 - Restabilized the broader SmartDashboard Native Link baseline after the latest
   merged `main` changes by:
   - queuing plugin transport callbacks onto the Qt thread

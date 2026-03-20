@@ -26,6 +26,39 @@ namespace
 
     const sd_transport_connection_field_descriptor_v1 kNativeLinkConnectionFields[] = {
         {
+            SD_TRANSPORT_FIELD_USE_TEAM_NUMBER,
+            "Use team number",
+            SD_TRANSPORT_CONNECTION_FIELD_TYPE_BOOL,
+            "Use FRC team-number resolution instead of a direct host/IP for TCP Native Link.",
+            1,
+            0,
+            nullptr,
+            0,
+            1
+        },
+        {
+            SD_TRANSPORT_FIELD_TEAM_NUMBER,
+            "Team number",
+            SD_TRANSPORT_CONNECTION_FIELD_TYPE_INT,
+            "Used when team-number resolution is enabled.",
+            0,
+            0,
+            nullptr,
+            0,
+            99999
+        },
+        {
+            SD_TRANSPORT_FIELD_HOST,
+            "Host / IP",
+            SD_TRANSPORT_CONNECTION_FIELD_TYPE_STRING,
+            "Used when connecting directly by host name or IP address for TCP Native Link.",
+            0,
+            0,
+            "127.0.0.1",
+            0,
+            0
+        },
+        {
             SD_TRANSPORT_FIELD_CLIENT_NAME,
             "Client name",
             SD_TRANSPORT_CONNECTION_FIELD_TYPE_STRING,
@@ -44,9 +77,33 @@ namespace
         std::string clientName = "SmartDashboardApp";
         std::string channelId = "native-link-default";
         std::string carrierName = "shm";
+        std::string host = "127.0.0.1";
+        int teamNumber = 0;
+        bool useTeamNumber = true;
         std::unique_ptr<sd::nativelink::NativeLinkCarrierClient> client;
         sd_transport_callbacks_v1 callbacks {};
     };
+
+    std::string ResolveTcpHost(const NativeLinkPluginInstance& instance)
+    {
+        if (instance.useTeamNumber && instance.teamNumber > 0)
+        {
+            const int hi = instance.teamNumber / 100;
+            const int lo = instance.teamNumber % 100;
+
+            // Ian: Teams already understand the Legacy NT dialog shape. Reusing
+            // the same team-number host resolution here keeps Native Link's TCP
+            // runtime path familiar without exposing carrier internals in the UI.
+            return "10." + std::to_string(hi) + "." + std::to_string(lo) + ".2";
+        }
+
+        if (!instance.host.empty())
+        {
+            return instance.host;
+        }
+
+        return "127.0.0.1";
+    }
 
     int GetNativeLinkBoolProperty(const char* propertyName, int defaultValue)
     {
@@ -232,6 +289,11 @@ namespace
         instance->clientName = (config != nullptr && config->nt_client_name != nullptr && config->nt_client_name[0] != '\0')
             ? config->nt_client_name
             : "SmartDashboardApp";
+        instance->host = (config != nullptr && config->nt_host != nullptr && config->nt_host[0] != '\0')
+            ? config->nt_host
+            : "127.0.0.1";
+        instance->teamNumber = config != nullptr ? config->nt_team : 0;
+        instance->useTeamNumber = config != nullptr ? (config->nt_use_team != 0) : true;
         instance->channelId = ReadPluginStringSetting(
             config != nullptr ? config->plugin_settings_json : nullptr,
             "channel_id",
@@ -249,7 +311,7 @@ namespace
         clientConfig.host = ReadPluginStringSetting(
             config != nullptr ? config->plugin_settings_json : nullptr,
             "host",
-            "127.0.0.1"
+            ResolveTcpHost(*instance)
         );
         clientConfig.port = ReadPluginPortSetting(
             config != nullptr ? config->plugin_settings_json : nullptr,

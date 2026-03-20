@@ -337,3 +337,47 @@ TEST(DashboardTransportRegistryTests, NativeLinkDefaultsToTcpCarrierWhenCarrierI
     transport->Stop();
     server.Stop();
 }
+
+TEST(DashboardTransportRegistryTests, NativeLinkTcpUsesDirectHostField)
+{
+    ASSERT_NE(EnsureCoreApp(), nullptr);
+
+    const std::string channelId = MakeUniqueChannel("native-link-registry-direct-host-test");
+    const std::uint16_t port = 5815;
+    sd::nativelink::testsupport::NativeLinkTcpTestServer server(channelId, port, "127.0.0.1");
+    ASSERT_TRUE(server.Start());
+    server.RegisterDefaultDashboardTopics();
+
+    sd::transport::DashboardTransportRegistry registry;
+
+    sd::transport::ConnectionConfig config;
+    config.kind = sd::transport::TransportKind::Plugin;
+    config.transportId = "native-link";
+    config.ntClientName = "RegistryDirectHostTcpTest";
+    config.ntUseTeam = false;
+    config.ntHost = "127.0.0.1";
+    config.pluginSettingsJson = QString::fromStdString(
+        std::string("{\"carrier\":\"tcp\",\"port\":")
+        + std::to_string(port)
+        + std::string(",\"channel_id\":\"")
+        + channelId
+        + "\"}"
+    );
+
+    std::unique_ptr<sd::transport::IDashboardTransport> transport = registry.CreateTransport(config);
+    ASSERT_NE(transport, nullptr);
+
+    const bool started = transport->Start(
+        [](const sd::transport::VariableUpdate&)
+        {
+        },
+        [](sd::transport::ConnectionState)
+        {
+        }
+    );
+
+    EXPECT_TRUE(started);
+
+    transport->Stop();
+    server.Stop();
+}
