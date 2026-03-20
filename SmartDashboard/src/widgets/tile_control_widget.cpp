@@ -77,6 +77,20 @@ namespace sd::widgets
                 emit StringEdited(text);
             });
         }
+
+        UpdateInteractivity();
+    }
+
+    void TileControlWidget::SetInteractionEnabled(bool enabled)
+    {
+        m_interactionEnabled = enabled;
+        UpdateInteractivity();
+    }
+
+    void TileControlWidget::SetValueAvailable(bool available)
+    {
+        m_valueAvailable = available;
+        UpdateInteractivity();
     }
 
     void TileControlWidget::SetBoolValue(bool value)
@@ -218,16 +232,41 @@ namespace sd::widgets
         if (m_lineEdit != nullptr)
         {
             m_lineEdit->setVisible(!m_stringChooserMode);
-            m_lineEdit->setEnabled(!m_stringChooserMode);
         }
 
         if (m_comboBox != nullptr)
         {
             m_comboBox->setVisible(m_stringChooserMode);
-            m_comboBox->setEnabled(m_stringChooserMode);
         }
 
+        UpdateInteractivity();
+
         DebugControlLog(QString("control.set_chooser_mode chooser=%1 combo_visible=%2 line_visible=%3").arg(m_stringChooserMode ? 1 : 0).arg(m_comboBox && m_comboBox->isVisible() ? 1 : 0).arg(m_lineEdit && m_lineEdit->isVisible() ? 1 : 0));
+    }
+
+    void TileControlWidget::UpdateInteractivity()
+    {
+        const bool controlsEnabled = m_interactionEnabled && m_valueAvailable;
+
+        if (m_checkBox != nullptr)
+        {
+            m_checkBox->setEnabled(controlsEnabled);
+        }
+
+        if (m_slider != nullptr)
+        {
+            m_slider->setEnabled(controlsEnabled);
+        }
+
+        if (m_lineEdit != nullptr)
+        {
+            m_lineEdit->setEnabled(controlsEnabled && !m_stringChooserMode);
+        }
+
+        if (m_comboBox != nullptr)
+        {
+            m_comboBox->setEnabled(controlsEnabled && m_stringChooserMode);
+        }
     }
 
     void TileControlWidget::SetTextFontPointSize(int pointSize)

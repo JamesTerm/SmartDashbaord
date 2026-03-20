@@ -49,8 +49,16 @@ class MainWindow final : public QMainWindow
     Q_OBJECT
 
 public:
-    explicit MainWindow(QWidget* parent = nullptr);
+    explicit MainWindow(QWidget* parent = nullptr, bool startTransportOnInit = true);
     ~MainWindow() override;
+
+#ifdef SMARTDASHBOARD_TESTS
+    void SetTransportSelectionForTesting(const QString& transportId, sd::transport::TransportKind kind);
+    void SimulateVariableUpdateForTesting(const QString& key, int valueType, const QVariant& value, quint64 seq = 0);
+    void SimulateControlDoubleEditForTesting(const QString& key, double value);
+    int RememberedControlValueCountForTesting() const;
+    bool HasRememberedControlValueForTesting(const QString& key) const;
+#endif
 
 private slots:
     void OnToggleEditable();
@@ -89,6 +97,10 @@ private slots:
     void OnAddReplayBookmark();
     void OnClearReplayBookmarks();
 
+#ifdef SMARTDASHBOARD_TESTS
+public:
+#endif
+
 private:
     using TileMap = std::unordered_map<std::string, sd::widgets::VariableTile*>;
     using LayoutMap = std::unordered_map<std::string, sd::layout::WidgetLayoutEntry>;
@@ -115,6 +127,7 @@ private:
     void LoadRememberedControlValues();
     void SaveRememberedControlValues() const;
     void ApplyRememberedControlValuesToTiles();
+    void RememberControlValueIfAllowed(const QString& key, int valueType, const QVariant& value, bool persistToSettings);
     QString BuildDisplayLabel(const QString& key) const;
     void StartTransport();
     void StopTransport();
@@ -143,6 +156,7 @@ private:
     bool CurrentTransportUsesShortDisplayKeys() const;
     bool CurrentTransportUsesLegacyNtSettings() const;
     bool CurrentTransportSupportsChooser() const;
+    bool CurrentTransportUsesRememberedControlValues() const;
     QVariant GetConnectionFieldValue(const sd::transport::ConnectionFieldDescriptor& field) const;
     void SetConnectionFieldValue(const QString& fieldId, const QVariant& value);
     void SyncConnectionConfigToPluginSettingsJson();

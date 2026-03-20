@@ -89,6 +89,11 @@ Curated milestone history for this repository.
   - focused SmartDashboard and Robot_Simulation Native Link automated checks are green
   - but the older two-real-dashboard shared-state probe still does not complete end-to-end against the current real IPC path, so paired app-level validation needs another pass before being treated as fully confirmed.
   - the first follow-up cleanup on that probe was to realign it with simulator-owned authority truth (`Just Move Forward`, `TestMove=3.5`) instead of the old dashboard-local scaffold defaults; the helper assertion is now corrected, but the real app-level retained-update gap still remains.
+- Persistence debugging follow-up from the next pass:
+  - a real SmartDashboard-local persistence bug did exist: incoming telemetry for operator widgets could still flow into `m_rememberedControlValues` on the `Direct` path, so retained transport state could later masquerade as dashboard-owned startup memory
+  - the fix now keeps remembered-control writes behind explicit local edit handlers only and prevents startup/reconnect refresh from inventing new remembered entries from live tiles
+  - the debugging also confirmed a second important lesson: even after the persistence fix, values like `TestMove=3.5` can still reappear from transport-retained state or authority-side test seeds, so future triage must check both `QSettings` and retained transport replay before concluding persistence regressed
+  - durable notes for that triage now live in `docs/persistence_debugging.md` and focused regression coverage was added in `SmartDashboard/tests/main_window_persistence_tests.cpp`.
 - Follow-up paired-validation fix:
   - the real two-dashboard helper was still launching both SmartDashboard processes with the same persisted Native Link client identity, which undercut the intended many-client proof against the simulator-owned authority
   - the helper now rewrites the persisted client name between launches and auto-starts the local `DriverStation_TransportSmoke.exe` authority when available

@@ -425,7 +425,7 @@ namespace
         "native-link",
         "Native Link",
         "native-link",
-        0u,
+        SD_TRANSPORT_PLUGIN_FLAG_USE_SHORT_DISPLAY_KEYS,
         &GetNativeLinkBoolProperty,
         &GetNativeLinkConnectionFields,
         &kNativeLinkApi

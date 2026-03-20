@@ -268,7 +268,7 @@ namespace
     }
 }
 
-MainWindow::MainWindow(QWidget* parent)
+MainWindow::MainWindow(QWidget* parent, bool startTransportOnInit)
     : QMainWindow(parent)
 {
     RefreshWindowTitle();
@@ -1016,7 +1016,14 @@ MainWindow::MainWindow(QWidget* parent)
         m_recordButton->setChecked(m_recordRequested);
     }
 
-    LoadRememberedControlValues();
+    if (CurrentTransportUsesRememberedControlValues())
+    {
+        LoadRememberedControlValues();
+    }
+    else
+    {
+        m_rememberedControlValues.clear();
+    }
 
     SetTimelineDockMode(m_playbackTimeline, m_replayTimelineDock != nullptr && m_replayTimelineDock->isFloating());
 
@@ -1043,9 +1050,15 @@ MainWindow::MainWindow(QWidget* parent)
 
     m_layoutFilePath = GetInitialLayoutPath();
     LoadLayoutFromPath(m_layoutFilePath, true);
-    ApplyRememberedControlValuesToTiles();
+    if (CurrentTransportUsesRememberedControlValues())
+    {
+        ApplyRememberedControlValuesToTiles();
+    }
     LoadWindowGeometry();
-    StartTransport();
+    if (startTransportOnInit)
+    {
+        StartTransport();
+    }
 }
 
 MainWindow::~MainWindow()
@@ -1275,11 +1288,6 @@ void MainWindow::OnVariableUpdateReceived(const QString& key, int valueType, con
                 {
                     chooserTile->SetStringValue(value.toString());
 
-                    RememberedControlValue chooserRemembered;
-                    chooserRemembered.valueType = static_cast<int>(sd::direct::ValueType::String);
-                    chooserRemembered.value = value;
-                    m_rememberedControlValues[chooserBase.toStdString()] = chooserRemembered;
-
                     // In Direct mode the robot reads chooser intent from the
                     // dashboard->robot command channel, not from telemetry.
                     // Mirror retained/live chooser selection updates into the
@@ -1333,30 +1341,22 @@ void MainWindow::OnVariableUpdateReceived(const QString& key, int valueType, con
         && m_transport
         && IsOperatorControlWidget(tile))
     {
-        RememberedControlValue remembered;
-
+        // Ian: This branch exists so Direct mode can still mirror retained/live
+        // operator widgets back onto the command channel when the old workflow
+        // expects it. Do not treat incoming telemetry as SmartDashboard-owned
+        // persistence here. Only explicit local edits are allowed to create or
+        // refresh `m_rememberedControlValues`, or retained authority truth like
+        // `TestMove=3.5` will start masquerading as a local startup setting.
         if (record.type == sd::widgets::VariableType::Bool)
         {
-            remembered.valueType = static_cast<int>(sd::direct::ValueType::Bool);
-            remembered.value = record.value.toBool();
-            m_rememberedControlValues[keyStd] = remembered;
-            SaveRememberedControlValues();
             m_transport->PublishBool(key, record.value.toBool());
         }
         else if (record.type == sd::widgets::VariableType::Double)
         {
-            remembered.valueType = static_cast<int>(sd::direct::ValueType::Double);
-            remembered.value = record.value.toDouble();
-            m_rememberedControlValues[keyStd] = remembered;
-            SaveRememberedControlValues();
             m_transport->PublishDouble(key, record.value.toDouble());
         }
         else if (record.type == sd::widgets::VariableType::String && tile->GetWidgetType() != "string.chooser")
         {
-            remembered.valueType = static_cast<int>(sd::direct::ValueType::String);
-            remembered.value = record.value.toString();
-            m_rememberedControlValues[keyStd] = remembered;
-            SaveRememberedControlValues();
             m_transport->PublishString(key, record.value.toString());
         }
     }
@@ -1401,7 +1401,7 @@ void MainWindow::OnConnectionStateChanged(int state)
 
 void MainWindow::PublishRememberedControlValues()
 {
-    if (!m_transport)
+    if (!m_transport || !CurrentTransportUsesRememberedControlValues())
     {
         return;
     }
@@ -1858,14 +1858,7 @@ void MainWindow::UpdateReplayDockHeightLock()
 
 void MainWindow::OnControlBoolEdited(const QString& key, bool value)
 {
-    if (!key.isEmpty())
-    {
-        RememberedControlValue remembered;
-        remembered.valueType = static_cast<int>(sd::direct::ValueType::Bool);
-        remembered.value = QVariant(value);
-        m_rememberedControlValues[key.toStdString()] = remembered;
-        SaveRememberedControlValues();
-    }
+    RememberControlValueIfAllowed(key, static_cast<int>(sd::direct::ValueType::Bool), QVariant(value), true);
 
     if (m_transport)
     {
@@ -1894,14 +1887,7 @@ void MainWindow::OnRemoveWidgetRequested(const QString& key)
 
 void MainWindow::OnControlDoubleEdited(const QString& key, double value)
 {
-    if (!key.isEmpty())
-    {
-        RememberedControlValue remembered;
-        remembered.valueType = static_cast<int>(sd::direct::ValueType::Double);
-        remembered.value = QVariant(value);
-        m_rememberedControlValues[key.toStdString()] = remembered;
-        SaveRememberedControlValues();
-    }
+    RememberControlValueIfAllowed(key, static_cast<int>(sd::direct::ValueType::Double), QVariant(value), true);
 
     if (m_transport)
     {
@@ -1911,14 +1897,7 @@ void MainWindow::OnControlDoubleEdited(const QString& key, double value)
 
 void MainWindow::OnControlStringEdited(const QString& key, const QString& value)
 {
-    if (!key.isEmpty())
-    {
-        RememberedControlValue remembered;
-        remembered.valueType = static_cast<int>(sd::direct::ValueType::String);
-        remembered.value = QVariant(value);
-        m_rememberedControlValues[key.toStdString()] = remembered;
-        SaveRememberedControlValues();
-    }
+    RememberControlValueIfAllowed(key, static_cast<int>(sd::direct::ValueType::String), QVariant(value), true);
 
     if (m_transport)
     {
@@ -2617,6 +2596,11 @@ void MainWindow::LoadRememberedControlValues()
 
 void MainWindow::SaveRememberedControlValues() const
 {
+    if (!CurrentTransportUsesRememberedControlValues())
+    {
+        return;
+    }
+
     QSettings settings("SmartDashboard", "SmartDashboardApp");
     settings.beginWriteArray("directRememberedControls");
     int index = 0;
@@ -2656,6 +2640,28 @@ void MainWindow::ApplyRememberedControlValuesToTiles()
         {
             tile->SetStringValue(remembered.value.toString());
         }
+    }
+}
+
+void MainWindow::RememberControlValueIfAllowed(const QString& key, int valueType, const QVariant& value, bool persistToSettings)
+{
+    if (key.isEmpty() || !CurrentTransportUsesRememberedControlValues())
+    {
+        return;
+    }
+
+    // Ian: This helper is the persistence boundary for operator controls.
+    // Call it from local edit handlers only. If telemetry/update paths call it,
+    // transport-retained state gets reclassified as dashboard-local memory and
+    // the next restart looks like a persistence bug instead of retained truth.
+    RememberedControlValue remembered;
+    remembered.valueType = valueType;
+    remembered.value = value;
+    m_rememberedControlValues[key.toStdString()] = remembered;
+
+    if (persistToSettings)
+    {
+        SaveRememberedControlValues();
     }
 }
 
@@ -2738,41 +2744,57 @@ void MainWindow::StartTransport()
             // dashboard instances get a full retained snapshot pass before any of
             // them start asserting local operator-owned values back onto the
             // authority.
-            ApplyRememberedControlValuesToTiles();
+            if (CurrentTransportUsesRememberedControlValues())
+            {
+                ApplyRememberedControlValuesToTiles();
+            }
 
             // Refresh remembered control cache from current tiles so reconnects can replay
             // the latest operator-facing values even if no new edit event occurs.
-            for (const auto& [_, tile] : m_tiles)
+            if (CurrentTransportUsesRememberedControlValues())
             {
-                if (!IsOperatorControlWidget(tile))
+                for (const auto& [_, tile] : m_tiles)
                 {
-                    continue;
-                }
+                    if (!IsOperatorControlWidget(tile))
+                    {
+                        continue;
+                    }
 
-                const QString key = tile->GetKey();
-                if (key.isEmpty())
-                {
-                    continue;
-                }
+                    const QString key = tile->GetKey();
+                    if (key.isEmpty())
+                    {
+                        continue;
+                    }
 
-                RememberedControlValue remembered;
-                const auto type = tile->GetType();
-                if (type == sd::widgets::VariableType::Bool)
-                {
-                    remembered.valueType = static_cast<int>(sd::direct::ValueType::Bool);
-                    remembered.value = QVariant(tile->GetBoolValue());
+                    auto rememberedIt = m_rememberedControlValues.find(key.toStdString());
+                    if (rememberedIt == m_rememberedControlValues.end())
+                    {
+                        continue;
+                    }
+
+                    // Ian: Refresh only values that were already remembered from
+                    // an explicit local edit. Startup retained tiles can carry
+                    // authority-owned state, and inventing new remembered entries
+                    // here turns transport replay into fake dashboard persistence.
+                    RememberedControlValue remembered;
+                    const auto type = tile->GetType();
+                    if (type == sd::widgets::VariableType::Bool)
+                    {
+                        remembered.valueType = static_cast<int>(sd::direct::ValueType::Bool);
+                        remembered.value = QVariant(tile->GetBoolValue());
+                    }
+                    else if (type == sd::widgets::VariableType::Double)
+                    {
+                        remembered.valueType = static_cast<int>(sd::direct::ValueType::Double);
+                        remembered.value = QVariant(tile->GetDoubleValue());
+                    }
+                    else
+                    {
+                        remembered.valueType = static_cast<int>(sd::direct::ValueType::String);
+                        remembered.value = QVariant(tile->GetStringValue());
+                    }
+                    rememberedIt->second = remembered;
                 }
-                else if (type == sd::widgets::VariableType::Double)
-                {
-                    remembered.valueType = static_cast<int>(sd::direct::ValueType::Double);
-                    remembered.value = QVariant(tile->GetDoubleValue());
-                }
-                else
-                {
-                    remembered.valueType = static_cast<int>(sd::direct::ValueType::String);
-                    remembered.value = QVariant(tile->GetStringValue());
-                }
-                m_rememberedControlValues[key.toStdString()] = remembered;
             }
         }
 
@@ -3646,6 +3668,39 @@ bool MainWindow::CurrentTransportSupportsChooser() const
 
     return descriptor->GetBoolProperty(QString::fromUtf8(sd::transport::kTransportPropertySupportsChooser), false);
 }
+
+bool MainWindow::CurrentTransportUsesRememberedControlValues() const
+{
+    return m_connectionConfig.kind == sd::transport::TransportKind::Direct;
+}
+
+#ifdef SMARTDASHBOARD_TESTS
+void MainWindow::SetTransportSelectionForTesting(const QString& transportId, sd::transport::TransportKind kind)
+{
+    m_connectionConfig.transportId = transportId;
+    m_connectionConfig.kind = kind;
+}
+
+void MainWindow::SimulateVariableUpdateForTesting(const QString& key, int valueType, const QVariant& value, quint64 seq)
+{
+    OnVariableUpdateReceived(key, valueType, value, seq);
+}
+
+void MainWindow::SimulateControlDoubleEditForTesting(const QString& key, double value)
+{
+    OnControlDoubleEdited(key, value);
+}
+
+int MainWindow::RememberedControlValueCountForTesting() const
+{
+    return static_cast<int>(m_rememberedControlValues.size());
+}
+
+bool MainWindow::HasRememberedControlValueForTesting(const QString& key) const
+{
+    return m_rememberedControlValues.find(key.toStdString()) != m_rememberedControlValues.end();
+}
+#endif
 
 QVariant MainWindow::GetConnectionFieldValue(const sd::transport::ConnectionFieldDescriptor& field) const
 {

@@ -46,6 +46,7 @@ namespace sd::widgets
         explicit VariableTile(const QString& key, VariableType type, QWidget* parent = nullptr);
 
         void SetEditable(bool editable);
+        void ClearValue();
         void SetBoolValue(bool value);
         void SetDoubleValue(double value);
         void SetStringValue(const QString& value);
@@ -72,6 +73,7 @@ namespace sd::widgets
         QString GetKey() const;
         VariableType GetType() const;
         QString GetWidgetType() const;
+        bool HasValue() const;
         bool GetBoolValue() const;
         double GetDoubleValue() const;
         QString GetStringValue() const;
@@ -143,6 +145,7 @@ namespace sd::widgets
         QPoint m_dragStartGlobal;
         QRect m_dragStartGeometry;
         DragMode m_dragMode = DragMode::None;
+        bool m_hasValue = false;
         bool m_boolValue = false;
         double m_doubleValue = 0.0;
         bool m_settingGaugeProgrammatically = false;

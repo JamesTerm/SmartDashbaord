@@ -3,9 +3,11 @@
 #include <QApplication>
 #include <QComboBox>
 #include <QLineEdit>
+#include <QSlider>
 
 #include <gtest/gtest.h>
 
+#include <cmath>
 #include <memory>
 
 namespace
@@ -60,4 +62,29 @@ TEST(TileControlWidgetTests, StringChooserOptionsAndValueStayInSync)
     ASSERT_NE(comboBox, nullptr);
     EXPECT_EQ(comboBox->count(), 3);
     EXPECT_EQ(comboBox->currentText(), QString("Taxi"));
+}
+
+TEST(TileControlWidgetTests, DoubleSliderEmitsEditedValueWhenInteractive)
+{
+    ASSERT_NE(EnsureApp(), nullptr);
+
+    sd::widgets::TileControlWidget control(sd::widgets::VariableType::Double);
+    control.SetDoubleRange(-1.0, 1.0);
+    control.SetValueAvailable(true);
+    control.SetInteractionEnabled(true);
+
+    double editedValue = 0.0;
+    bool sawEdit = false;
+    QObject::connect(&control, &sd::widgets::TileControlWidget::DoubleEdited, [&editedValue, &sawEdit](double value)
+    {
+        editedValue = value;
+        sawEdit = true;
+    });
+
+    QSlider* slider = control.findChild<QSlider*>();
+    ASSERT_NE(slider, nullptr);
+    slider->setValue(75);
+
+    EXPECT_TRUE(sawEdit);
+    EXPECT_NEAR(editedValue, 0.5, 0.01);
 }

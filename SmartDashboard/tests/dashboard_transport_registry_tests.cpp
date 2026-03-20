@@ -73,6 +73,7 @@ TEST(DashboardTransportRegistryTests, NativeLinkPluginIsDiscoverableWhenPresentN
     ASSERT_NE(descriptor, nullptr);
     EXPECT_EQ(descriptor->displayName, QString("Native Link"));
     EXPECT_EQ(descriptor->kind, sd::transport::TransportKind::Plugin);
+    EXPECT_TRUE(descriptor->useShortDisplayKeys);
     EXPECT_TRUE(descriptor->GetBoolProperty(QString::fromUtf8(sd::transport::kTransportPropertySupportsMultiClient), false));
     EXPECT_TRUE(descriptor->GetBoolProperty(QString::fromUtf8(sd::transport::kTransportPropertySupportsChooser), false));
 }
@@ -338,7 +339,7 @@ TEST(DashboardTransportRegistryTests, NativeLinkDefaultsToTcpCarrierWhenCarrierI
     server.Stop();
 }
 
-TEST(DashboardTransportRegistryTests, NativeLinkTcpTransportStartReturnsPromptlyWithoutAuthority)
+TEST(DashboardTransportRegistryTests, NativeLinkTcpTransportFailsWithoutAuthority)
 {
     ASSERT_NE(EnsureCoreApp(), nullptr);
 
@@ -368,8 +369,8 @@ TEST(DashboardTransportRegistryTests, NativeLinkTcpTransportStartReturnsPromptly
         std::chrono::steady_clock::now() - startTime
     ).count();
 
-    EXPECT_TRUE(started);
-    EXPECT_LT(elapsedMs, 500);
+    EXPECT_FALSE(started);
+    EXPECT_LT(elapsedMs, 5000);
 
     transport->Stop();
 }

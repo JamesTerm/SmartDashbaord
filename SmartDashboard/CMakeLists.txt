@@ -69,14 +69,21 @@ if(BUILD_TESTING)
 
     add_executable(SmartDashboard_tests
         tests/line_plot_widget_tests.cpp
+        tests/main_window_persistence_tests.cpp
         tests/playback_timeline_widget_tests.cpp
         tests/tile_control_widget_tests.cpp
         tests/variable_tile_tests.cpp
         tests/startup_instance_gate_tests.cpp
         src/app/debug_log_paths.h
         src/app/debug_log_paths.cpp
+        src/app/main_window.h
+        src/app/main_window.cpp
         src/app/startup_instance_gate.h
         src/app/startup_instance_gate.cpp
+        src/model/variable_store.h
+        src/model/variable_store.cpp
+        src/layout/layout_serializer.h
+        src/layout/layout_serializer.cpp
         src/transport/dashboard_transport.h
         src/transport/dashboard_transport.cpp
         src/widgets/variable_tile.cpp
@@ -92,6 +99,7 @@ if(BUILD_TESTING)
     target_include_directories(SmartDashboard_tests
         PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}/src
+            ${CMAKE_SOURCE_DIR}/SmartDashboard_Interface_direct/include
     )
 
     if(SMARTDASHBOARD_BUILD_PLUGIN_NATIVE_LINK)

@@ -208,12 +208,12 @@ namespace sd::widgets
         m_showEditHandles = m_editable && (m_editInteractionMode != EditInteractionMode::MoveOnly);
 
         // Edit mode is layout-only: never allow widget controls to send commands while moving/resizing.
-        m_controlWidget->setEnabled(!m_editable);
+        m_controlWidget->SetInteractionEnabled(!m_editable);
         m_controlWidget->setAttribute(Qt::WA_TransparentForMouseEvents, m_editable);
-        m_doubleEdit->setEnabled(!m_editable);
+        m_doubleEdit->setEnabled(!m_editable && m_hasValue);
         m_doubleEdit->setAttribute(Qt::WA_TransparentForMouseEvents, m_editable);
         // Keep gauge visually consistent in editable mode; block interaction via mouse transparency.
-        m_gauge->setEnabled(true);
+        m_gauge->setEnabled(m_hasValue);
         m_gauge->setAttribute(Qt::WA_TransparentForMouseEvents, m_editable);
 
         if (!m_editable)
@@ -229,6 +229,13 @@ namespace sd::widgets
         }
 
         update();
+    }
+
+    void VariableTile::ClearValue()
+    {
+        m_hasValue = false;
+        UpdateWidgetPresentation();
+        UpdateValueDisplay();
     }
 
     void VariableTile::SetShowEditHandles(bool showHandles)
@@ -522,19 +529,25 @@ namespace sd::widgets
 
     void VariableTile::SetBoolValue(bool value)
     {
+        m_hasValue = true;
         m_boolValue = value;
+        UpdateWidgetPresentation();
         UpdateValueDisplay();
     }
 
     void VariableTile::SetDoubleValue(double value)
     {
+        m_hasValue = true;
         m_doubleValue = value;
+        UpdateWidgetPresentation();
         UpdateValueDisplay();
     }
 
     void VariableTile::SetStringValue(const QString& value)
     {
+        m_hasValue = true;
         m_stringValue = value;
+        UpdateWidgetPresentation();
         UpdateValueDisplay();
     }
 
@@ -551,6 +564,11 @@ namespace sd::widgets
     QString VariableTile::GetWidgetType() const
     {
         return m_widgetType;
+    }
+
+    bool VariableTile::HasValue() const
+    {
+        return m_hasValue;
     }
 
     bool VariableTile::GetBoolValue() const
@@ -994,6 +1012,29 @@ namespace sd::widgets
     {
         m_layout->setVerticalSpacing(4);
 
+        if (!m_hasValue)
+        {
+            m_boolLed->setVisible(false);
+            m_progressBar->setVisible(false);
+            m_gauge->setVisible(false);
+            m_linePlot->setVisible(false);
+            m_doubleEdit->setVisible(false);
+            m_controlWidget->setVisible(false);
+            m_controlWidget->SetValueAvailable(false);
+            m_titleLabel->setVisible(true);
+            m_valueLabel->setVisible(true);
+            m_valueLabel->setWordWrap(false);
+            m_valueLabel->setMinimumHeight(0);
+            m_layout->setColumnMinimumWidth(0, 90);
+            m_layout->addWidget(m_titleLabel, 0, 0, 1, 1, Qt::AlignLeft | Qt::AlignVCenter);
+            m_layout->addWidget(m_valueLabel, 0, 1, 1, 1);
+            m_layout->setRowStretch(0, 0);
+            m_layout->setRowStretch(1, 0);
+            m_doubleEdit->setEnabled(false);
+            m_gauge->setEnabled(false);
+            return;
+        }
+
         // Widget strategy selection:
         // map persisted widgetType id to one concrete visual presentation.
         const bool isBoolLed = (m_widgetType == "bool.led");
@@ -1025,6 +1066,7 @@ namespace sd::widgets
         m_stringChooserMode = showStringChooser;
         m_controlWidget->SetStringChooserMode(m_stringChooserMode);
         m_controlWidget->SetStringOptions(m_stringChooserOptions);
+        m_controlWidget->SetValueAvailable(true);
 
         m_boolLed->setVisible(showBoolLed);
         if (showBoolLed)
@@ -1051,6 +1093,7 @@ namespace sd::widgets
             m_doubleEdit->setText(QString::number(m_doubleValue, 'f', 4));
             m_settingDoubleEditProgrammatically = false;
         }
+        m_doubleEdit->setEnabled(showDoubleEdit && !m_editable && m_hasValue);
         m_titleLabel->setVisible(!showDoubleGauge);
 
         const bool showControl = showBoolCheckbox || showDoubleSlider || showStringEdit || showStringChooser;
@@ -1158,6 +1201,12 @@ namespace sd::widgets
 
     void VariableTile::UpdateValueDisplay()
     {
+        if (!m_hasValue)
+        {
+            m_valueLabel->setText("No data");
+            return;
+        }
+
         const bool isBoolCheckbox = (m_type == VariableType::Bool && m_widgetType == "bool.checkbox");
         const bool isDoubleSlider = (m_type == VariableType::Double && m_widgetType == "double.slider");
         const bool isStringEdit = (m_type == VariableType::String && m_widgetType == "string.edit");

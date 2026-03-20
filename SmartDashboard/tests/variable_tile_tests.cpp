@@ -4,6 +4,7 @@
 
 #include <QApplication>
 #include <QComboBox>
+#include <QLabel>
 #include <QLineEdit>
 #include <QProgressBar>
 
@@ -55,6 +56,20 @@ namespace
 
         return nullptr;
     }
+
+    QLabel* FindLabelWithText(sd::widgets::VariableTile& tile, const QString& text)
+    {
+        const QList<QLabel*> labels = tile.findChildren<QLabel*>();
+        for (QLabel* label : labels)
+        {
+            if (label != nullptr && label->text() == text)
+            {
+                return label;
+            }
+        }
+
+        return nullptr;
+    }
 }
 
 TEST(VariableTileTests, ProgressBarZeroCentersBeforeWidgetIsShown)
@@ -90,6 +105,23 @@ TEST(VariableTileTests, StringChooserWidgetUsesComboAndTracksOptions)
     EXPECT_TRUE(lineEdit->isHidden());
     EXPECT_EQ(comboBox->count(), 3);
     EXPECT_EQ(comboBox->currentText(), QString("Taxi"));
+}
+
+TEST(VariableTileTests, TilesShowPlaceholderUntilFirstValueArrives)
+{
+    ASSERT_NE(EnsureApp(), nullptr);
+
+    sd::widgets::VariableTile tile("test.numeric", sd::widgets::VariableType::Double);
+    tile.SetWidgetType("double.numeric");
+
+    QLabel* placeholder = FindLabelWithText(tile, "No data");
+    ASSERT_NE(placeholder, nullptr);
+    EXPECT_FALSE(tile.HasValue());
+
+    tile.SetDoubleValue(4.25);
+
+    EXPECT_TRUE(tile.HasValue());
+    EXPECT_EQ(FindLabelWithText(tile, "No data"), nullptr);
 }
 
 TEST(VariableTileTests, ResetLinePlotGraphClearsAccumulatedSamples)
