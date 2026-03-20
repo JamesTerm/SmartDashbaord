@@ -64,6 +64,14 @@ Examples:
 - dashboard adapters: SmartDashboard, Shuffleboard, Elastic
 - compatibility bridges: NT-facing adapters or standalone bridge services.
 
+Practical product stance for carriers:
+
+- `tcp` should be treated as the intended normal runtime carrier because it fits
+  existing FRC network expectations and scales beyond one machine
+- `shm` should be preserved as an internal diagnostic/reference carrier for
+  support, probes, and carrier-isolation debugging, not as a normal team-facing
+  runtime choice.
+
 Important boundary rule:
 
 - carriers move Native Link frames/semantics
@@ -175,9 +183,10 @@ That means future cleanup on the simulator side should keep moving toward reusab
 1. finish the carrier cleanup so `shm` and `tcp` both sit under the same semantic contract
 2. preserve `shm` as the diagnostic/reference backend
 3. complete localhost `tcp` parity in the current SmartDashboard + Robot_Simulation reference path
-4. document an explicit adapter boundary beside the carrier boundary
-5. sketch a future `NT4 <-> Native Link` bridge/service path
-6. plan packaging for Java/C++ robot-side libraries and dashboard-side adapters.
+4. keep runtime TCP selection environment-driven/internal first rather than adding a public SHM/TCP user choice too early
+5. document an explicit adapter boundary beside the carrier boundary
+6. sketch a future `NT4 <-> Native Link` bridge/service path
+7. plan packaging for Java/C++ robot-side libraries and dashboard-side adapters.
 
 ## Decision rule for future sessions
 

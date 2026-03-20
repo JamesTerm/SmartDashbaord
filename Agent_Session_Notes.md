@@ -30,9 +30,10 @@
   - adapter boundary above the semantic contract
 - Long-term roadmap is compatibility-first plus native-first, not robot-code-rewrite-only.
 - SmartDashboard-specific behavior should not leak into the Native Link core contract.
+- Product stance: `tcp` is the intended normal runtime carrier; `shm` stays as the internal diagnostic/reference backend and should not be pushed into normal team-facing UI.
 
 ## Immediate next-session focus
 
-1. Continue Robot_Simulation authority-side cleanup so TCP and SHM both sit under the same semantic contract cleanly.
+1. Continue the narrow runtime integration from the now-proven environment-driven TCP path instead of adding a public SHM/TCP selector.
 2. Keep `Robot_Simulation` as the first reference authority/example, but avoid trapping reusable authority logic inside app-specific code.
-3. After simulator-side cleanup, rerun the full cross-repo Native Link validation slice.
+3. After each runtime slice, rerun the SmartDashboard SHM probe, SmartDashboard TCP runtime probe, and focused Robot_Simulation Native Link tests.

@@ -1,3 +1,4 @@
+import os
 import re
 import subprocess
 import sys
@@ -58,9 +59,17 @@ def launch_authority_if_available() -> Optional[subprocess.Popen]:
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
+        env=build_authority_env(),
     )
     time.sleep(1.0)
     return process
+
+
+def build_authority_env() -> dict[str, str]:
+	env = os.environ.copy()
+	env.setdefault("NATIVE_LINK_CARRIER", "shm")
+	env.setdefault("NATIVE_LINK_CHANNEL_ID", "native-link-default")
+	return env
 
 
 def close_dashboards() -> None:

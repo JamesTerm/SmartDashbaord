@@ -159,22 +159,26 @@ TEST(DashboardTransportRegistryTests, NativeLinkPluginTransportStartsAndPublishe
     server.Stop();
 }
 
-TEST(DashboardTransportRegistryTests, NativeLinkPluginRejectsUnsupportedCarrierSelection)
+TEST(DashboardTransportRegistryTests, NativeLinkPluginTcpTransportFailsWithoutTcpAuthority)
 {
     ASSERT_NE(EnsureCoreApp(), nullptr);
 
-    const std::string channelId = MakeUniqueChannel("native-link-registry-unsupported-carrier");
-    sd::nativelink::testsupport::NativeLinkIpcTestServer server(channelId);
-    ASSERT_TRUE(server.Start());
-    server.RegisterDefaultDashboardTopics();
+    const std::string channelId = MakeUniqueChannel("native-link-registry-missing-tcp-authority");
+    const std::uint16_t port = 5899;
 
     sd::transport::DashboardTransportRegistry registry;
 
     sd::transport::ConnectionConfig config;
     config.kind = sd::transport::TransportKind::Plugin;
     config.transportId = "native-link";
-    config.ntClientName = "RegistryUnsupportedCarrier";
-    config.pluginSettingsJson = QString::fromStdString(std::string("{\"carrier\":\"tcp\",\"channel_id\":\"") + channelId + "\"}");
+    config.ntClientName = "RegistryMissingTcpAuthority";
+    config.pluginSettingsJson = QString::fromStdString(
+        std::string("{\"carrier\":\"tcp\",\"host\":\"127.0.0.1\",\"port\":")
+        + std::to_string(port)
+        + std::string(",\"channel_id\":\"")
+        + channelId
+        + "\"}"
+    );
 
     std::unique_ptr<sd::transport::IDashboardTransport> transport = registry.CreateTransport(config);
     ASSERT_NE(transport, nullptr);
@@ -191,7 +195,6 @@ TEST(DashboardTransportRegistryTests, NativeLinkPluginRejectsUnsupportedCarrierS
     EXPECT_FALSE(started);
 
     transport->Stop();
-    server.Stop();
 }
 
 TEST(DashboardTransportRegistryTests, NativeLinkPluginTcpTransportStartsAndPublishesInitialState)

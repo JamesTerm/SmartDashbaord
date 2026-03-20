@@ -180,6 +180,8 @@ Current checkpoint additions:
 - validate carrier-name parsing independently from transport startup
 - validate that explicit `tcp` selection fails cleanly until the TCP carrier is
   implemented, rather than silently reusing the SHM backend.
+- use `tools/native_link_tcp_runtime_probe.py` for the first environment-driven
+  runtime TCP proof before adding user-facing carrier-selection plumbing.
 
 ## Acceptance signal for first implementation slice
 
