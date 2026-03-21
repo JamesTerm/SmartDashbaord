@@ -51,6 +51,7 @@
 #include <QWidget>
 
 #include <QtWidgets/QDockWidget>
+#include <QtWidgets/QGroupBox>
 #include <QtWidgets/QListWidget>
 #include <QtWidgets/QListWidgetItem>
 #include <QtCore/QJsonArray>
@@ -68,6 +69,13 @@ namespace
             || key == "TestMove"
             || key == "Timer"
             || key == "Y_ft"
+            || key == "X_ft"
+            || key == "Velocity"
+            || key == "Rotation Velocity"
+            || key == "Wheel_fl_Velocity"
+            || key == "Wheel_fr_Velocity"
+            || key == "Wheel_rl_Velocity"
+            || key == "Wheel_rr_Velocity"
             || key == "Test/Auton_Selection/AutoChooser/selected";
     }
 
@@ -2345,6 +2353,24 @@ void MainWindow::OnEditTransportSettings()
         editors.push_back({field.id, editor});
     }
 
+#ifdef _DEBUG
+    QComboBox* nativeLinkCarrierCombo = nullptr;
+    if (ShouldShowNativeLinkCarrierDebugOptions())
+    {
+        auto* debugGroup = new QGroupBox("Debug Carrier Override", &dialog);
+        auto* debugFormLayout = new QFormLayout(debugGroup);
+        nativeLinkCarrierCombo = new QComboBox(debugGroup);
+        nativeLinkCarrierCombo->addItem("Shared Memory (SHM)", "shm");
+        nativeLinkCarrierCombo->addItem("TCP/IP", "tcp");
+        const QString currentCarrier = GetNativeLinkCarrierSetting();
+        const int index = nativeLinkCarrierCombo->findData(currentCarrier);
+        nativeLinkCarrierCombo->setCurrentIndex(index >= 0 ? index : 0);
+        nativeLinkCarrierCombo->setToolTip("Debug-only Native Link carrier override for quickly comparing SHM and TCP.");
+        debugFormLayout->addRow("Carrier:", nativeLinkCarrierCombo);
+        layout->addWidget(debugGroup);
+    }
+#endif
+
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
     layout->addWidget(buttons);
     connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
@@ -2370,6 +2396,13 @@ void MainWindow::OnEditTransportSettings()
             SetConnectionFieldValue(fieldId, lineEdit->text().trimmed());
         }
     }
+
+#ifdef _DEBUG
+    if (nativeLinkCarrierCombo != nullptr)
+    {
+        SetNativeLinkCarrierSetting(nativeLinkCarrierCombo->currentData().toString());
+    }
+#endif
 
     SyncConnectionConfigToPluginSettingsJson();
     ApplyTransportMenuChecks();
@@ -3952,6 +3985,26 @@ void MainWindow::SyncConnectionConfigToPluginSettingsJson()
     object.insert(QString::fromUtf8(sd::transport::kTransportFieldTeamNumber), m_connectionConfig.ntTeam);
     object.insert(QString::fromUtf8(sd::transport::kTransportFieldUseTeamNumber), m_connectionConfig.ntUseTeam);
     object.insert(QString::fromUtf8(sd::transport::kTransportFieldClientName), m_connectionConfig.ntClientName);
+    if (!m_connectionConfig.pluginSettingsJson.trimmed().isEmpty())
+    {
+        const QJsonDocument document = QJsonDocument::fromJson(m_connectionConfig.pluginSettingsJson.toUtf8());
+        if (document.isObject())
+        {
+            const QJsonObject existing = document.object();
+            if (existing.contains("carrier"))
+            {
+                object.insert("carrier", existing.value("carrier").toString("tcp"));
+            }
+            if (existing.contains("channel_id"))
+            {
+                object.insert("channel_id", existing.value("channel_id").toString("native-link-default"));
+            }
+            if (existing.contains("port"))
+            {
+                object.insert("port", existing.value("port").toInt(5810));
+            }
+        }
+    }
     m_connectionConfig.pluginSettingsJson = QString::fromUtf8(QJsonDocument(object).toJson(QJsonDocument::Compact));
 }
 
@@ -3987,4 +4040,55 @@ void MainWindow::SyncConnectionConfigFromPluginSettingsJson()
     {
         m_connectionConfig.ntClientName = object.value(QString::fromUtf8(sd::transport::kTransportFieldClientName)).toString(m_connectionConfig.ntClientName);
     }
+}
+
+QString MainWindow::GetNativeLinkCarrierSetting() const
+{
+    if (!m_connectionConfig.pluginSettingsJson.trimmed().isEmpty())
+    {
+        const QJsonDocument document = QJsonDocument::fromJson(m_connectionConfig.pluginSettingsJson.toUtf8());
+        if (document.isObject())
+        {
+            const QString carrier = document.object().value("carrier").toString().trimmed().toLower();
+            if (carrier == "shm")
+            {
+                return carrier;
+            }
+        }
+    }
+
+    return "tcp";
+}
+
+void MainWindow::SetNativeLinkCarrierSetting(const QString& carrier)
+{
+    QJsonObject object;
+    if (!m_connectionConfig.pluginSettingsJson.trimmed().isEmpty())
+    {
+        const QJsonDocument document = QJsonDocument::fromJson(m_connectionConfig.pluginSettingsJson.toUtf8());
+        if (document.isObject())
+        {
+            object = document.object();
+        }
+    }
+
+    object.insert("carrier", carrier.trimmed().compare("shm", Qt::CaseInsensitive) == 0 ? "shm" : "tcp");
+    if (!object.contains("channel_id"))
+    {
+        object.insert("channel_id", "native-link-default");
+    }
+    if (!object.contains("port"))
+    {
+        object.insert("port", 5810);
+    }
+    m_connectionConfig.pluginSettingsJson = QString::fromUtf8(QJsonDocument(object).toJson(QJsonDocument::Compact));
+}
+
+bool MainWindow::ShouldShowNativeLinkCarrierDebugOptions() const
+{
+#ifdef _DEBUG
+    return m_connectionConfig.transportId == "native-link";
+#else
+    return false;
+#endif
 }

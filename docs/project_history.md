@@ -9,6 +9,14 @@ Curated milestone history for this repository.
 
 ## 2026-03-20 - Startup defaults without persistence rollback
 
+- Added a debug-only Native Link carrier override to SmartDashboard transport settings so local validation can quickly compare `shm` and `tcp` against the same dashboard UI path.
+- Expanded Native Link focus-key UI logging to include `Velocity`, `Rotation Velocity`, `X_ft`, and wheel velocities for manual parity checks against Direct Connect.
+- Added `tools/native_link_observe_session.py` as a deterministic one-dashboard observe helper for Native Link manual debugging.
+- Confirmed a current split worth keeping visible in follow-up work:
+  - Direct Connect still shows live `Velocity` updates in tile logs
+  - Native Link SHM can be made to connect reliably in the observe flow when the authority starts first
+  - but the latest one-dashboard Native Link observe run still did not deliver post-connect live motion telemetry like `Velocity`.
+
 - Stabilized the post-persistence-cleanup startup experience on `feature/native-link-tcpip-carrier`.
 - Disabled SmartDashboard-owned direct remembered-control persistence by default behind `SMARTDASHBOARD_ENABLE_DIRECT_REMEMBERED_CONTROLS`.
 - Added temporary UI-only startup defaults behind `SMARTDASHBOARD_ENABLE_TEMPORARY_TILE_DEFAULTS` so widgets can hydrate without writing fake state back to transport or `QSettings`.

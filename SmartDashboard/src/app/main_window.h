@@ -38,6 +38,7 @@ class QListWidgetItem;
 class QPushButton;
 class QToolButton;
 class QTimer;
+class QGroupBox;
 
 namespace sd::widgets
 {
@@ -166,6 +167,9 @@ private:
     void SetConnectionFieldValue(const QString& fieldId, const QVariant& value);
     void SyncConnectionConfigToPluginSettingsJson();
     void SyncConnectionConfigFromPluginSettingsJson();
+    QString GetNativeLinkCarrierSetting() const;
+    void SetNativeLinkCarrierSetting(const QString& carrier);
+    bool ShouldShowNativeLinkCarrierDebugOptions() const;
     void ApplyTemporaryDefaultValuesToTiles();
 
     QWidget* m_canvas = nullptr;

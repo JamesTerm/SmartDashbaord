@@ -22,7 +22,17 @@
 - Plugin runtime settings support explicit carrier choice, but normal Native Link runtime use now defaults to TCP when `carrier` is omitted:
   - `{"carrier":"shm","channel_id":"..."}`
   - `{"carrier":"tcp","host":"127.0.0.1","port":5810,"channel_id":"..."}`
+- Debug builds now expose a manual Native Link carrier override in SmartDashboard transport settings for quick SHM vs TCP comparison.
+- `tools/native_link_observe_session.py` is the current one-dashboard Native Link observe helper.
+- The most reliable SHM observe order so far is authority first, then dashboard; bringing the dashboard up first can still fail at transport start.
 - `SMARTDASHBOARD_BUILD_PLUGIN_NATIVE_LINK` stays `OFF` by default outside focused validation.
+
+## Current Native Link manual-debug checkpoint
+
+- Direct Connect still shows live `Velocity` in tile logs, so the logging path is valid.
+- Native Link SHM can now be made to connect reliably in the one-dashboard observe flow.
+- The Native Link focus-key log now includes `Velocity`, `Rotation Velocity`, `X_ft`, and wheel velocities for manual comparison.
+- Current gap: retained/default state arrives, but the latest manual SHM observe run still did not show post-connect live `Velocity` or other motion telemetry updates.
 
 ## Current SmartDashboard startup/defaults state
 
@@ -48,6 +58,6 @@
 
 ## Immediate next-session focus
 
-1. If needed, add runtime toggles for startup default seeding instead of relying only on compile-time flags.
-2. Keep `Robot_Simulation` as the first reference authority/example, but avoid trapping reusable authority logic inside app-specific code.
+1. Compare the same manual Native Link observe flow on SHM vs TCP now that debug builds can switch carriers on demand.
+2. Trace why Native Link retained/default values arrive while live motion telemetry like `Velocity` still does not paint after connect.
 3. For any follow-up fix, rerun the SmartDashboard SHM probe, SmartDashboard TCP runtime probe, SmartDashboard Native Link `ctest` slice, and focused Robot_Simulation Native Link tests.
