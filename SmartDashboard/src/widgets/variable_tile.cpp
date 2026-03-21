@@ -234,6 +234,7 @@ namespace sd::widgets
     void VariableTile::ClearValue()
     {
         m_hasValue = false;
+        m_valueOrigin = ValueOrigin::None;
         UpdateWidgetPresentation();
         UpdateValueDisplay();
     }
@@ -529,26 +530,47 @@ namespace sd::widgets
 
     void VariableTile::SetBoolValue(bool value)
     {
-        m_hasValue = true;
-        m_boolValue = value;
-        UpdateWidgetPresentation();
-        UpdateValueDisplay();
+        SetBoolValueInternal(value, ValueOrigin::LiveTransport);
     }
 
     void VariableTile::SetDoubleValue(double value)
     {
-        m_hasValue = true;
-        m_doubleValue = value;
-        UpdateWidgetPresentation();
-        UpdateValueDisplay();
+        SetDoubleValueInternal(value, ValueOrigin::LiveTransport);
     }
 
     void VariableTile::SetStringValue(const QString& value)
     {
-        m_hasValue = true;
-        m_stringValue = value;
-        UpdateWidgetPresentation();
-        UpdateValueDisplay();
+        SetStringValueInternal(value, ValueOrigin::LiveTransport);
+    }
+
+    void VariableTile::SetTemporaryDefaultBoolValue(bool value)
+    {
+        if (m_hasValue && m_valueOrigin != ValueOrigin::TemporaryDefault)
+        {
+            return;
+        }
+
+        SetBoolValueInternal(value, ValueOrigin::TemporaryDefault);
+    }
+
+    void VariableTile::SetTemporaryDefaultDoubleValue(double value)
+    {
+        if (m_hasValue && m_valueOrigin != ValueOrigin::TemporaryDefault)
+        {
+            return;
+        }
+
+        SetDoubleValueInternal(value, ValueOrigin::TemporaryDefault);
+    }
+
+    void VariableTile::SetTemporaryDefaultStringValue(const QString& value)
+    {
+        if (m_hasValue && m_valueOrigin != ValueOrigin::TemporaryDefault)
+        {
+            return;
+        }
+
+        SetStringValueInternal(value, ValueOrigin::TemporaryDefault);
     }
 
     QString VariableTile::GetKey() const
@@ -569,6 +591,21 @@ namespace sd::widgets
     bool VariableTile::HasValue() const
     {
         return m_hasValue;
+    }
+
+    bool VariableTile::HasLiveValue() const
+    {
+        return m_hasValue && m_valueOrigin != ValueOrigin::TemporaryDefault;
+    }
+
+    bool VariableTile::IsShowingTemporaryDefault() const
+    {
+        return m_hasValue && m_valueOrigin == ValueOrigin::TemporaryDefault;
+    }
+
+    ValueOrigin VariableTile::GetValueOrigin() const
+    {
+        return m_valueOrigin;
     }
 
     bool VariableTile::GetBoolValue() const
@@ -1008,6 +1045,33 @@ namespace sd::widgets
         }
     }
 
+    void VariableTile::SetBoolValueInternal(bool value, ValueOrigin origin)
+    {
+        m_hasValue = true;
+        m_valueOrigin = origin;
+        m_boolValue = value;
+        UpdateWidgetPresentation();
+        UpdateValueDisplay();
+    }
+
+    void VariableTile::SetDoubleValueInternal(double value, ValueOrigin origin)
+    {
+        m_hasValue = true;
+        m_valueOrigin = origin;
+        m_doubleValue = value;
+        UpdateWidgetPresentation();
+        UpdateValueDisplay();
+    }
+
+    void VariableTile::SetStringValueInternal(const QString& value, ValueOrigin origin)
+    {
+        m_hasValue = true;
+        m_valueOrigin = origin;
+        m_stringValue = value;
+        UpdateWidgetPresentation();
+        UpdateValueDisplay();
+    }
+
     void VariableTile::UpdateWidgetPresentation()
     {
         m_layout->setVerticalSpacing(4);
@@ -1033,6 +1097,15 @@ namespace sd::widgets
             m_doubleEdit->setEnabled(false);
             m_gauge->setEnabled(false);
             return;
+        }
+
+        if (m_valueOrigin == ValueOrigin::TemporaryDefault)
+        {
+            m_valueLabel->setStyleSheet("font-weight: 600; color: #8a94a6;");
+        }
+        else
+        {
+            m_valueLabel->setStyleSheet("font-weight: 600;");
         }
 
         // Widget strategy selection:
@@ -1203,6 +1276,7 @@ namespace sd::widgets
     {
         if (!m_hasValue)
         {
+            m_valueLabel->setStyleSheet("font-weight: 600;");
             m_valueLabel->setText("No data");
             return;
         }

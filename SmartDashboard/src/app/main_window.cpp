@@ -266,6 +266,72 @@ namespace
         }
 
     }
+
+    bool IsTemporaryDefaultEligibleWidget(const sd::widgets::VariableTile* tile)
+    {
+        if (tile == nullptr)
+        {
+            return false;
+        }
+
+        const QString widgetType = tile->GetWidgetType();
+        return widgetType == "bool.checkbox"
+            || widgetType == "bool.led"
+            || widgetType == "bool.text"
+            || widgetType == "double.numeric"
+            || widgetType == "double.progress"
+            || widgetType == "double.gauge"
+            || widgetType == "double.slider"
+            || widgetType == "string.text"
+            || widgetType == "string.multiline"
+            || widgetType == "string.edit"
+            || widgetType == "string.chooser";
+    }
+
+    QVariant TemporaryDefaultValueForTile(const sd::widgets::VariableTile* tile)
+    {
+        if (tile == nullptr)
+        {
+            return {};
+        }
+
+        const QString widgetType = tile->GetWidgetType();
+        if (widgetType == "bool.checkbox")
+        {
+            return QVariant(false);
+        }
+
+        if (widgetType == "bool.led" || widgetType == "bool.text")
+        {
+            return QVariant(false);
+        }
+
+        if (widgetType == "double.numeric" || widgetType == "double.progress" || widgetType == "double.gauge")
+        {
+            return QVariant(0.0);
+        }
+
+        if (widgetType == "double.slider")
+        {
+            return QVariant(0.0);
+        }
+
+        if (widgetType == "string.text" || widgetType == "string.multiline" || widgetType == "string.edit")
+        {
+            return QVariant(QString());
+        }
+
+        if (widgetType == "string.chooser")
+        {
+            const QStringList options = tile->GetStringChooserOptions();
+            if (!options.isEmpty())
+            {
+                return QVariant(options.front());
+            }
+        }
+
+        return {};
+    }
 }
 
 MainWindow::MainWindow(QWidget* parent, bool startTransportOnInit)
@@ -1054,6 +1120,7 @@ MainWindow::MainWindow(QWidget* parent, bool startTransportOnInit)
     {
         ApplyRememberedControlValuesToTiles();
     }
+    ApplyTemporaryDefaultValuesToTiles();
     LoadWindowGeometry();
     if (startTransportOnInit)
     {
@@ -2031,6 +2098,8 @@ bool MainWindow::LoadLayoutFromPath(const QString& path, bool applyToExistingTil
             sd::widgets::VariableTile* tile = GetOrCreateTile(entry.variableKey, inferredType);
             ApplyLayoutEntryToTile(tile, entry);
         }
+
+        ApplyTemporaryDefaultValuesToTiles();
     }
 
     if (persistAsCurrentPath)
@@ -2575,6 +2644,10 @@ void MainWindow::LoadRememberedControlValues()
 {
     m_rememberedControlValues.clear();
 
+#if !SMARTDASHBOARD_ENABLE_DIRECT_REMEMBERED_CONTROLS
+    return;
+#endif
+
     QSettings settings("SmartDashboard", "SmartDashboardApp");
     const int size = settings.beginReadArray("directRememberedControls");
     for (int i = 0; i < size; ++i)
@@ -2596,6 +2669,10 @@ void MainWindow::LoadRememberedControlValues()
 
 void MainWindow::SaveRememberedControlValues() const
 {
+#if !SMARTDASHBOARD_ENABLE_DIRECT_REMEMBERED_CONTROLS
+    return;
+#endif
+
     if (!CurrentTransportUsesRememberedControlValues())
     {
         return;
@@ -2616,6 +2693,10 @@ void MainWindow::SaveRememberedControlValues() const
 
 void MainWindow::ApplyRememberedControlValuesToTiles()
 {
+#if !SMARTDASHBOARD_ENABLE_DIRECT_REMEMBERED_CONTROLS
+    return;
+#endif
+
     for (const auto& [keyStd, remembered] : m_rememberedControlValues)
     {
         const auto tileIt = m_tiles.find(keyStd);
@@ -2643,8 +2724,65 @@ void MainWindow::ApplyRememberedControlValuesToTiles()
     }
 }
 
+void MainWindow::ApplyTemporaryDefaultValuesToTiles()
+{
+#if !SMARTDASHBOARD_ENABLE_TEMPORARY_TILE_DEFAULTS
+    return;
+#endif
+
+    m_temporaryDefaultValues.clear();
+    for (const auto& [keyStd, tile] : m_tiles)
+    {
+        if (!IsTemporaryDefaultEligibleWidget(tile) || tile->HasValue())
+        {
+            continue;
+        }
+
+        const QVariant defaultValue = TemporaryDefaultValueForTile(tile);
+        if (!defaultValue.isValid())
+        {
+            continue;
+        }
+
+        TemporaryDefaultValue remembered;
+        const auto type = tile->GetType();
+        if (type == sd::widgets::VariableType::Bool)
+        {
+            remembered.valueType = static_cast<int>(sd::direct::ValueType::Bool);
+            remembered.value = defaultValue;
+            tile->SetTemporaryDefaultBoolValue(defaultValue.toBool());
+        }
+        else if (type == sd::widgets::VariableType::Double)
+        {
+            remembered.valueType = static_cast<int>(sd::direct::ValueType::Double);
+            remembered.value = defaultValue;
+            tile->SetTemporaryDefaultDoubleValue(defaultValue.toDouble());
+        }
+        else if (type == sd::widgets::VariableType::String)
+        {
+            remembered.valueType = static_cast<int>(sd::direct::ValueType::String);
+            remembered.value = defaultValue;
+            tile->SetTemporaryDefaultStringValue(defaultValue.toString());
+        }
+        else
+        {
+            continue;
+        }
+
+        m_temporaryDefaultValues[keyStd] = remembered;
+    }
+}
+
 void MainWindow::RememberControlValueIfAllowed(const QString& key, int valueType, const QVariant& value, bool persistToSettings)
 {
+#if !SMARTDASHBOARD_ENABLE_DIRECT_REMEMBERED_CONTROLS
+    static_cast<void>(key);
+    static_cast<void>(valueType);
+    static_cast<void>(value);
+    static_cast<void>(persistToSettings);
+    return;
+#endif
+
     if (key.isEmpty() || !CurrentTransportUsesRememberedControlValues())
     {
         return;
@@ -2748,6 +2886,7 @@ void MainWindow::StartTransport()
             {
                 ApplyRememberedControlValuesToTiles();
             }
+            ApplyTemporaryDefaultValuesToTiles();
 
             // Refresh remembered control cache from current tiles so reconnects can replay
             // the latest operator-facing values even if no new edit event occurs.
@@ -3671,6 +3810,10 @@ bool MainWindow::CurrentTransportSupportsChooser() const
 
 bool MainWindow::CurrentTransportUsesRememberedControlValues() const
 {
+#if !SMARTDASHBOARD_ENABLE_DIRECT_REMEMBERED_CONTROLS
+    return false;
+#endif
+
     return m_connectionConfig.kind == sd::transport::TransportKind::Direct;
 }
 
@@ -3691,6 +3834,21 @@ void MainWindow::SimulateControlDoubleEditForTesting(const QString& key, double 
     OnControlDoubleEdited(key, value);
 }
 
+void MainWindow::LoadRememberedControlValuesForTesting()
+{
+    LoadRememberedControlValues();
+}
+
+bool MainWindow::LoadLayoutFromPathForTesting(const QString& path, bool applyToExistingTiles, bool persistAsCurrentPath)
+{
+    return LoadLayoutFromPath(path, applyToExistingTiles, persistAsCurrentPath);
+}
+
+void MainWindow::ClearWidgetsForTesting()
+{
+    OnClearWidgets();
+}
+
 int MainWindow::RememberedControlValueCountForTesting() const
 {
     return static_cast<int>(m_rememberedControlValues.size());
@@ -3699,6 +3857,18 @@ int MainWindow::RememberedControlValueCountForTesting() const
 bool MainWindow::HasRememberedControlValueForTesting(const QString& key) const
 {
     return m_rememberedControlValues.find(key.toStdString()) != m_rememberedControlValues.end();
+}
+
+bool MainWindow::TileHasValueForTesting(const QString& key) const
+{
+    const auto it = m_tiles.find(key.toStdString());
+    return it != m_tiles.end() && it->second != nullptr && it->second->HasValue();
+}
+
+bool MainWindow::TileIsTemporaryDefaultForTesting(const QString& key) const
+{
+    const auto it = m_tiles.find(key.toStdString());
+    return it != m_tiles.end() && it->second != nullptr && it->second->IsShowingTemporaryDefault();
 }
 #endif
 

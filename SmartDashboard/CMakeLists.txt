@@ -6,6 +6,9 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTORCC ON)
 
+option(SMARTDASHBOARD_ENABLE_DIRECT_REMEMBERED_CONTROLS "Enable dashboard-owned remembered direct control persistence" OFF)
+option(SMARTDASHBOARD_ENABLE_TEMPORARY_TILE_DEFAULTS "Seed temporary widget defaults until live data arrives" ON)
+
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Test)
 
 qt_add_executable(SmartDashboardApp WIN32
@@ -53,6 +56,10 @@ target_link_libraries(SmartDashboardApp
 )
 
 target_compile_features(SmartDashboardApp PRIVATE cxx_std_20)
+target_compile_definitions(SmartDashboardApp PRIVATE
+    SMARTDASHBOARD_ENABLE_DIRECT_REMEMBERED_CONTROLS=$<BOOL:${SMARTDASHBOARD_ENABLE_DIRECT_REMEMBERED_CONTROLS}>
+    SMARTDASHBOARD_ENABLE_TEMPORARY_TILE_DEFAULTS=$<BOOL:${SMARTDASHBOARD_ENABLE_TEMPORARY_TILE_DEFAULTS}>
+)
 
 if(BUILD_TESTING)
     include(FetchContent)
@@ -125,7 +132,11 @@ if(BUILD_TESTING)
     endif()
 
     target_compile_features(SmartDashboard_tests PRIVATE cxx_std_20)
-    target_compile_definitions(SmartDashboard_tests PRIVATE SMARTDASHBOARD_TESTS=1)
+    target_compile_definitions(SmartDashboard_tests PRIVATE
+        SMARTDASHBOARD_TESTS=1
+        SMARTDASHBOARD_ENABLE_DIRECT_REMEMBERED_CONTROLS=$<BOOL:${SMARTDASHBOARD_ENABLE_DIRECT_REMEMBERED_CONTROLS}>
+        SMARTDASHBOARD_ENABLE_TEMPORARY_TILE_DEFAULTS=$<BOOL:${SMARTDASHBOARD_ENABLE_TEMPORARY_TILE_DEFAULTS}>
+    )
 
     include(GoogleTest)
     gtest_discover_tests(SmartDashboard_tests)

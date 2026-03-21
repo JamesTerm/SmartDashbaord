@@ -124,6 +124,68 @@ TEST(VariableTileTests, TilesShowPlaceholderUntilFirstValueArrives)
     EXPECT_EQ(FindLabelWithText(tile, "No data"), nullptr);
 }
 
+TEST(VariableTileTests, TemporaryDefaultYieldsToFirstLiveValue)
+{
+    ASSERT_NE(EnsureApp(), nullptr);
+
+    sd::widgets::VariableTile tile("test.slider", sd::widgets::VariableType::Double);
+    tile.SetWidgetType("double.slider");
+
+    tile.SetTemporaryDefaultDoubleValue(0.0);
+
+    EXPECT_TRUE(tile.HasValue());
+    EXPECT_FALSE(tile.HasLiveValue());
+    EXPECT_TRUE(tile.IsShowingTemporaryDefault());
+    EXPECT_EQ(tile.GetDoubleValue(), 0.0);
+
+    tile.SetDoubleValue(4.25);
+
+    EXPECT_TRUE(tile.HasValue());
+    EXPECT_TRUE(tile.HasLiveValue());
+    EXPECT_FALSE(tile.IsShowingTemporaryDefault());
+    EXPECT_EQ(tile.GetDoubleValue(), 4.25);
+}
+
+TEST(VariableTileTests, TemporaryDefaultBoolAndStringStatesAreRepresentable)
+{
+    ASSERT_NE(EnsureApp(), nullptr);
+
+    sd::widgets::VariableTile boolTile("test.bool", sd::widgets::VariableType::Bool);
+    boolTile.SetWidgetType("bool.led");
+    boolTile.SetTemporaryDefaultBoolValue(false);
+
+    EXPECT_TRUE(boolTile.HasValue());
+    EXPECT_FALSE(boolTile.HasLiveValue());
+    EXPECT_TRUE(boolTile.IsShowingTemporaryDefault());
+    EXPECT_FALSE(boolTile.GetBoolValue());
+
+    sd::widgets::VariableTile chooserTile("test.chooser.default", sd::widgets::VariableType::String);
+    chooserTile.SetWidgetType("string.chooser");
+    chooserTile.SetStringChooserMode(true);
+    chooserTile.SetStringChooserOptions(QStringList{ "Move_Forward", "Taxi" });
+    chooserTile.SetTemporaryDefaultStringValue("Move_Forward");
+
+    EXPECT_TRUE(chooserTile.HasValue());
+    EXPECT_FALSE(chooserTile.HasLiveValue());
+    EXPECT_TRUE(chooserTile.IsShowingTemporaryDefault());
+    EXPECT_EQ(chooserTile.GetStringValue(), QString("Move_Forward"));
+}
+
+TEST(VariableTileTests, EmptyTemporaryStringDefaultSuppressesNoDataPlaceholder)
+{
+    ASSERT_NE(EnsureApp(), nullptr);
+
+    sd::widgets::VariableTile tile("test.string", sd::widgets::VariableType::String);
+    tile.SetWidgetType("string.text");
+    tile.SetTemporaryDefaultStringValue(QString());
+
+    EXPECT_TRUE(tile.HasValue());
+    EXPECT_FALSE(tile.HasLiveValue());
+    EXPECT_TRUE(tile.IsShowingTemporaryDefault());
+    EXPECT_EQ(tile.GetStringValue(), QString());
+    EXPECT_EQ(FindLabelWithText(tile, "No data"), nullptr);
+}
+
 TEST(VariableTileTests, ResetLinePlotGraphClearsAccumulatedSamples)
 {
     ASSERT_NE(EnsureApp(), nullptr);

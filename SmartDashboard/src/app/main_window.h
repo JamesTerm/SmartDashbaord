@@ -56,8 +56,13 @@ public:
     void SetTransportSelectionForTesting(const QString& transportId, sd::transport::TransportKind kind);
     void SimulateVariableUpdateForTesting(const QString& key, int valueType, const QVariant& value, quint64 seq = 0);
     void SimulateControlDoubleEditForTesting(const QString& key, double value);
+    void LoadRememberedControlValuesForTesting();
+    bool LoadLayoutFromPathForTesting(const QString& path, bool applyToExistingTiles = true, bool persistAsCurrentPath = false);
+    void ClearWidgetsForTesting();
     int RememberedControlValueCountForTesting() const;
     bool HasRememberedControlValueForTesting(const QString& key) const;
+    bool TileHasValueForTesting(const QString& key) const;
+    bool TileIsTemporaryDefaultForTesting(const QString& key) const;
 #endif
 
 private slots:
@@ -161,6 +166,7 @@ private:
     void SetConnectionFieldValue(const QString& fieldId, const QVariant& value);
     void SyncConnectionConfigToPluginSettingsJson();
     void SyncConnectionConfigFromPluginSettingsJson();
+    void ApplyTemporaryDefaultValuesToTiles();
 
     QWidget* m_canvas = nullptr;
     QLabel* m_statusLabel = nullptr;
@@ -223,7 +229,13 @@ private:
         int valueType = 3;
         QVariant value;
     };
+    struct TemporaryDefaultValue
+    {
+        int valueType = 3;
+        QVariant value;
+    };
     std::unordered_map<std::string, RememberedControlValue> m_rememberedControlValues;
+    std::unordered_map<std::string, TemporaryDefaultValue> m_temporaryDefaultValues;
     mutable std::ofstream m_uiDebugLog;
     std::mutex m_pendingUiUpdatesMutex;
     QVector<sd::transport::VariableUpdate> m_pendingUiUpdates;

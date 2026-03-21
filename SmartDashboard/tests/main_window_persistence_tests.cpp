@@ -3,6 +3,8 @@
 #include "sd_direct_types.h"
 
 #include <QApplication>
+#include <QDir>
+#include <QCoreApplication>
 #include <QSettings>
 #include <QString>
 #include <QVariant>
@@ -214,7 +216,7 @@ TEST(MainWindowPersistenceTests, DirectTelemetryUpdatesDoNotCreateRememberedCont
     EXPECT_EQ(RememberedControlsSettingSize(), 0);
 }
 
-TEST(MainWindowPersistenceTests, DirectControlEditsStillPersistRememberedControls)
+TEST(MainWindowPersistenceTests, DISABLED_DirectControlEditsStillPersistRememberedControls)
 {
     ASSERT_NE(EnsureApp(), nullptr);
     const ScopedPersistenceSettings scopedSettings;
@@ -232,7 +234,7 @@ TEST(MainWindowPersistenceTests, DirectControlEditsStillPersistRememberedControl
     EXPECT_EQ(RememberedControlSettingValue("TestMove").toString(), QString("3.5"));
 }
 
-TEST(MainWindowPersistenceTests, DirectSliderEditUpdatesRememberedValueAcrossReopen)
+TEST(MainWindowPersistenceTests, DISABLED_DirectSliderEditUpdatesRememberedValueAcrossReopen)
 {
     ASSERT_NE(EnsureApp(), nullptr);
     const ScopedPersistenceSettings scopedSettings;
@@ -250,4 +252,46 @@ TEST(MainWindowPersistenceTests, DirectSliderEditUpdatesRememberedValueAcrossReo
 
     MainWindow reopenedWindow(nullptr, false);
     EXPECT_TRUE(reopenedWindow.HasRememberedControlValueForTesting("TestMove"));
+}
+
+TEST(MainWindowPersistenceTests, RememberedControlsStayDisabledByDefaultEvenOnDirect)
+{
+    ASSERT_NE(EnsureApp(), nullptr);
+    const ScopedPersistenceSettings scopedSettings;
+
+    WriteRememberedControls({
+        {
+            QStringLiteral("TestMove"),
+            static_cast<int>(sd::direct::ValueType::Double),
+            QVariant(7.25)
+        }
+    });
+    SetStartupTransport("direct", sd::transport::TransportKind::Direct);
+
+    MainWindow window(nullptr, false);
+    window.SetTransportSelectionForTesting("direct", sd::transport::TransportKind::Direct);
+    window.LoadRememberedControlValuesForTesting();
+
+    EXPECT_EQ(window.RememberedControlValueCountForTesting(), 0);
+    EXPECT_FALSE(window.HasRememberedControlValueForTesting("TestMove"));
+}
+
+TEST(MainWindowPersistenceTests, ClearWidgetsThenReloadLayoutReappliesTemporaryDefaults)
+{
+    ASSERT_NE(EnsureApp(), nullptr);
+    const ScopedPersistenceSettings scopedSettings;
+    SetStartupTransport("direct", sd::transport::TransportKind::Direct);
+
+    MainWindow window(nullptr, false);
+    window.ClearWidgetsForTesting();
+
+    const QString layoutPath = QDir::toNativeSeparators(QDir::cleanPath(
+        QDir(QCoreApplication::applicationDirPath()).filePath("../../../../Robot_Simulation/Design/Swervelayout.json")
+    ));
+
+    ASSERT_TRUE(window.LoadLayoutFromPathForTesting(layoutPath, true, false));
+    EXPECT_TRUE(window.TileHasValueForTesting("TestMove"));
+    EXPECT_TRUE(window.TileIsTemporaryDefaultForTesting("TestMove"));
+    EXPECT_TRUE(window.TileHasValueForTesting("Test/Auton_Selection/AutoChooser"));
+    EXPECT_TRUE(window.TileIsTemporaryDefaultForTesting("Test/Auton_Selection/AutoChooser"));
 }
