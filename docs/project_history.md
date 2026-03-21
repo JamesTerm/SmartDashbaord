@@ -7,6 +7,46 @@ Curated milestone history for this repository.
 - Keep milestone sections in descending chronological order (newest first) so recent changes are immediately visible.
 - Historical branch/status wording in older entries is time-bound; read each section as a snapshot from that date.
 
+## 2026-03-21 - CMake build system hardening: gtest discovery fix, NativeLink always-on, solution folders
+
+### gtest_discover_tests / MSB3073 build error fixed
+
+- **Root cause:** CMake 4.3 changed `gtest_discover_tests` default behaviour — the default `POST_BUILD` discovery mode runs the test executable immediately after linking. Under Visual Studio multi-config generators this fails because the output path can't be reliably resolved at post-build time, producing MSB3073 build errors on all test targets.
+- **Fix:** Added `DISCOVERY_MODE PRE_TEST` to every `gtest_discover_tests(...)` call across all repos — defers test enumeration to `ctest` run time. Applied to 6 call sites total (2 in `SmartDashboard`, 1 in `ClientInterface_direct`, 1 in `plugins/NativeLinkTransport` in the main repo; 2 in `SmartDashboard_baseline`).
+
+### NativeLink always built unconditionally
+
+- **Root cause:** `SMARTDASHBOARD_BUILD_PLUGIN_NATIVE_LINK` CMake option defaulted `OFF`, so a fresh `cmake` configure on a clean clone silently omitted all NativeLink projects. The build cache happened to have it `ON` from a prior manual override, making the configuration inconsistent across machines.
+- **Fix:** Removed the `option(SMARTDASHBOARD_BUILD_PLUGIN_NATIVE_LINK ...)` declaration from `CMakeLists.txt` entirely. `add_subdirectory(plugins/NativeLinkTransport)` is now unconditional. Removed the three `if(SMARTDASHBOARD_BUILD_PLUGIN_NATIVE_LINK)` guards in `SmartDashboard/CMakeLists.txt` (test source, include dir, and link library now always applied). Applied to both `SmartDashboard` and `SmartDashboard_baseline`.
+
+### Solution Explorer folder grouping added
+
+- **Root cause:** No CMake `FOLDER` properties were set on any target, so all 25+ projects appeared flat in Solution Explorer with no grouping — easy to lose NativeLink targets in the noise.
+- **Fix:** Added `set_property(GLOBAL PROPERTY USE_FOLDERS ON)` and `set(CMAKE_FOLDER "_CMake")` at the top-level `CMakeLists.txt`, plus `FOLDER` properties on every target. Solution Explorer now shows:
+  ```
+  SmartDashboard/          → SmartDashboardApp, SmartDashboard_tests
+  plugins/
+    NativeLink/            → NativeLinkTransportCore, NativeLinkTransportPlugin, NativeLinkTransport_tests
+    LegacyNt/              → LegacyNtTransportPlugin
+  ClientInterface_direct/  → lib + tests + samples/ + tools/
+  SmartDashboard_Interface_direct/ → DirectCommon, Interface_direct
+  _CMake/                  → ALL_BUILD, ZERO_CHECK, RUN_TESTS, INSTALL, ctest targets
+  ```
+- `ZERO_CHECK` / "reload solution" now correctly reflects NativeLink on every configure, including fresh clones.
+
+### Files changed
+
+| File | Change |
+|------|--------|
+| `CMakeLists.txt` | Removed `SMARTDASHBOARD_BUILD_PLUGIN_NATIVE_LINK` option; unconditional `add_subdirectory(plugins/NativeLinkTransport)`; `USE_FOLDERS ON`; `CMAKE_FOLDER "_CMake"` |
+| `SmartDashboard/CMakeLists.txt` | Removed 3 `if(SMARTDASHBOARD_BUILD_PLUGIN_NATIVE_LINK)` guards; `FOLDER "SmartDashboard"` on both targets; `DISCOVERY_MODE PRE_TEST` |
+| `ClientInterface_direct/CMakeLists.txt` | `FOLDER` properties for all targets; `DISCOVERY_MODE PRE_TEST` |
+| `SmartDashboard_Interface_direct/CMakeLists.txt` | `FOLDER "SmartDashboard_Interface_direct"` on both targets |
+| `plugins/NativeLinkTransport/CMakeLists.txt` | `FOLDER "plugins/NativeLink"` on all 3 targets; `DISCOVERY_MODE PRE_TEST` |
+| `plugins/LegacyNtTransport/CMakeLists.txt` | `FOLDER "plugins/LegacyNt"` |
+
+---
+
 ## 2026-03-21 - Native Link SHM transport declared stable; live telemetry fix and stress hardening
 
 ### Live telemetry gap — root cause and fix

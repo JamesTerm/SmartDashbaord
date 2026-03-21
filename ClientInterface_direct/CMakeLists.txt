@@ -93,6 +93,10 @@ target_compile_features(SmartDashboardCaptureCli PRIVATE cxx_std_20)
 target_compile_features(DirectStateProbeCli PRIVATE cxx_std_20)
 target_compile_features(DirectWatchCli PRIVATE cxx_std_20)
 
+set_target_properties(ClientInterface_direct PROPERTIES FOLDER "ClientInterface_direct")
+set_target_properties(sd_direct_publisher_sample sd_command_roundtrip_sample PROPERTIES FOLDER "ClientInterface_direct/samples")
+set_target_properties(SmartDashboardCaptureCli DirectStateProbeCli DirectWatchCli PROPERTIES FOLDER "ClientInterface_direct/tools")
+
 if(BUILD_TESTING)
     include(FetchContent)
 
@@ -119,5 +123,9 @@ if(BUILD_TESTING)
     )
 
     include(GoogleTest)
-    gtest_discover_tests(ClientInterface_direct_tests)
+    gtest_discover_tests(ClientInterface_direct_tests
+        DISCOVERY_MODE PRE_TEST
+    )
+
+    set_target_properties(ClientInterface_direct_tests PROPERTIES FOLDER "ClientInterface_direct")
 endif()

@@ -45,6 +45,11 @@ target_link_libraries(NativeLinkTransportPlugin
 
 set_target_properties(NativeLinkTransportPlugin PROPERTIES
     OUTPUT_NAME "SmartDashboardTransport_NativeLink"
+    FOLDER "plugins/NativeLink"
+)
+
+set_target_properties(NativeLinkTransportCore PROPERTIES
+    FOLDER "plugins/NativeLink"
 )
 
 add_custom_command(TARGET NativeLinkTransportPlugin POST_BUILD
@@ -89,6 +94,12 @@ if(BUILD_TESTING)
 
     target_compile_features(NativeLinkTransport_tests PRIVATE cxx_std_20)
 
+    set_target_properties(NativeLinkTransport_tests PROPERTIES
+        FOLDER "plugins/NativeLink"
+    )
+
     include(GoogleTest)
-    gtest_discover_tests(NativeLinkTransport_tests)
+    gtest_discover_tests(NativeLinkTransport_tests
+        DISCOVERY_MODE PRE_TEST
+    )
 endif()

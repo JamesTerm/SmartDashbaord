@@ -44,3 +44,5 @@ target_link_libraries(SmartDashboard_Interface_direct
     PUBLIC
         SmartDashboard_DirectCommon
 )
+
+set_target_properties(SmartDashboard_DirectCommon SmartDashboard_Interface_direct PROPERTIES FOLDER "SmartDashboard_Interface_direct")

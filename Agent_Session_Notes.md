@@ -23,12 +23,15 @@
   - `{"carrier":"shm","channel_id":"..."}`
   - `{"carrier":"tcp","host":"127.0.0.1","port":5810,"channel_id":"..."}`
 - Debug builds now expose a manual Native Link carrier override in SmartDashboard transport settings for quick SHM vs TCP comparison.
-- `SMARTDASHBOARD_BUILD_PLUGIN_NATIVE_LINK` stays `OFF` by default outside focused validation.
+- `NativeLinkTransport` is now always built unconditionally (no longer gated by a CMake option).
+- `gtest_discover_tests` calls all use `DISCOVERY_MODE PRE_TEST` (fixes MSB3073 under CMake 4.3 + VS multi-config).
+- Solution Explorer folder grouping is in place (`USE_FOLDERS ON`; `FOLDER` set on every target).
 
 ## SHM transport status — STABLE
 
 - SHM transport is declared stable as of 2026-03-21.
 - Live telemetry fix: `NativeLink.cpp` `Core::PublishInternal` now auto-registers unknown topics for server-originated writes instead of silently rejecting them.
+- **Ring buffer overwrite fix (2026-03-21):** `PublishEnvelopeToAllClients` and `PublishEnvelopeToSingleClient` in `NativeLink.cpp` now guard against the server write index lapping the client read index. When `writeIndex - clientReadIndex >= kMaxMessages`, the write is skipped (dropped) for that slot rather than overwriting unread messages. Root cause: at ~20 keys/tick × ~100 Hz the 1024-slot ring fills in ~0.5 s; auto-registered keys (`Velocity`, `X_ft`, `Heading`, wheel velocities) only appear as live updates post-snapshot and were silently overwritten before the client drained them. `Timer` and `Y_ft` survived because they are pre-registered and delivered via the retained-state snapshot before overflow. Fix verified: `native_link_live_telemetry_verify.py` reports all REQUIRED_KEYS present with ≥2 distinct values.
 - Disconnect stress: 50/50 cycles PASS with `pause_ms=400`, zero warnings.
 - Verification tool: `tools/native_link_live_telemetry_verify.py` — runs headless, requires no GUI.
 

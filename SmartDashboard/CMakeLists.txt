@@ -9,7 +9,7 @@ set(CMAKE_AUTORCC ON)
 option(SMARTDASHBOARD_ENABLE_DIRECT_REMEMBERED_CONTROLS "Enable dashboard-owned remembered direct control persistence" OFF)
 option(SMARTDASHBOARD_ENABLE_TEMPORARY_TILE_DEFAULTS "Seed temporary widget defaults until live data arrives" ON)
 
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Test)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Network Test)
 
 qt_add_executable(SmartDashboardApp WIN32
     src/main.cpp
@@ -50,6 +50,7 @@ target_link_libraries(SmartDashboardApp
         Qt6::Core
         Qt6::Gui
         Qt6::Widgets
+        Qt6::Network
         SmartDashboard_Interface_direct
         ClientInterface_direct
         ws2_32
@@ -60,6 +61,8 @@ target_compile_definitions(SmartDashboardApp PRIVATE
     SMARTDASHBOARD_ENABLE_DIRECT_REMEMBERED_CONTROLS=$<BOOL:${SMARTDASHBOARD_ENABLE_DIRECT_REMEMBERED_CONTROLS}>
     SMARTDASHBOARD_ENABLE_TEMPORARY_TILE_DEFAULTS=$<BOOL:${SMARTDASHBOARD_ENABLE_TEMPORARY_TILE_DEFAULTS}>
 )
+
+set_target_properties(SmartDashboardApp PROPERTIES FOLDER "SmartDashboard")
 
 if(BUILD_TESTING)
     include(FetchContent)
@@ -99,22 +102,14 @@ if(BUILD_TESTING)
         src/widgets/tile_control_widget.cpp
     )
 
-    if(SMARTDASHBOARD_BUILD_PLUGIN_NATIVE_LINK)
-        target_sources(SmartDashboard_tests PRIVATE tests/dashboard_transport_registry_tests.cpp)
-    endif()
+    target_sources(SmartDashboard_tests PRIVATE tests/dashboard_transport_registry_tests.cpp)
 
     target_include_directories(SmartDashboard_tests
         PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}/src
             ${CMAKE_SOURCE_DIR}/SmartDashboard_Interface_direct/include
+            ${CMAKE_SOURCE_DIR}/plugins/NativeLinkTransport/include
     )
-
-    if(SMARTDASHBOARD_BUILD_PLUGIN_NATIVE_LINK)
-        target_include_directories(SmartDashboard_tests
-            PRIVATE
-                ${CMAKE_SOURCE_DIR}/plugins/NativeLinkTransport/include
-        )
-    endif()
 
     target_link_libraries(SmartDashboard_tests
         PRIVATE
@@ -125,11 +120,8 @@ if(BUILD_TESTING)
             SmartDashboard_Interface_direct
             ClientInterface_direct
             GTest::gtest_main
+            NativeLinkTransportCore
     )
-
-    if(SMARTDASHBOARD_BUILD_PLUGIN_NATIVE_LINK)
-        target_link_libraries(SmartDashboard_tests PRIVATE NativeLinkTransportCore)
-    endif()
 
     target_compile_features(SmartDashboard_tests PRIVATE cxx_std_20)
     target_compile_definitions(SmartDashboard_tests PRIVATE
@@ -138,8 +130,12 @@ if(BUILD_TESTING)
         SMARTDASHBOARD_ENABLE_TEMPORARY_TILE_DEFAULTS=$<BOOL:${SMARTDASHBOARD_ENABLE_TEMPORARY_TILE_DEFAULTS}>
     )
 
+    set_target_properties(SmartDashboard_tests PROPERTIES FOLDER "SmartDashboard")
+
     include(GoogleTest)
-    gtest_discover_tests(SmartDashboard_tests)
+    gtest_discover_tests(SmartDashboard_tests
+        DISCOVERY_MODE PRE_TEST
+    )
 endif()
 
 if(WIN32)

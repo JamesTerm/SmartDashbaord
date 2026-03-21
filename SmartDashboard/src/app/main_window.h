@@ -39,6 +39,10 @@ class QPushButton;
 class QToolButton;
 class QTimer;
 class QGroupBox;
+#ifdef _DEBUG
+class QLocalServer;
+class QLocalSocket;
+#endif
 
 namespace sd::widgets
 {
@@ -102,6 +106,10 @@ private slots:
     void OnReplayMarkerActivated(QListWidgetItem* item);
     void OnAddReplayBookmark();
     void OnClearReplayBookmarks();
+
+#ifdef _DEBUG
+    void OnDebugCommandReceived();
+#endif
 
 #ifdef SMARTDASHBOARD_TESTS
 public:
@@ -267,4 +275,8 @@ private:
     bool m_syncingReplayTimelineDockVisibility = false;
     bool m_syncingReplayMarkerDockVisibility = false;
     bool m_syncingMarkerSelection = false;
+
+#ifdef _DEBUG
+    QLocalServer* m_debugCommandServer = nullptr;
+#endif
 };

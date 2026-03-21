@@ -14,8 +14,14 @@ endif()
 
 include(CTest)
 
+# Ian: Push CMake-generated infrastructure targets (ALL_BUILD, ZERO_CHECK,
+# RUN_TESTS, INSTALL, ctest dashboard targets) into a hidden folder so they
+# don't clutter the top level of the VS Solution Explorer alongside the real
+# project targets.
+set_property(GLOBAL PROPERTY USE_FOLDERS ON)
+set(CMAKE_FOLDER "_CMake")
+
 option(SMARTDASHBOARD_BUILD_PLUGIN_LEGACY_NT "Build legacy NetworkTables transport plugin" ON)
-option(SMARTDASHBOARD_BUILD_PLUGIN_NATIVE_LINK "Build native generic transport plugin scaffold" OFF)
 
 add_subdirectory(SmartDashboard_Interface_direct)
 add_subdirectory(ClientInterface_direct)
@@ -25,9 +31,7 @@ if(SMARTDASHBOARD_BUILD_PLUGIN_LEGACY_NT)
     add_subdirectory(plugins/LegacyNtTransport)
 endif()
 
-if(SMARTDASHBOARD_BUILD_PLUGIN_NATIVE_LINK)
-    add_subdirectory(plugins/NativeLinkTransport)
-endif()
+add_subdirectory(plugins/NativeLinkTransport)
 
 # Ian: These transport plugins deploy themselves with POST_BUILD copy steps.
 # Make the app/test targets depend on the plugin targets so a normal
