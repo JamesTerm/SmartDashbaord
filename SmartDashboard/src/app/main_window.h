@@ -38,6 +38,11 @@ class QListWidgetItem;
 class QPushButton;
 class QToolButton;
 class QTimer;
+class QGroupBox;
+#ifdef _DEBUG
+class QLocalServer;
+class QLocalSocket;
+#endif
 
 namespace sd::widgets
 {
@@ -49,8 +54,24 @@ class MainWindow final : public QMainWindow
     Q_OBJECT
 
 public:
-    explicit MainWindow(QWidget* parent = nullptr);
+    explicit MainWindow(QWidget* parent = nullptr, bool startTransportOnInit = true);
     ~MainWindow() override;
+
+#ifdef SMARTDASHBOARD_TESTS
+    void SetTransportSelectionForTesting(const QString& transportId, sd::transport::TransportKind kind);
+    void SimulateVariableUpdateForTesting(const QString& key, int valueType, const QVariant& value, quint64 seq = 0);
+    void SimulateControlDoubleEditForTesting(const QString& key, double value);
+    void LoadRememberedControlValuesForTesting();
+    bool LoadLayoutFromPathForTesting(const QString& path, bool applyToExistingTiles = true, bool persistAsCurrentPath = false);
+    void ClearWidgetsForTesting();
+    int RememberedControlValueCountForTesting() const;
+    bool HasRememberedControlValueForTesting(const QString& key) const;
+    bool TileHasValueForTesting(const QString& key) const;
+    bool TileIsTemporaryDefaultForTesting(const QString& key) const;
+    void SetConnectionFieldValueForTesting(const QString& fieldId, const QVariant& value);
+    void SyncConnectionConfigToPluginSettingsJsonForTesting();
+    bool GetConnectionFieldBoolForTesting(const QString& fieldId, bool defaultValue) const;
+#endif
 
 private slots:
     void OnToggleEditable();
@@ -78,6 +99,7 @@ private slots:
     void OnEditTransportSettings();
     void OnOpenReplayFile();
     void OnRecordToggled(bool checked);
+    void OnResetAllLinePlots();
     void OnPlaybackRewindToStart();
     void OnPlaybackPlayPause();
     void OnPlaybackRateChanged(int index);
@@ -87,6 +109,14 @@ private slots:
     void OnReplayMarkerActivated(QListWidgetItem* item);
     void OnAddReplayBookmark();
     void OnClearReplayBookmarks();
+
+#ifdef _DEBUG
+    void OnDebugCommandReceived();
+#endif
+
+#ifdef SMARTDASHBOARD_TESTS
+public:
+#endif
 
 private:
     using TileMap = std::unordered_map<std::string, sd::widgets::VariableTile*>;
@@ -114,6 +144,7 @@ private:
     void LoadRememberedControlValues();
     void SaveRememberedControlValues() const;
     void ApplyRememberedControlValuesToTiles();
+    void RememberControlValueIfAllowed(const QString& key, int valueType, const QVariant& value, bool persistToSettings);
     QString BuildDisplayLabel(const QString& key) const;
     void StartTransport();
     void StopTransport();
@@ -125,6 +156,8 @@ private:
     void PersistUserReplayBookmarks() const;
     void RestoreDefaultReplayWorkspaceLayout();
     void UpdateReplayDockHeightLock();
+    void ResetAllLinePlots();
+    void SeekPlaybackToUs(std::int64_t targetUs, bool rewindToStart = false);
     void StepPlaybackByUs(std::int64_t deltaUs);
     void StartSessionRecording();
     void StopSessionRecording();
@@ -140,10 +173,15 @@ private:
     bool CurrentTransportUsesShortDisplayKeys() const;
     bool CurrentTransportUsesLegacyNtSettings() const;
     bool CurrentTransportSupportsChooser() const;
+    bool CurrentTransportUsesRememberedControlValues() const;
     QVariant GetConnectionFieldValue(const sd::transport::ConnectionFieldDescriptor& field) const;
     void SetConnectionFieldValue(const QString& fieldId, const QVariant& value);
     void SyncConnectionConfigToPluginSettingsJson();
     void SyncConnectionConfigFromPluginSettingsJson();
+    QString GetNativeLinkCarrierSetting() const;
+    void SetNativeLinkCarrierSetting(const QString& carrier);
+    bool ShouldShowNativeLinkCarrierDebugOptions() const;
+    void ApplyTemporaryDefaultValuesToTiles();
 
     QWidget* m_canvas = nullptr;
     QLabel* m_statusLabel = nullptr;
@@ -164,6 +202,9 @@ private:
     QAction* m_replayTimelineViewAction = nullptr;
     QAction* m_replayMarkersViewAction = nullptr;
     QAction* m_openReplayFileAction = nullptr;
+    QAction* m_resetAllLinePlotsAction = nullptr;
+    QAction* m_clearLinePlotsOnRewindAction = nullptr;
+    QAction* m_clearLinePlotsOnBackwardSeekAction = nullptr;
     QWidget* m_telemetryControlsPanel = nullptr;
     QPushButton* m_recordButton = nullptr;
     QToolButton* m_rewindButton = nullptr;
@@ -203,7 +244,13 @@ private:
         int valueType = 3;
         QVariant value;
     };
+    struct TemporaryDefaultValue
+    {
+        int valueType = 3;
+        QVariant value;
+    };
     std::unordered_map<std::string, RememberedControlValue> m_rememberedControlValues;
+    std::unordered_map<std::string, TemporaryDefaultValue> m_temporaryDefaultValues;
     mutable std::ofstream m_uiDebugLog;
     std::mutex m_pendingUiUpdatesMutex;
     QVector<sd::transport::VariableUpdate> m_pendingUiUpdates;
@@ -225,8 +272,14 @@ private:
     bool m_replayControlsPreferredVisible = true;
     bool m_replayTimelinePreferredVisible = true;
     bool m_replayMarkersPreferredVisible = true;
+    bool m_clearLinePlotsOnRewind = false;
+    bool m_clearLinePlotsOnBackwardSeek = false;
     bool m_syncingReplayControlsDockVisibility = false;
     bool m_syncingReplayTimelineDockVisibility = false;
     bool m_syncingReplayMarkerDockVisibility = false;
     bool m_syncingMarkerSelection = false;
+
+#ifdef _DEBUG
+    QLocalServer* m_debugCommandServer = nullptr;
+#endif
 };

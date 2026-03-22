@@ -29,6 +29,7 @@
 #include <QMenuBar>
 #include <QInputDialog>
 #include <QKeyEvent>
+#include <QKeySequence>
 #include <QLineEdit>
 #include <QMetaObject>
 #include <QPalette>
@@ -50,23 +51,48 @@
 #include <QWidget>
 
 #include <QtWidgets/QDockWidget>
+#include <QtWidgets/QGroupBox>
 #include <QtWidgets/QListWidget>
 #include <QtWidgets/QListWidgetItem>
 #include <QtCore/QJsonArray>
 #include <QtCore/QPoint>
 
+#include <algorithm>
 #include <chrono>
+
+#ifdef _DEBUG
+#include <QLocalServer>
+#include <QLocalSocket>
+#endif
 #include <fstream>
 #include <limits>
 
 namespace
 {
+    // Ian: This allowlist is intentional and narrow by design.  It gates the
+    // DebugLogUiEvent path in OnVariableUpdate so only harness-relevant keys
+    // write to the headless UI log that automated scripts parse.  ALL delivered
+    // keys still create tiles and receive live updates — this function only
+    // controls which keys are noise-filtered out of the debug log.
+    //
+    // Ian: Heading and Travel_Heading ARE delivered (tiles are created, sequence
+    // gap analysis confirms receipt) but are NOT in this list because they are
+    // not currently used by the automated stress/verification scripts.  If you
+    // add a new key to the harness scripts, add it here too — otherwise the
+    // scripts will see zero log lines for it even though the transport is fine.
     bool IsHarnessFocusKey(const QString& key)
     {
         return key == "Test/AutonTest"
             || key == "TestMove"
             || key == "Timer"
             || key == "Y_ft"
+            || key == "X_ft"
+            || key == "Velocity"
+            || key == "Rotation Velocity"
+            || key == "Wheel_fl_Velocity"
+            || key == "Wheel_fr_Velocity"
+            || key == "Wheel_rl_Velocity"
+            || key == "Wheel_rr_Velocity"
             || key == "Test/Auton_Selection/AutoChooser/selected";
     }
 
@@ -265,9 +291,75 @@ namespace
         }
 
     }
+
+    bool IsTemporaryDefaultEligibleWidget(const sd::widgets::VariableTile* tile)
+    {
+        if (tile == nullptr)
+        {
+            return false;
+        }
+
+        const QString widgetType = tile->GetWidgetType();
+        return widgetType == "bool.checkbox"
+            || widgetType == "bool.led"
+            || widgetType == "bool.text"
+            || widgetType == "double.numeric"
+            || widgetType == "double.progress"
+            || widgetType == "double.gauge"
+            || widgetType == "double.slider"
+            || widgetType == "string.text"
+            || widgetType == "string.multiline"
+            || widgetType == "string.edit"
+            || widgetType == "string.chooser";
+    }
+
+    QVariant TemporaryDefaultValueForTile(const sd::widgets::VariableTile* tile)
+    {
+        if (tile == nullptr)
+        {
+            return {};
+        }
+
+        const QString widgetType = tile->GetWidgetType();
+        if (widgetType == "bool.checkbox")
+        {
+            return QVariant(false);
+        }
+
+        if (widgetType == "bool.led" || widgetType == "bool.text")
+        {
+            return QVariant(false);
+        }
+
+        if (widgetType == "double.numeric" || widgetType == "double.progress" || widgetType == "double.gauge")
+        {
+            return QVariant(0.0);
+        }
+
+        if (widgetType == "double.slider")
+        {
+            return QVariant(0.0);
+        }
+
+        if (widgetType == "string.text" || widgetType == "string.multiline" || widgetType == "string.edit")
+        {
+            return QVariant(QString());
+        }
+
+        if (widgetType == "string.chooser")
+        {
+            const QStringList options = tile->GetStringChooserOptions();
+            if (!options.isEmpty())
+            {
+                return QVariant(options.front());
+            }
+        }
+
+        return {};
+    }
 }
 
-MainWindow::MainWindow(QWidget* parent)
+MainWindow::MainWindow(QWidget* parent, bool startTransportOnInit)
     : QMainWindow(parent)
 {
     RefreshWindowTitle();
@@ -341,6 +433,45 @@ MainWindow::MainWindow(QWidget* parent)
     m_replayTimelineViewAction->setCheckable(true);
     m_replayTimelineViewAction->setChecked(true);
     m_replayTimelineViewAction->setEnabled(false);
+
+    viewMenu->addSeparator();
+    m_resetAllLinePlotsAction = viewMenu->addAction("Reset All Line Plots");
+    m_resetAllLinePlotsAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+R")));
+    m_resetAllLinePlotsAction->setShortcutContext(Qt::ApplicationShortcut);
+    m_resetAllLinePlotsAction->setStatusTip("Clear history in every visible line plot");
+    connect(m_resetAllLinePlotsAction, &QAction::triggered, this, &MainWindow::OnResetAllLinePlots);
+
+    m_clearLinePlotsOnRewindAction = viewMenu->addAction("Clear line plots on rewind-to-start");
+    m_clearLinePlotsOnRewindAction->setCheckable(true);
+    m_clearLinePlotsOnRewindAction->setStatusTip("Clear line plots when rewind-to-start is used");
+    connect(
+        m_clearLinePlotsOnRewindAction,
+        &QAction::toggled,
+        this,
+        [this](bool checked)
+        {
+            m_clearLinePlotsOnRewind = checked;
+
+            QSettings settings("SmartDashboard", "SmartDashboardApp");
+            settings.setValue("replay/clearLinePlotsOnRewind", checked);
+        }
+    );
+
+    m_clearLinePlotsOnBackwardSeekAction = viewMenu->addAction("Clear line plots on backward seek");
+    m_clearLinePlotsOnBackwardSeekAction->setCheckable(true);
+    m_clearLinePlotsOnBackwardSeekAction->setStatusTip("Clear line plots whenever replay moves backward in time");
+    connect(
+        m_clearLinePlotsOnBackwardSeekAction,
+        &QAction::toggled,
+        this,
+        [this](bool checked)
+        {
+            m_clearLinePlotsOnBackwardSeek = checked;
+
+            QSettings settings("SmartDashboard", "SmartDashboardApp");
+            settings.setValue("replay/clearLinePlotsOnBackwardSeek", checked);
+        }
+    );
 
     m_statusLabel = new QLabel("State: Disconnected", this);
     statusBar()->addPermanentWidget(m_statusLabel);
@@ -942,6 +1073,8 @@ MainWindow::MainWindow(QWidget* parent)
     m_replayControlsPreferredVisible = settings.value("replay/controlsVisible", true).toBool();
     m_replayTimelinePreferredVisible = settings.value("replay/timelineVisible", true).toBool();
     m_replayMarkersPreferredVisible = settings.value("replay/markersVisible", true).toBool();
+    m_clearLinePlotsOnRewind = settings.value("replay/clearLinePlotsOnRewind", false).toBool();
+    m_clearLinePlotsOnBackwardSeek = settings.value("replay/clearLinePlotsOnBackwardSeek", false).toBool();
     if (m_telemetryFeatureViewAction != nullptr)
     {
         m_telemetryFeatureViewAction->setChecked(m_telemetryFeatureEnabled);
@@ -961,12 +1094,27 @@ MainWindow::MainWindow(QWidget* parent)
         m_replayTimelineViewAction->setChecked(m_replayTimelinePreferredVisible);
         m_replayTimelineViewAction->setEnabled(false);
     }
+    if (m_clearLinePlotsOnRewindAction != nullptr)
+    {
+        m_clearLinePlotsOnRewindAction->setChecked(m_clearLinePlotsOnRewind);
+    }
+    if (m_clearLinePlotsOnBackwardSeekAction != nullptr)
+    {
+        m_clearLinePlotsOnBackwardSeekAction->setChecked(m_clearLinePlotsOnBackwardSeek);
+    }
     if (m_recordButton != nullptr)
     {
         m_recordButton->setChecked(m_recordRequested);
     }
 
-    LoadRememberedControlValues();
+    if (CurrentTransportUsesRememberedControlValues())
+    {
+        LoadRememberedControlValues();
+    }
+    else
+    {
+        m_rememberedControlValues.clear();
+    }
 
     SetTimelineDockMode(m_playbackTimeline, m_replayTimelineDock != nullptr && m_replayTimelineDock->isFloating());
 
@@ -993,9 +1141,42 @@ MainWindow::MainWindow(QWidget* parent)
 
     m_layoutFilePath = GetInitialLayoutPath();
     LoadLayoutFromPath(m_layoutFilePath, true);
-    ApplyRememberedControlValuesToTiles();
+    if (CurrentTransportUsesRememberedControlValues())
+    {
+        ApplyRememberedControlValuesToTiles();
+    }
+    ApplyTemporaryDefaultValuesToTiles();
     LoadWindowGeometry();
-    StartTransport();
+
+#ifdef _DEBUG
+    // Debug-only named-pipe command channel so automation scripts can reliably
+    // trigger connect/disconnect without fragile keyboard injection.
+    // Channel name: "SmartDashboardApp_DebugCmd_<PID>"
+    // Supported commands (newline-terminated): "disconnect\n", "connect\n"
+    {
+        const QString serverName = QString("SmartDashboardApp_DebugCmd_%1")
+            .arg(static_cast<qint64>(QCoreApplication::applicationPid()));
+        m_debugCommandServer = new QLocalServer(this);
+        QLocalServer::removeServer(serverName); // clean up any stale socket
+        if (m_debugCommandServer->listen(serverName))
+        {
+            DebugLogUiEvent(QString("debug_cmd_server=listening name=%1").arg(serverName));
+            connect(m_debugCommandServer, &QLocalServer::newConnection,
+                    this, &MainWindow::OnDebugCommandReceived);
+        }
+        else
+        {
+            DebugLogUiEvent(QString("debug_cmd_server=failed name=%1 err=%2")
+                .arg(serverName)
+                .arg(m_debugCommandServer->errorString()));
+        }
+    }
+#endif
+
+    if (startTransportOnInit)
+    {
+        StartTransport();
+    }
 }
 
 MainWindow::~MainWindow()
@@ -1047,14 +1228,66 @@ void MainWindow::DebugLogUiEvent(const QString& line) const
 
 void MainWindow::DrainPendingUiUpdates()
 {
-    QVector<sd::transport::VariableUpdate> updates;
+    // Ian: Per-call budget cap (Fix B).  During auton mode the robot publishes
+    // ~25 keys at ~62 Hz (~1,500 msg/sec over TCP).  Without a cap, a burst
+    // fills m_pendingUiUpdates with thousands of items and DrainPendingUiUpdates
+    // processes them all in one synchronous pass on the UI thread, blocking
+    // painting and input for 10-20 seconds — the freeze + playback-backlog
+    // symptom observed in manual testing.  Processing at most kDrainBudget
+    // items per event-loop turn bounds the UI-thread hold time to a few ms.
+    // If the queue still has items after the budget is consumed, a new drain
+    // is scheduled immediately so no updates are lost, just slightly deferred.
+    static constexpr int kDrainBudget = 150;
+
+    QVector<sd::transport::VariableUpdate> batch;
+    bool reschedule = false;
     {
         std::lock_guard<std::mutex> lock(m_pendingUiUpdatesMutex);
-        updates.swap(m_pendingUiUpdates);
         m_uiDrainScheduled = false;
+
+        const int take = std::min(static_cast<int>(m_pendingUiUpdates.size()), kDrainBudget);
+        batch = QVector<sd::transport::VariableUpdate>(
+            m_pendingUiUpdates.begin(),
+            m_pendingUiUpdates.begin() + take);
+        m_pendingUiUpdates.erase(m_pendingUiUpdates.begin(), m_pendingUiUpdates.begin() + take);
+
+        if (!m_pendingUiUpdates.isEmpty())
+        {
+            m_uiDrainScheduled = true;
+            reschedule = true;
+        }
     }
 
-    for (const auto& update : updates)
+    if (reschedule)
+    {
+        QMetaObject::invokeMethod(this, &MainWindow::DrainPendingUiUpdates, Qt::QueuedConnection);
+    }
+
+    // Ian: Last-write-wins coalescing per key (Fix C).  When the robot sends
+    // multiple updates for the same key within one budget window (common at
+    // 62 Hz with 25 keys), only the most recent value matters for display.
+    // Build an ordered list of unique keys, keeping the last-seen VariableUpdate
+    // for each, in first-appearance order so tile creation order is stable.
+    QVector<sd::transport::VariableUpdate> coalesced;
+    coalesced.reserve(batch.size());
+    std::unordered_map<std::string, int> keyIndex;  // key -> index into coalesced
+    keyIndex.reserve(static_cast<size_t>(batch.size()));
+    for (const auto& update : batch)
+    {
+        const std::string key = update.key.toStdString();
+        auto it = keyIndex.find(key);
+        if (it == keyIndex.end())
+        {
+            keyIndex[key] = static_cast<int>(coalesced.size());
+            coalesced.push_back(update);
+        }
+        else
+        {
+            coalesced[it->second] = update;  // overwrite with newer value
+        }
+    }
+
+    for (const auto& update : coalesced)
     {
         OnVariableUpdateReceived(update.key, update.valueType, update.value, static_cast<quint64>(update.seq));
     }
@@ -1225,11 +1458,6 @@ void MainWindow::OnVariableUpdateReceived(const QString& key, int valueType, con
                 {
                     chooserTile->SetStringValue(value.toString());
 
-                    RememberedControlValue chooserRemembered;
-                    chooserRemembered.valueType = static_cast<int>(sd::direct::ValueType::String);
-                    chooserRemembered.value = value;
-                    m_rememberedControlValues[chooserBase.toStdString()] = chooserRemembered;
-
                     // In Direct mode the robot reads chooser intent from the
                     // dashboard->robot command channel, not from telemetry.
                     // Mirror retained/live chooser selection updates into the
@@ -1283,30 +1511,22 @@ void MainWindow::OnVariableUpdateReceived(const QString& key, int valueType, con
         && m_transport
         && IsOperatorControlWidget(tile))
     {
-        RememberedControlValue remembered;
-
+        // Ian: This branch exists so Direct mode can still mirror retained/live
+        // operator widgets back onto the command channel when the old workflow
+        // expects it. Do not treat incoming telemetry as SmartDashboard-owned
+        // persistence here. Only explicit local edits are allowed to create or
+        // refresh `m_rememberedControlValues`, or retained authority truth like
+        // `TestMove=3.5` will start masquerading as a local startup setting.
         if (record.type == sd::widgets::VariableType::Bool)
         {
-            remembered.valueType = static_cast<int>(sd::direct::ValueType::Bool);
-            remembered.value = record.value.toBool();
-            m_rememberedControlValues[keyStd] = remembered;
-            SaveRememberedControlValues();
             m_transport->PublishBool(key, record.value.toBool());
         }
         else if (record.type == sd::widgets::VariableType::Double)
         {
-            remembered.valueType = static_cast<int>(sd::direct::ValueType::Double);
-            remembered.value = record.value.toDouble();
-            m_rememberedControlValues[keyStd] = remembered;
-            SaveRememberedControlValues();
             m_transport->PublishDouble(key, record.value.toDouble());
         }
         else if (record.type == sd::widgets::VariableType::String && tile->GetWidgetType() != "string.chooser")
         {
-            remembered.valueType = static_cast<int>(sd::direct::ValueType::String);
-            remembered.value = record.value.toString();
-            m_rememberedControlValues[keyStd] = remembered;
-            SaveRememberedControlValues();
             m_transport->PublishString(key, record.value.toString());
         }
     }
@@ -1318,22 +1538,43 @@ void MainWindow::OnConnectionStateChanged(int state)
 {
     m_connectionState = state;
 
+    QString stateText = "Disconnected";
+    if (state == static_cast<int>(sd::transport::ConnectionState::Connecting))
+    {
+        stateText = "Connecting";
+    }
+    else if (state == static_cast<int>(sd::transport::ConnectionState::Connected))
+    {
+        stateText = "Connected";
+    }
+    DebugLogUiEvent(QString("connection_state=%1").arg(stateText));
+
     const int connected = static_cast<int>(sd::transport::ConnectionState::Connected);
     if (state == connected)
     {
         // Reconnect handling: reset sequence gating when transport re-enters connected state.
         m_variableStore.ResetSequenceTracking();
 
+        // Ian: The merged replay/line-plot work changed more startup behavior in
+        // the window, but Native Link still needs one deterministic reconnect
+        // rule: accept the authority-owned retained snapshot first, then publish
+        // dashboard-owned remembered controls. Doing this in the explicit
+        // `Connected` callback avoids a race where one dashboard instance can
+        // restart and republish before another instance has finished applying its
+        // snapshot-driven tiles.
         PublishRememberedControlValues();
     }
 
     UpdateWindowConnectionText(state);
     RecordConnectionEvent(state);
+
+    // Refresh Connect/Disconnect enabled state now that m_connectionState has changed.
+    ApplyTransportMenuChecks();
 }
 
 void MainWindow::PublishRememberedControlValues()
 {
-    if (!m_transport)
+    if (!m_transport || !CurrentTransportUsesRememberedControlValues())
     {
         return;
     }
@@ -1790,14 +2031,7 @@ void MainWindow::UpdateReplayDockHeightLock()
 
 void MainWindow::OnControlBoolEdited(const QString& key, bool value)
 {
-    if (!key.isEmpty())
-    {
-        RememberedControlValue remembered;
-        remembered.valueType = static_cast<int>(sd::direct::ValueType::Bool);
-        remembered.value = QVariant(value);
-        m_rememberedControlValues[key.toStdString()] = remembered;
-        SaveRememberedControlValues();
-    }
+    RememberControlValueIfAllowed(key, static_cast<int>(sd::direct::ValueType::Bool), QVariant(value), true);
 
     if (m_transport)
     {
@@ -1826,14 +2060,7 @@ void MainWindow::OnRemoveWidgetRequested(const QString& key)
 
 void MainWindow::OnControlDoubleEdited(const QString& key, double value)
 {
-    if (!key.isEmpty())
-    {
-        RememberedControlValue remembered;
-        remembered.valueType = static_cast<int>(sd::direct::ValueType::Double);
-        remembered.value = QVariant(value);
-        m_rememberedControlValues[key.toStdString()] = remembered;
-        SaveRememberedControlValues();
-    }
+    RememberControlValueIfAllowed(key, static_cast<int>(sd::direct::ValueType::Double), QVariant(value), true);
 
     if (m_transport)
     {
@@ -1843,14 +2070,7 @@ void MainWindow::OnControlDoubleEdited(const QString& key, double value)
 
 void MainWindow::OnControlStringEdited(const QString& key, const QString& value)
 {
-    if (!key.isEmpty())
-    {
-        RememberedControlValue remembered;
-        remembered.valueType = static_cast<int>(sd::direct::ValueType::String);
-        remembered.value = QVariant(value);
-        m_rememberedControlValues[key.toStdString()] = remembered;
-        SaveRememberedControlValues();
-    }
+    RememberControlValueIfAllowed(key, static_cast<int>(sd::direct::ValueType::String), QVariant(value), true);
 
     if (m_transport)
     {
@@ -1984,6 +2204,8 @@ bool MainWindow::LoadLayoutFromPath(const QString& path, bool applyToExistingTil
             sd::widgets::VariableTile* tile = GetOrCreateTile(entry.variableKey, inferredType);
             ApplyLayoutEntryToTile(tile, entry);
         }
+
+        ApplyTemporaryDefaultValuesToTiles();
     }
 
     if (persistAsCurrentPath)
@@ -2102,8 +2324,47 @@ void MainWindow::OnDisconnectTransport()
     }
 
     StopTransport();
-    UpdateWindowConnectionText(static_cast<int>(sd::transport::ConnectionState::Disconnected));
+    // Ian: Route through OnConnectionStateChanged (not UpdateWindowConnectionText directly)
+    // so the full state-change pipeline fires: title bar, menu enable/disable, recording event.
+    // Calling UpdateWindowConnectionText directly was the original bug — it updated the title
+    // but left m_connectionState and the Connect/Disconnect menu items out of sync.
+    OnConnectionStateChanged(static_cast<int>(sd::transport::ConnectionState::Disconnected));
 }
+
+#ifdef _DEBUG
+void MainWindow::OnDebugCommandReceived()
+{
+    while (m_debugCommandServer && m_debugCommandServer->hasPendingConnections())
+    {
+        QLocalSocket* socket = m_debugCommandServer->nextPendingConnection();
+        // Read the full command (wait briefly for data to arrive)
+        if (!socket->waitForReadyRead(500))
+        {
+            socket->deleteLater();
+            continue;
+        }
+        const QString cmd = QString::fromUtf8(socket->readAll()).trimmed().toLower();
+        DebugLogUiEvent(QString("debug_cmd_received cmd=%1").arg(cmd));
+        socket->write("ok\n");
+        socket->flush();
+        socket->deleteLater();
+
+        if (cmd == "disconnect")
+        {
+            if (m_connectionConfig.kind != sd::transport::TransportKind::Replay)
+            {
+                StopTransport();
+                UpdateWindowConnectionText(
+                    static_cast<int>(sd::transport::ConnectionState::Disconnected));
+            }
+        }
+        else if (cmd == "connect")
+        {
+            StartTransport();
+        }
+    }
+}
+#endif
 
 void MainWindow::OnUseDirectTransport()
 {
@@ -2229,6 +2490,24 @@ void MainWindow::OnEditTransportSettings()
         editors.push_back({field.id, editor});
     }
 
+#ifdef _DEBUG
+    QComboBox* nativeLinkCarrierCombo = nullptr;
+    if (ShouldShowNativeLinkCarrierDebugOptions())
+    {
+        auto* debugGroup = new QGroupBox("Debug Carrier Override", &dialog);
+        auto* debugFormLayout = new QFormLayout(debugGroup);
+        nativeLinkCarrierCombo = new QComboBox(debugGroup);
+        nativeLinkCarrierCombo->addItem("Shared Memory (SHM)", "shm");
+        nativeLinkCarrierCombo->addItem("TCP/IP", "tcp");
+        const QString currentCarrier = GetNativeLinkCarrierSetting();
+        const int index = nativeLinkCarrierCombo->findData(currentCarrier);
+        nativeLinkCarrierCombo->setCurrentIndex(index >= 0 ? index : 0);
+        nativeLinkCarrierCombo->setToolTip("Debug-only Native Link carrier override for quickly comparing SHM and TCP.");
+        debugFormLayout->addRow("Carrier:", nativeLinkCarrierCombo);
+        layout->addWidget(debugGroup);
+    }
+#endif
+
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
     layout->addWidget(buttons);
     connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
@@ -2255,9 +2534,58 @@ void MainWindow::OnEditTransportSettings()
         }
     }
 
+#ifdef _DEBUG
+    if (nativeLinkCarrierCombo != nullptr)
+    {
+        SetNativeLinkCarrierSetting(nativeLinkCarrierCombo->currentData().toString());
+    }
+#endif
+
     SyncConnectionConfigToPluginSettingsJson();
     ApplyTransportMenuChecks();
     PersistConnectionSettings();
+
+    // Ian: auto_connect is the one setting that can be applied to a live
+    // transport without a full stop+start.  When the user unchecks it while
+    // the transport is running (or pulsing in the Connecting/Disconnected
+    // retry cycle), we stop immediately so the title bar settles and the
+    // Connect button becomes available for a manual single-shot attempt.
+    // Stopping is safe and fast: the worker is either sleeping kReconnectRetryMs
+    // (500 ms) between attempts or blocked in a 3-second connect timeout, both
+    // of which are interrupted by ShutdownSocket() inside Stop().
+    //
+    // For all other setting changes (host, port, carrier) the transport is left
+    // running so an operator editing fields mid-match does not get an involuntary
+    // disconnect.  A message box informs them to reconnect manually.
+    const bool newAutoConnect = [&]() -> bool {
+        if (m_connectionConfig.pluginSettingsJson.trimmed().isEmpty())
+        {
+            return true;
+        }
+        const QJsonDocument doc = QJsonDocument::fromJson(m_connectionConfig.pluginSettingsJson.toUtf8());
+        if (!doc.isObject())
+        {
+            return true;
+        }
+        const QJsonValue v = doc.object().value("auto_connect");
+        return v.isUndefined() ? true : v.toBool(true);
+    }();
+
+    if (m_transport != nullptr && !newAutoConnect)
+    {
+        // User disabled auto-connect — stop the retry cycle right now.
+        StopTransport();
+        OnConnectionStateChanged(static_cast<int>(sd::transport::ConnectionState::Disconnected));
+    }
+    else if (m_transport != nullptr)
+    {
+        // Other settings changed while connected — inform the user to reconnect.
+        QMessageBox::information(
+            this,
+            QStringLiteral("Settings Saved"),
+            QStringLiteral("Settings have been saved.\n\nReconnect (Disconnect then Connect) for the new settings to take effect.")
+        );
+    }
 }
 
 void MainWindow::OnOpenReplayFile()
@@ -2303,8 +2631,13 @@ void MainWindow::OnPlaybackRewindToStart()
     }
 
     m_transport->SetPlaybackPlaying(false);
-    m_transport->SeekPlaybackUs(0);
+    SeekPlaybackToUs(0, true);
     UpdatePlaybackUiState();
+}
+
+void MainWindow::OnResetAllLinePlots()
+{
+    ResetAllLinePlots();
 }
 
 void MainWindow::OnPlaybackPlayPause()
@@ -2337,7 +2670,7 @@ void MainWindow::OnPlaybackCursorScrubbed(std::int64_t cursorUs)
         return;
     }
 
-    m_transport->SeekPlaybackUs(cursorUs);
+    SeekPlaybackToUs(cursorUs);
     UpdatePlaybackUiState();
 }
 
@@ -2365,7 +2698,7 @@ void MainWindow::OnPlaybackPreviousMarker()
         targetUs = m_replayMarkerTimesUs.front();
     }
 
-    m_transport->SeekPlaybackUs(targetUs);
+    SeekPlaybackToUs(targetUs);
     UpdatePlaybackUiState();
 }
 
@@ -2392,7 +2725,7 @@ void MainWindow::OnPlaybackNextMarker()
         targetUs = m_replayMarkerTimesUs.back();
     }
 
-    m_transport->SeekPlaybackUs(targetUs);
+    SeekPlaybackToUs(targetUs);
     UpdatePlaybackUiState();
 }
 
@@ -2408,7 +2741,7 @@ void MainWindow::OnReplayMarkerActivated(QListWidgetItem* item)
     }
 
     const std::int64_t markerUs = item->data(Qt::UserRole).toLongLong();
-    m_transport->SeekPlaybackUs(markerUs);
+    SeekPlaybackToUs(markerUs);
     UpdatePlaybackUiState();
 }
 
@@ -2493,14 +2826,22 @@ void MainWindow::ApplyTransportMenuChecks()
         m_openReplayFileAction->setEnabled(m_telemetryFeatureEnabled);
     }
 
+    // Ian: Connect is only meaningful when the transport is stopped (Disconnected).
+    // Disconnect is only meaningful when the transport is running (Connecting/Connected/Stale).
+    // Graying them out in the wrong state avoids confusing double-clicks and makes
+    // the menu self-documenting about current transport lifecycle.
+    const bool isDisconnected =
+        m_connectionState == static_cast<int>(sd::transport::ConnectionState::Disconnected);
+    const bool isRunning = !isDisconnected;
+
     if (m_connectTransportAction != nullptr)
     {
-        m_connectTransportAction->setEnabled(!replayMode);
+        m_connectTransportAction->setEnabled(!replayMode && isDisconnected);
     }
 
     if (m_disconnectTransportAction != nullptr)
     {
-        m_disconnectTransportAction->setEnabled(!replayMode);
+        m_disconnectTransportAction->setEnabled(!replayMode && isRunning);
     }
 }
 
@@ -2523,6 +2864,10 @@ void MainWindow::LoadRememberedControlValues()
 {
     m_rememberedControlValues.clear();
 
+#if !SMARTDASHBOARD_ENABLE_DIRECT_REMEMBERED_CONTROLS
+    return;
+#endif
+
     QSettings settings("SmartDashboard", "SmartDashboardApp");
     const int size = settings.beginReadArray("directRememberedControls");
     for (int i = 0; i < size; ++i)
@@ -2544,6 +2889,15 @@ void MainWindow::LoadRememberedControlValues()
 
 void MainWindow::SaveRememberedControlValues() const
 {
+#if !SMARTDASHBOARD_ENABLE_DIRECT_REMEMBERED_CONTROLS
+    return;
+#endif
+
+    if (!CurrentTransportUsesRememberedControlValues())
+    {
+        return;
+    }
+
     QSettings settings("SmartDashboard", "SmartDashboardApp");
     settings.beginWriteArray("directRememberedControls");
     int index = 0;
@@ -2559,6 +2913,10 @@ void MainWindow::SaveRememberedControlValues() const
 
 void MainWindow::ApplyRememberedControlValuesToTiles()
 {
+#if !SMARTDASHBOARD_ENABLE_DIRECT_REMEMBERED_CONTROLS
+    return;
+#endif
+
     for (const auto& [keyStd, remembered] : m_rememberedControlValues)
     {
         const auto tileIt = m_tiles.find(keyStd);
@@ -2583,6 +2941,85 @@ void MainWindow::ApplyRememberedControlValuesToTiles()
         {
             tile->SetStringValue(remembered.value.toString());
         }
+    }
+}
+
+void MainWindow::ApplyTemporaryDefaultValuesToTiles()
+{
+#if !SMARTDASHBOARD_ENABLE_TEMPORARY_TILE_DEFAULTS
+    return;
+#endif
+
+    m_temporaryDefaultValues.clear();
+    for (const auto& [keyStd, tile] : m_tiles)
+    {
+        if (!IsTemporaryDefaultEligibleWidget(tile) || tile->HasValue())
+        {
+            continue;
+        }
+
+        const QVariant defaultValue = TemporaryDefaultValueForTile(tile);
+        if (!defaultValue.isValid())
+        {
+            continue;
+        }
+
+        TemporaryDefaultValue remembered;
+        const auto type = tile->GetType();
+        if (type == sd::widgets::VariableType::Bool)
+        {
+            remembered.valueType = static_cast<int>(sd::direct::ValueType::Bool);
+            remembered.value = defaultValue;
+            tile->SetTemporaryDefaultBoolValue(defaultValue.toBool());
+        }
+        else if (type == sd::widgets::VariableType::Double)
+        {
+            remembered.valueType = static_cast<int>(sd::direct::ValueType::Double);
+            remembered.value = defaultValue;
+            tile->SetTemporaryDefaultDoubleValue(defaultValue.toDouble());
+        }
+        else if (type == sd::widgets::VariableType::String)
+        {
+            remembered.valueType = static_cast<int>(sd::direct::ValueType::String);
+            remembered.value = defaultValue;
+            tile->SetTemporaryDefaultStringValue(defaultValue.toString());
+        }
+        else
+        {
+            continue;
+        }
+
+        m_temporaryDefaultValues[keyStd] = remembered;
+    }
+}
+
+void MainWindow::RememberControlValueIfAllowed(const QString& key, int valueType, const QVariant& value, bool persistToSettings)
+{
+#if !SMARTDASHBOARD_ENABLE_DIRECT_REMEMBERED_CONTROLS
+    static_cast<void>(key);
+    static_cast<void>(valueType);
+    static_cast<void>(value);
+    static_cast<void>(persistToSettings);
+    return;
+#endif
+
+    if (key.isEmpty() || !CurrentTransportUsesRememberedControlValues())
+    {
+        return;
+    }
+
+    // Ian: This helper is the persistence boundary for operator controls.
+    // Call it from local edit handlers only. If telemetry/update paths call it,
+    // transport-retained state gets reclassified as dashboard-local memory and
+    // the next restart looks like a persistence bug instead of retained truth.
+    RememberedControlValue remembered;
+    remembered.valueType = valueType;
+    remembered.value = value;
+    m_rememberedControlValues[key.toStdString()] = remembered;
+
+    if (persistToSettings)
+    {
+        SaveRememberedControlValues();
     }
 }
 
@@ -2641,6 +3078,8 @@ void MainWindow::StartTransport()
         }
     );
 
+    DebugLogUiEvent(QString("transport_start_result=%1").arg(started ? "ok" : "failed"));
+
     if (started)
     {
         if (m_transport)
@@ -2658,90 +3097,64 @@ void MainWindow::StartTransport()
                 }
             );
 
-            // Ian: Numeric operator controls are dashboard-owned state.
-            // Retained transport replay can still carry a stale default from an
-            // earlier startup before the dashboard reapplies its remembered UI
-            // value. Re-apply remembered controls here so the visible tile state
-            // and the republished command value both prefer the dashboard's last
-            // operator intent on restart.
-            ApplyRememberedControlValuesToTiles();
-
-            // Ensure dashboard-owned control widgets publish their current values on connect.
-            // This makes operator intent available to freshly connected robot processes even
-            // when no live edit event has occurred since app startup.
-            for (const auto& [_, tile] : m_tiles)
+            // Ian: Snapshot handling stops here now. Any remembered-control
+            // republish still belongs in `OnConnectionStateChanged(Connected)` so
+            // all dashboard instances get a full retained snapshot pass before any
+            // of them start asserting local operator-owned values back onto the
+            // authority. The current default build disables remembered controls,
+            // but this ordering rule still matters if that feature is re-enabled.
+            if (CurrentTransportUsesRememberedControlValues())
             {
-                if (!IsOperatorControlWidget(tile))
-                {
-                    continue;
-                }
-
-                const QString key = tile->GetKey();
-                if (key.isEmpty())
-                {
-                    continue;
-                }
-
-                const auto type = tile->GetType();
-                if (type == sd::widgets::VariableType::Bool)
-                {
-                    m_transport->PublishBool(key, tile->GetBoolValue());
-                }
-                else if (type == sd::widgets::VariableType::Double)
-                {
-                    m_transport->PublishDouble(key, tile->GetDoubleValue());
-                }
-                else if (type == sd::widgets::VariableType::String)
-                {
-                    const QString widgetType = tile->GetWidgetType();
-                    if (widgetType == "string.chooser")
-                    {
-                        const QString selectedValue = tile->GetStringValue();
-                        if (!selectedValue.isEmpty())
-                        {
-                            m_transport->PublishString(key + "/selected", selectedValue);
-                        }
-                    }
-                    else
-                    {
-                        m_transport->PublishString(key, tile->GetStringValue());
-                    }
-                }
+                ApplyRememberedControlValuesToTiles();
             }
+            ApplyTemporaryDefaultValuesToTiles();
 
             // Refresh remembered control cache from current tiles so reconnects can replay
             // the latest operator-facing values even if no new edit event occurs.
-            for (const auto& [_, tile] : m_tiles)
+            if (CurrentTransportUsesRememberedControlValues())
             {
-                if (!IsOperatorControlWidget(tile))
+                for (const auto& [_, tile] : m_tiles)
                 {
-                    continue;
-                }
+                    if (!IsOperatorControlWidget(tile))
+                    {
+                        continue;
+                    }
 
-                const QString key = tile->GetKey();
-                if (key.isEmpty())
-                {
-                    continue;
-                }
+                    const QString key = tile->GetKey();
+                    if (key.isEmpty())
+                    {
+                        continue;
+                    }
 
-                RememberedControlValue remembered;
-                const auto type = tile->GetType();
-                if (type == sd::widgets::VariableType::Bool)
-                {
-                    remembered.valueType = static_cast<int>(sd::direct::ValueType::Bool);
-                    remembered.value = QVariant(tile->GetBoolValue());
+                    auto rememberedIt = m_rememberedControlValues.find(key.toStdString());
+                    if (rememberedIt == m_rememberedControlValues.end())
+                    {
+                        continue;
+                    }
+
+                    // Ian: Refresh only values that were already remembered from
+                    // an explicit local edit. Startup retained tiles can carry
+                    // authority-owned state, and inventing new remembered entries
+                    // here turns transport replay into fake dashboard persistence.
+                    RememberedControlValue remembered;
+                    const auto type = tile->GetType();
+                    if (type == sd::widgets::VariableType::Bool)
+                    {
+                        remembered.valueType = static_cast<int>(sd::direct::ValueType::Bool);
+                        remembered.value = QVariant(tile->GetBoolValue());
+                    }
+                    else if (type == sd::widgets::VariableType::Double)
+                    {
+                        remembered.valueType = static_cast<int>(sd::direct::ValueType::Double);
+                        remembered.value = QVariant(tile->GetDoubleValue());
+                    }
+                    else
+                    {
+                        remembered.valueType = static_cast<int>(sd::direct::ValueType::String);
+                        remembered.value = QVariant(tile->GetStringValue());
+                    }
+                    rememberedIt->second = remembered;
                 }
-                else if (type == sd::widgets::VariableType::Double)
-                {
-                    remembered.valueType = static_cast<int>(sd::direct::ValueType::Double);
-                    remembered.value = QVariant(tile->GetDoubleValue());
-                }
-                else
-                {
-                    remembered.valueType = static_cast<int>(sd::direct::ValueType::String);
-                    remembered.value = QVariant(tile->GetStringValue());
-                }
-                m_rememberedControlValues[key.toStdString()] = remembered;
             }
         }
 
@@ -2763,7 +3176,7 @@ void MainWindow::StartTransport()
     {
         StopSessionRecording();
         m_transport.reset();
-        UpdateWindowConnectionText(static_cast<int>(sd::transport::ConnectionState::Disconnected));
+        OnConnectionStateChanged(static_cast<int>(sd::transport::ConnectionState::Disconnected));
     }
 
     UpdatePlaybackUiState();
@@ -3218,7 +3631,7 @@ void MainWindow::StepPlaybackByUs(std::int64_t deltaUs)
 
     const std::int64_t cursorUs = m_transport->GetPlaybackCursorUs();
     const std::int64_t targetUs = std::max<std::int64_t>(0, cursorUs + deltaUs);
-    m_transport->SeekPlaybackUs(targetUs);
+    SeekPlaybackToUs(targetUs);
     UpdatePlaybackUiState();
 }
 
@@ -3259,6 +3672,39 @@ void MainWindow::keyPressEvent(QKeyEvent* event)
     }
 
     QMainWindow::keyPressEvent(event);
+}
+
+void MainWindow::ResetAllLinePlots()
+{
+    for (const auto& [_, tile] : m_tiles)
+    {
+        if (tile == nullptr || !tile->IsLinePlotWidget())
+        {
+            continue;
+        }
+
+        tile->ResetLinePlotGraph();
+    }
+}
+
+void MainWindow::SeekPlaybackToUs(std::int64_t targetUs, bool rewindToStart)
+{
+    if (!m_transport || !m_transport->SupportsPlayback())
+    {
+        return;
+    }
+
+    const std::int64_t clampedTargetUs = std::max<std::int64_t>(0, targetUs);
+    const std::int64_t currentUs = std::max<std::int64_t>(0, m_transport->GetPlaybackCursorUs());
+    const bool movedBackward = clampedTargetUs < currentUs;
+    const bool shouldClear = (rewindToStart && m_clearLinePlotsOnRewind)
+        || (movedBackward && m_clearLinePlotsOnBackwardSeek);
+    if (shouldClear)
+    {
+        ResetAllLinePlots();
+    }
+
+    m_transport->SeekPlaybackUs(clampedTargetUs);
 }
 
 void MainWindow::StartSessionRecording()
@@ -3583,6 +4029,89 @@ bool MainWindow::CurrentTransportSupportsChooser() const
     return descriptor->GetBoolProperty(QString::fromUtf8(sd::transport::kTransportPropertySupportsChooser), false);
 }
 
+bool MainWindow::CurrentTransportUsesRememberedControlValues() const
+{
+#if !SMARTDASHBOARD_ENABLE_DIRECT_REMEMBERED_CONTROLS
+    return false;
+#endif
+
+    return m_connectionConfig.kind == sd::transport::TransportKind::Direct;
+}
+
+#ifdef SMARTDASHBOARD_TESTS
+void MainWindow::SetTransportSelectionForTesting(const QString& transportId, sd::transport::TransportKind kind)
+{
+    m_connectionConfig.transportId = transportId;
+    m_connectionConfig.kind = kind;
+}
+
+void MainWindow::SimulateVariableUpdateForTesting(const QString& key, int valueType, const QVariant& value, quint64 seq)
+{
+    OnVariableUpdateReceived(key, valueType, value, seq);
+}
+
+void MainWindow::SimulateControlDoubleEditForTesting(const QString& key, double value)
+{
+    OnControlDoubleEdited(key, value);
+}
+
+void MainWindow::LoadRememberedControlValuesForTesting()
+{
+    LoadRememberedControlValues();
+}
+
+bool MainWindow::LoadLayoutFromPathForTesting(const QString& path, bool applyToExistingTiles, bool persistAsCurrentPath)
+{
+    return LoadLayoutFromPath(path, applyToExistingTiles, persistAsCurrentPath);
+}
+
+void MainWindow::ClearWidgetsForTesting()
+{
+    OnClearWidgets();
+}
+
+int MainWindow::RememberedControlValueCountForTesting() const
+{
+    return static_cast<int>(m_rememberedControlValues.size());
+}
+
+bool MainWindow::HasRememberedControlValueForTesting(const QString& key) const
+{
+    return m_rememberedControlValues.find(key.toStdString()) != m_rememberedControlValues.end();
+}
+
+bool MainWindow::TileHasValueForTesting(const QString& key) const
+{
+    const auto it = m_tiles.find(key.toStdString());
+    return it != m_tiles.end() && it->second != nullptr && it->second->HasValue();
+}
+
+bool MainWindow::TileIsTemporaryDefaultForTesting(const QString& key) const
+{
+    const auto it = m_tiles.find(key.toStdString());
+    return it != m_tiles.end() && it->second != nullptr && it->second->IsShowingTemporaryDefault();
+}
+
+void MainWindow::SetConnectionFieldValueForTesting(const QString& fieldId, const QVariant& value)
+{
+    SetConnectionFieldValue(fieldId, value);
+}
+
+void MainWindow::SyncConnectionConfigToPluginSettingsJsonForTesting()
+{
+    SyncConnectionConfigToPluginSettingsJson();
+}
+
+bool MainWindow::GetConnectionFieldBoolForTesting(const QString& fieldId, bool defaultValue) const
+{
+    sd::transport::ConnectionFieldDescriptor field;
+    field.id = fieldId;
+    field.type = sd::transport::ConnectionFieldType::Bool;
+    field.defaultValue = defaultValue;
+    return GetConnectionFieldValue(field).toBool();
+}
+#endif
+
 QVariant MainWindow::GetConnectionFieldValue(const sd::transport::ConnectionFieldDescriptor& field) const
 {
     if (field.id == QString::fromUtf8(sd::transport::kTransportFieldHost))
@@ -3662,6 +4191,38 @@ void MainWindow::SyncConnectionConfigToPluginSettingsJson()
     object.insert(QString::fromUtf8(sd::transport::kTransportFieldTeamNumber), m_connectionConfig.ntTeam);
     object.insert(QString::fromUtf8(sd::transport::kTransportFieldUseTeamNumber), m_connectionConfig.ntUseTeam);
     object.insert(QString::fromUtf8(sd::transport::kTransportFieldClientName), m_connectionConfig.ntClientName);
+    if (!m_connectionConfig.pluginSettingsJson.trimmed().isEmpty())
+    {
+        const QJsonDocument document = QJsonDocument::fromJson(m_connectionConfig.pluginSettingsJson.toUtf8());
+        if (document.isObject())
+        {
+            const QJsonObject existing = document.object();
+            if (existing.contains("carrier"))
+            {
+                object.insert("carrier", existing.value("carrier").toString("tcp"));
+            }
+            if (existing.contains("channel_id"))
+            {
+                object.insert("channel_id", existing.value("channel_id").toString("native-link-default"));
+            }
+            if (existing.contains("port"))
+            {
+                object.insert("port", existing.value("port").toInt(5810));
+            }
+            // Ian: "auto_connect" is a plugin-owned Bool field stored only in
+            // pluginSettingsJson (it has no dedicated ConnectionConfig member).
+            // It must be explicitly round-tripped here or SetConnectionFieldValue
+            // writes it into the JSON and then this function immediately overwrites
+            // the JSON from scratch, silently discarding the user's choice.
+            // The plugin fallback is true, so omitting this key is safe for legacy
+            // INI entries — but once the user has explicitly set it to false, it
+            // must survive this rebuild.
+            if (existing.contains("auto_connect"))
+            {
+                object.insert("auto_connect", existing.value("auto_connect").toBool(true));
+            }
+        }
+    }
     m_connectionConfig.pluginSettingsJson = QString::fromUtf8(QJsonDocument(object).toJson(QJsonDocument::Compact));
 }
 
@@ -3697,4 +4258,55 @@ void MainWindow::SyncConnectionConfigFromPluginSettingsJson()
     {
         m_connectionConfig.ntClientName = object.value(QString::fromUtf8(sd::transport::kTransportFieldClientName)).toString(m_connectionConfig.ntClientName);
     }
+}
+
+QString MainWindow::GetNativeLinkCarrierSetting() const
+{
+    if (!m_connectionConfig.pluginSettingsJson.trimmed().isEmpty())
+    {
+        const QJsonDocument document = QJsonDocument::fromJson(m_connectionConfig.pluginSettingsJson.toUtf8());
+        if (document.isObject())
+        {
+            const QString carrier = document.object().value("carrier").toString().trimmed().toLower();
+            if (carrier == "shm")
+            {
+                return carrier;
+            }
+        }
+    }
+
+    return "tcp";
+}
+
+void MainWindow::SetNativeLinkCarrierSetting(const QString& carrier)
+{
+    QJsonObject object;
+    if (!m_connectionConfig.pluginSettingsJson.trimmed().isEmpty())
+    {
+        const QJsonDocument document = QJsonDocument::fromJson(m_connectionConfig.pluginSettingsJson.toUtf8());
+        if (document.isObject())
+        {
+            object = document.object();
+        }
+    }
+
+    object.insert("carrier", carrier.trimmed().compare("shm", Qt::CaseInsensitive) == 0 ? "shm" : "tcp");
+    if (!object.contains("channel_id"))
+    {
+        object.insert("channel_id", "native-link-default");
+    }
+    if (!object.contains("port"))
+    {
+        object.insert("port", 5810);
+    }
+    m_connectionConfig.pluginSettingsJson = QString::fromUtf8(QJsonDocument(object).toJson(QJsonDocument::Compact));
+}
+
+bool MainWindow::ShouldShowNativeLinkCarrierDebugOptions() const
+{
+#ifdef _DEBUG
+    return m_connectionConfig.transportId == "native-link";
+#else
+    return false;
+#endif
 }

@@ -7,6 +7,306 @@ Curated milestone history for this repository.
 - Keep milestone sections in descending chronological order (newest first) so recent changes are immediately visible.
 - Historical branch/status wording in older entries is time-bound; read each section as a snapshot from that date.
 
+## 2026-03-21 - UI freeze during auton fixed: drain budget cap and key coalescing
+
+### Root cause
+
+During auton, Robot_Simulation publishes ~25 keys at ~62.5 Hz over TCP — roughly 1,500–1,562 messages/sec. The old dispatch had **two stacked `Qt::QueuedConnection` hops**:
+
+1. `OnPluginVariableUpdate` in `dashboard_transport.cpp` wrapped every incoming message in a `QMetaObject::invokeMethod(qApp, ..., QueuedConnection)` call — one Qt event per message = 1,500+ events/sec flooding the UI thread's event queue.
+2. Inside that lambda, `m_pendingUiUpdates` was populated (the batch path), but because the outer hop had already queued a separate Qt event for every message, the queue was never actually coalescing anything useful.
+
+`DrainPendingUiUpdates` processed the entire unbounded queue synchronously on every call with no per-call cap, so a sudden burst of 1,500 queued events would block the UI thread for 10–20 seconds.
+
+### Three fixes
+
+**Fix A** (`dashboard_transport.cpp` `OnPluginVariableUpdate`): Removed the outer `QMetaObject::invokeMethod`. Now calls `m_onVariableUpdate(update)` directly after the `alive` guard — messages go straight to the `m_pendingUiUpdates` batch path, no extra Qt event per message.
+
+**Fix B** (`main_window.cpp` `DrainPendingUiUpdates`): Added `kDrainBudget = 150` per-call cap. If more items remain after draining 150, a 16 ms reschedule fires to continue — keeps the UI event loop responsive between drains.
+
+**Fix C** (`main_window.cpp` `DrainPendingUiUpdates`): Added last-write-wins key coalescing using `std::unordered_map<std::string, int>` before processing the batch. At runtime with ~25 unique keys, a 150-item batch collapses to ≤25 unique tile updates before any widget repaint occurs.
+
+### Rule captured
+
+Never wrap a high-frequency per-message callback in `QueuedConnection` invokeMethod — that creates one Qt event per message and will flood the queue at any non-trivial rate. Reserve `QueuedConnection` for infrequent state changes (e.g. `OnPluginConnectionState`). For high-frequency data, write directly into an atomic queue/map and drain on a timer with a per-call budget cap.
+
+### Verification
+
+Ian confirmed the fix working manually (live auton run with ~25 keys at 62.5 Hz — dashboard remained responsive throughout). 74/74 automated tests pass.
+
+---
+
+## 2026-03-21 - Auto-connect checkbox now works correctly
+
+### Root cause (two parts)
+
+**Bug 1 — value silently discarded:** `SyncConnectionConfigToPluginSettingsJson()` rebuilt the plugin settings JSON from scratch each call, only preserving `carrier`, `channel_id`, and `port`. When `SetConnectionFieldValue("auto_connect", false)` wrote the value into the JSON, the next call to `SyncConnectionConfigToPluginSettingsJson()` (triggered by the same OK button handler) immediately overwrote the JSON from scratch, dropping `auto_connect`. The user's change was visible for zero time.
+
+**Bug 2 — live transport not interrupted:** Even after fixing Bug 1 so the value persisted, the running transport's reconnect loop was not interrupted. The TCP client's `autoConnect` atomic is set at `Start()` time and never updated live. The user was trapped: when the transport pulsed through `Connecting`/`Disconnected`, the Disconnect menu item was greyed out during `Disconnected` state and Connect was greyed during `Connecting` — neither was reliably clickable.
+
+### Fixes
+
+**Bug 1 fix** (`main_window.cpp` `SyncConnectionConfigToPluginSettingsJson`): Added `auto_connect` to the JSON round-trip preserve list. Includes an `Ian:` comment explaining the trap — any plugin Bool field stored only in `pluginSettingsJson` (with no dedicated `ConnectionConfig` member) must be explicitly listed here or it silently vanishes.
+
+**Bug 2 fix** (`main_window.cpp` `OnEditTransportSettings`): When the user unchecks auto-connect and clicks OK, and a transport is running, `StopTransport()` is called immediately. This is safe and fast — the worker is either sleeping `kReconnectRetryMs` (500 ms) between attempts or blocked in a 3-second connect timeout, both of which are interrupted by `ShutdownSocket()` inside `Stop()`. After stopping, `OnConnectionStateChanged(Disconnected)` is called so the title bar settles and the Connect menu item becomes available for a manual single-shot attempt. All other setting changes (host, port, carrier) retain the existing "reconnect manually" message box behavior.
+
+### Rule captured
+
+Any plugin-owned setting stored only in `pluginSettingsJson` (i.e., no dedicated `ConnectionConfig` struct member) must be explicitly round-tripped in `SyncConnectionConfigToPluginSettingsJson`. The function rebuilds JSON from scratch — any key not in the preserve list is silently dropped. When adding a new plugin Bool/Int/String field to a transport descriptor, always add a corresponding preserve entry here.
+
+### Verification
+
+74/74 automated tests pass including `AutoConnectFalseSurvivesSyncToPluginSettingsJson` (test #29). Ready for Ian's manual verification.
+
+---
+
+## 2026-03-21 - TCP wire protocol verified: no mismatches between DS server and SD client
+
+Full side-by-side comparison of all DS-side and SD-side TCP protocol definitions:
+
+| Item | DS (`NativeLinkTcp.h`) | SD (`native_link_tcp_protocol.h`) | Result |
+|---|---|---|---|
+| `kFrameMagic` | `0x4E4C5443` | `0x4E4C5443` | ✅ Match |
+| `kFrameVersion` | `1` | `1` | ✅ Match |
+| `FrameHeader` layout | `u32 magic, u16 version, u16 kind, u32 payloadBytes` | same | ✅ Match |
+| `FrameKind` enum | ClientHello=1, ServerHello=2, ServerMessage=3, ClientPublish=4, Heartbeat=5 | same | ✅ Match |
+| `HelloPayload` | `char channelId[64], char clientId[64]` | same | ✅ Match |
+| `ServerHelloPayload` | `u64 serverSessionId` | same | ✅ Match |
+| `HeartbeatPayload` | `u64 serverSessionId` | same | ✅ Match |
+| `SharedMessage` field layout | 4×u32, 3×u64, char[192], char[64], unsigned char[1024] | same (different namespace alias, identical struct) | ✅ Match |
+
+The previous session hypothesis about a wire-level protocol mismatch was **disproved**. The DS server's `ReceiveFrame` check at `NativeLinkTcp.cpp:125` will accept the SD client's frames — the magic and version bytes are identical.
+
+The DS `NativeLinkSharedMemory.h` includes the SD's `native_link_ipc_protocol.h` via a relative path (`../../../../plugins/NativeLinkTransport/include/native_link_ipc_protocol.h`) and aliases `sd::nativelink::SharedMessage` locally. The SD client uses `ipc::SharedMessage` which resolves to `sd::nativelink::ipc::SharedMessage` from its own copy of the same header. The two copies have different namespace nesting (`sd::nativelink` vs `sd::nativelink::ipc`) but identical struct field layout — so wire encoding is the same.
+
+**Conclusion:** The only things that were blocking cross-machine TCP were the three DS fixes now committed in `c5e14b3` (bind address `0.0.0.0`, INI default, carrier combo bounce). No protocol changes are needed.
+
+---
+
+## 2026-03-21 - DS Native Link TCP bind address fixed: 127.0.0.1 → 0.0.0.0
+
+- **Problem:** `ApplyNativeLinkEnvironment` in `DriverStation.cpp` hardcoded `NATIVE_LINK_HOST=127.0.0.1`. This value flowed into `ServerConfig.host` via `LoadServerConfigFromEnvironment` and was used as the bind address in `TcpServerCarrier::Start()` (`NativeLinkTcp.cpp:173`). A loopback-bound socket is invisible to any other machine — the kernel silently drops all cross-machine packets before they reach the process, which meant SmartDashboard on a remote machine at `192.168.1.x` could never connect. Windows Firewall would also never prompt because no external packet reached the socket (explaining the DS window "disappearing" — the firewall consent dialog was appearing and being dismissed for a connection that would have failed anyway).
+- **Comparison:** Legacy NT's `SocketServerStreamProvider` uses `htonl(INADDR_ANY)` (0.0.0.0) — all interfaces. That is why Legacy NT works cross-machine and Native Link TCP did not.
+- **Fix:** Changed `NATIVE_LINK_HOST` to `"0.0.0.0"` in `ApplyNativeLinkEnvironment`. The TCP server now binds all interfaces, matching Legacy NT behavior. Windows will prompt the firewall on the first inbound connection from a remote machine; allow once and it works permanently.
+- **Rule captured:** TCP server bind address must be `0.0.0.0` (all interfaces) for any cross-machine use case. `127.0.0.1` is loopback-only and correct only for same-machine testing.
+
+---
+
+## 2026-03-21 - DS Debug carrier combo regression fixed
+
+### Root cause
+When the user switched the carrier combo (SHM ↔ TCP/IP) while in Native Link mode, the `CBN_SELCHANGE` handler called:
+```cpp
+ApplyConnectionMode(ConnectionMode::eDirectConnect);
+ApplyConnectionMode(ConnectionMode::eNativeLink);
+```
+The intent was to restart the NativeLink server with the new carrier env that had just been written. But `ApplyConnectionMode` calls `SetConnectionMode` on the robot tester, which does a full mode teardown/restart. The intermediate `eDirectConnect` transition was observable: the connection mode combo visibly snapped to DirectConnect, the DS was left in an unusable state in Debug, and the carrier combo was left in an inconsistent enabled/disabled state.
+
+### Fix
+Replaced the two-step bounce with a single direct call:
+```cpp
+if (s_pRobotTester && s_pRobotTester->GetConnectionMode() == ConnectionMode::eNativeLink)
+    s_pRobotTester->SetConnectionMode(ConnectionMode::eNativeLink);
+```
+This re-applies the current mode (and therefore picks up the newly written `NATIVE_LINK_CARRIER` env) without ever surfacing a DirectConnect state to the user or to `ApplyConnectionMode`. The connection mode combo stays on Native Link throughout.
+
+### Secondary fix — `LoadPersistedNativeLinkCarrier` INI default
+The `GetPrivateProfileStringW` call in `LoadPersistedNativeLinkCarrier` was using a hardcoded `L"shm"` as the default string. On a clean machine (no `DriverStation.ini`) in Release, this would cause the INI-path to return `SharedMemory` even though `GetDefaultNativeLinkCarrier()` returns `Tcp`. Fixed by computing the default string from `GetDefaultNativeLinkCarrier()` so both code paths agree.
+
+### Rule captured
+Never use `ApplyConnectionMode` to bounce through an intermediate mode as a restart trick. `ApplyConnectionMode` is a user-visible state transition function — it updates the combo, persists to INI, and calls `SetConnectionMode` which does a full teardown. Use `SetConnectionMode` directly on the robot tester when a silent restart with updated env is needed.
+
+---
+
+## 2026-03-21 - Connect/Disconnect menu state-aware enable/disable
+
+- **Problem:** Connect and Disconnect menu items were always enabled (unless in replay mode), making them misleading — clicking Connect while already connected, or Disconnect while already stopped, was silently a no-op.
+- **Fix 1 — `ApplyTransportMenuChecks`:** Connect is now enabled only when `m_connectionState == Disconnected`; Disconnect is enabled only when the transport is running (Connecting/Connected/Stale). Added `Ian:` comment explaining the state-aware rationale.
+- **Fix 2 — `OnConnectionStateChanged`:** Added a call to `ApplyTransportMenuChecks()` at the end of `OnConnectionStateChanged` so the menu items refresh on every transport-driven state transition (e.g. the auto-connect loop cycling through Connecting → Connected → Disconnected).
+- **Bug found during testing:** `OnDisconnectTransport` was calling `UpdateWindowConnectionText(Disconnected)` directly, bypassing `OnConnectionStateChanged`. This updated the title bar but left `m_connectionState` and the menu enable states out of sync — so clicking Disconnect never re-enabled Connect. Fixed by routing through `OnConnectionStateChanged` instead. Same fix applied to the `StartTransport` failure path. Added `Ian:` comment at the fix site.
+- **Rule captured:** any code path that changes connection state must go through `OnConnectionStateChanged`, not `UpdateWindowConnectionText` directly. The former runs the full pipeline (title, menu enable/disable, recording event); the latter only updates the status bar label.
+- **Test counts:** 21/21 `NativeLinkTransport_tests` + 32/32 `SmartDashboard_tests` pass.
+
+---
+
+## 2026-03-21 - DS Native Link TCP root cause fixed: CRT/Win32 env desync
+
+- **Root cause:** `LoadServerConfigFromEnvironment()` in `Robot_Simulation/.../NativeLink.cpp` read `NATIVE_LINK_CARRIER` via `_dupenv_s` (CRT), while `ApplyNativeLinkEnvironment()` wrote it via `SetEnvironmentVariableA` (Win32). The CRT's env cache and the Win32 OS env block are separate stores that can diverge after process startup. The carrier read back as empty/default (`SharedMemory`) even though the Win32 block already had `"tcp"`, so port 5810 was never bound on a clean DS launch.
+- **Fix:** replaced `_dupenv_s` with `GetEnvironmentVariableA` (Win32) at `NativeLink.cpp:~104` so all reads in `LoadServerConfigFromEnvironment()` use the same Win32 layer as the write. Port 5810 now binds on a double-click/clean-env DS launch.
+- **Rule captured:** never mix `SetEnvironmentVariableA` (Win32 write) with `_dupenv_s` (CRT read) for the same variable in the same process. Use `GetEnvironmentVariableA` for both sides.
+- **Two stale SmartDashboard tests updated:** `NativeLinkPluginTcpTransportFailsWithoutTcpAuthority` and `NativeLinkTcpTransportFailsWithoutAuthority` were asserting `Start()` returns `false` — the old synchronous-blocking TCP behavior. With the non-blocking reconnecting client, `Start()` always returns `true` immediately; failure manifests as a `Disconnected` callback. Tests updated to use `auto_connect:false` and `WaitForCondition` for `Disconnected`.
+- **Test counts:** 21/21 `NativeLinkTransport_tests` + 32/32 `SmartDashboard_tests` pass.
+- **Verbose journal entry:** `docs/journal/2026-03-21-ds-env-root-cause.md`
+
+---
+
+## 2026-03-21 - CMake build system hardening: gtest discovery fix, NativeLink always-on, solution folders
+
+### gtest_discover_tests / MSB3073 build error fixed
+
+- **Root cause:** CMake 4.3 changed `gtest_discover_tests` default behaviour — the default `POST_BUILD` discovery mode runs the test executable immediately after linking. Under Visual Studio multi-config generators this fails because the output path can't be reliably resolved at post-build time, producing MSB3073 build errors on all test targets.
+- **Fix:** Added `DISCOVERY_MODE PRE_TEST` to every `gtest_discover_tests(...)` call across all repos — defers test enumeration to `ctest` run time. Applied to 6 call sites total (2 in `SmartDashboard`, 1 in `ClientInterface_direct`, 1 in `plugins/NativeLinkTransport` in the main repo; 2 in `SmartDashboard_baseline`).
+
+### NativeLink always built unconditionally
+
+- **Root cause:** `SMARTDASHBOARD_BUILD_PLUGIN_NATIVE_LINK` CMake option defaulted `OFF`, so a fresh `cmake` configure on a clean clone silently omitted all NativeLink projects. The build cache happened to have it `ON` from a prior manual override, making the configuration inconsistent across machines.
+- **Fix:** Removed the `option(SMARTDASHBOARD_BUILD_PLUGIN_NATIVE_LINK ...)` declaration from `CMakeLists.txt` entirely. `add_subdirectory(plugins/NativeLinkTransport)` is now unconditional. Removed the three `if(SMARTDASHBOARD_BUILD_PLUGIN_NATIVE_LINK)` guards in `SmartDashboard/CMakeLists.txt` (test source, include dir, and link library now always applied). Applied to both `SmartDashboard` and `SmartDashboard_baseline`.
+
+### Solution Explorer folder grouping added
+
+- **Root cause:** No CMake `FOLDER` properties were set on any target, so all 25+ projects appeared flat in Solution Explorer with no grouping — easy to lose NativeLink targets in the noise.
+- **Fix:** Added `set_property(GLOBAL PROPERTY USE_FOLDERS ON)` and `set(CMAKE_FOLDER "_CMake")` at the top-level `CMakeLists.txt`, plus `FOLDER` properties on every target. Solution Explorer now shows:
+  ```
+  SmartDashboard/          → SmartDashboardApp, SmartDashboard_tests
+  plugins/
+    NativeLink/            → NativeLinkTransportCore, NativeLinkTransportPlugin, NativeLinkTransport_tests
+    LegacyNt/              → LegacyNtTransportPlugin
+  ClientInterface_direct/  → lib + tests + samples/ + tools/
+  SmartDashboard_Interface_direct/ → DirectCommon, Interface_direct
+  _CMake/                  → ALL_BUILD, ZERO_CHECK, RUN_TESTS, INSTALL, ctest targets
+  ```
+- `ZERO_CHECK` / "reload solution" now correctly reflects NativeLink on every configure, including fresh clones.
+
+### Files changed
+
+| File | Change |
+|------|--------|
+| `CMakeLists.txt` | Removed `SMARTDASHBOARD_BUILD_PLUGIN_NATIVE_LINK` option; unconditional `add_subdirectory(plugins/NativeLinkTransport)`; `USE_FOLDERS ON`; `CMAKE_FOLDER "_CMake"` |
+| `SmartDashboard/CMakeLists.txt` | Removed 3 `if(SMARTDASHBOARD_BUILD_PLUGIN_NATIVE_LINK)` guards; `FOLDER "SmartDashboard"` on both targets; `DISCOVERY_MODE PRE_TEST` |
+| `ClientInterface_direct/CMakeLists.txt` | `FOLDER` properties for all targets; `DISCOVERY_MODE PRE_TEST` |
+| `SmartDashboard_Interface_direct/CMakeLists.txt` | `FOLDER "SmartDashboard_Interface_direct"` on both targets |
+| `plugins/NativeLinkTransport/CMakeLists.txt` | `FOLDER "plugins/NativeLink"` on all 3 targets; `DISCOVERY_MODE PRE_TEST` |
+| `plugins/LegacyNtTransport/CMakeLists.txt` | `FOLDER "plugins/LegacyNt"` |
+
+---
+
+## 2026-03-21 - Native Link SHM transport declared stable; live telemetry fix and stress hardening
+
+### Live telemetry gap — root cause and fix
+
+- **Root cause:** `NativeLink::Core::PublishInternal` called `FindTopic()` and rejected any write with `WriteRejectReason::UnknownTopic` if the topic was not pre-registered. `RegisterDefaultTopics` only pre-registered 7 topics. `TeleAutonV2` publishes ~26 keys per loop (Velocity, X_ft, Y_ft, Heading, Travel_Heading, Rotation Velocity, all wheel velocities/voltages/encoders, swivel voltages/raws, predicted_*). All of those extra keys were silently rejected — no error, no crash, just a missing value.
+- **Why Direct Connect worked and Native Link SHM did not:** `DirectPublisherStub::PublishDouble` writes to a raw ring buffer with no topic registration gate. Native Link's explicit topic contract is stricter by design.
+- **Fix in `NativeLink.cpp` `Core::PublishInternal`:** When `allowServerOnly=true` (server-originated write) and the topic is not found, auto-register it as `TopicKind::State`, `RetentionMode::LatestValue`, `replayOnSubscribe=true`, `WriterPolicy::ServerOnly`, value type inferred from the incoming value. Client-originated writes on unknown topics are still rejected, preserving the server-authoritative ownership model.
+- **Verified with `tools/native_link_live_telemetry_verify.py` (new script):** PASS — Velocity (57 distinct values), Y_ft (56 distinct), Wheel_fl_Velocity (12 distinct), all 7 required keys delivered, 410+ updates each across a 10-second headless collection window.
+
+### Disconnect stress script — 4 synchronization bugs fixed
+
+- **Bug 1:** Cycle 1 fired `disconnect` while the dashboard was still in Connecting state (had not yet drained the initial SHM snapshot). Fixed by waiting for `connection_state=Connected` (Nth occurrence) before the first cycle.
+- **Bug 2:** Cycles 44-50 saw `connected_state_timeout` because the authority's hardcoded `60000 ms` run expired before 50 cycles × ~1.2s completed. Fixed by computing authority run time from `max(60000, cycles × (pause_ms×2 + 15000) + 20000)`.
+- **Bug 3:** `connect` was fired without verifying the dashboard had actually reached `Disconnected` first. Fixed by polling the window title for "Disconnected" before each reconnect.
+- **Bug 4:** The script had a duplicate function body (lines 255-443 were a verbatim copy of lines 148-252). Removed.
+- **Result:** 50/50 cycles PASS, zero warnings, clean 50-cycle run with `pause_ms=400`.
+
+### SHM wire protocol — fully documented
+
+- SHM name: `Local\NativeLink.Shared.native-link-default`
+- `SharedState` = 10,825,000 bytes; `SharedClientSlot` = 1,353,112 bytes × 8; `SharedMessage` = 1,320 bytes
+- Ring buffer: monotonically increasing `serverWriteIndex`/`clientReadIndex`, slot = `messages[index % 1024]`
+- Value encoding: Bool=1 byte, Double=8 bytes LE IEEE-754, String=raw UTF-8, StringArray=`[u32 len][bytes]…`
+- Connect = CAS `clientTag` 0→nonzero; zero `snapshotCompleteSessionId` to trigger snapshot; heartbeat timeout = 5s
+
+### Dashboard log filtering insight documented
+
+- `IsHarnessFocusKey()` in `main_window.cpp` is an intentional narrow allowlist for the `DebugLogUiEvent` path.
+- `Heading` and `Travel_Heading` ARE delivered (sequence gap analysis: ~16 gaps per cycle = ~16 non-logged auto-registered topics) but are not in the allowlist.
+- Tiles are created for all delivered keys via the `m_nextTileOffset` cascade — the allowlist only controls what appears in the headless debug log.
+
+### New tooling
+
+- `tools/native_link_live_telemetry_verify.py` — headless telemetry delivery verifier; runs authority + dashboard, collects 10s of updates, asserts required keys and live value change.
+
+### `Ian:` comments added
+
+- `NativeLink.cpp` `PublishInternal` — server-authoritative ownership model and auto-register safety rationale
+- `NativeLinkAuthorityHelpers.cpp` `RegisterDefaultTopics` — explains why the list is minimal and where the auto-register path is the correct home for robot-code keys
+- `main_window.cpp` `IsHarnessFocusKey` — explains intentional allowlist scope and common trap (missing from allowlist ≠ not delivered)
+- `native_link_shm_disconnect_stress.py` — explains occurrence-count wait pattern, dynamic authority lifetime formula, and SHM snapshot drain motivation
+- `native_link_live_telemetry_verify.py` — explains REQUIRED_KEYS design and original root cause
+
+### Declaration
+
+- SHM transport is declared **stable** for the current session baseline.
+- Next session target: Native Link TCP carrier work (SHM remains hot-swappable reference backend).
+
+## 2026-03-20 - Startup defaults without persistence rollback
+
+- Added a debug-only Native Link carrier override to SmartDashboard transport settings so local validation can quickly compare `shm` and `tcp` against the same dashboard UI path.
+- Expanded Native Link focus-key UI logging to include `Velocity`, `Rotation Velocity`, `X_ft`, and wheel velocities for manual parity checks against Direct Connect.
+- Added `tools/native_link_observe_session.py` as a deterministic one-dashboard observe helper for Native Link manual debugging.
+- Confirmed a current split worth keeping visible in follow-up work:
+  - Direct Connect still shows live `Velocity` updates in tile logs
+  - Native Link SHM can be made to connect reliably in the observe flow when the authority starts first
+  - but the latest one-dashboard Native Link observe run still did not deliver post-connect live motion telemetry like `Velocity`.
+
+- Stabilized the post-persistence-cleanup startup experience on `feature/native-link-tcpip-carrier`.
+- Disabled SmartDashboard-owned direct remembered-control persistence by default behind `SMARTDASHBOARD_ENABLE_DIRECT_REMEMBERED_CONTROLS`.
+- Added temporary UI-only startup defaults behind `SMARTDASHBOARD_ENABLE_TEMPORARY_TILE_DEFAULTS` so widgets can hydrate without writing fake state back to transport or `QSettings`.
+- Current temporary default policy:
+  - bool widgets seed to `false`
+  - numeric widgets seed to `0.0`
+  - chooser widgets seed to first available option
+  - string display/edit widgets seed to empty string.
+- Reapplied temporary defaults after runtime layout loads, including the `Clear Widgets` -> `Load Layout` workflow.
+- Added focused regression coverage in:
+  - `SmartDashboard/tests/main_window_persistence_tests.cpp`
+  - `SmartDashboard/tests/variable_tile_tests.cpp`
+- Stable checkpoint commit: `dc69ecd` (`restore startup widget defaults without reviving persistence`).
+
+## 2026-03-19 - Replay line-plot reset workflow
+
+- Added a global line-plot reset workflow for repeated replay diagnosis passes:
+  - `View -> Reset All Line Plots` now clears all active line plots
+  - added app-wide shortcut `Ctrl+Shift+R`
+- Added replay-integrated reset preferences:
+  - optional `Clear line plots on rewind-to-start`
+  - optional `Clear line plots on backward seek`
+  - both persist through `QSettings`
+- Added focused tile coverage in `SmartDashboard/tests/variable_tile_tests.cpp` for line-plot reset behavior.
+- Gated Native Link registry tests behind `SMARTDASHBOARD_BUILD_PLUGIN_NATIVE_LINK` so the default test target builds on non-Native-Link configurations again.
+
+## 2026-03-20 - Native Link TCP pre-merge checkpoint
+
+- Completed the first full carrier-abstraction checkpoint across `SmartDashboard`
+  and `Robot_Simulation` while preserving the Native Link semantic contract:
+  - one server-authoritative session/generation model
+  - descriptor snapshot -> state snapshot -> live delta ordering
+  - explicit state vs command/event behavior
+  - lease/ownership behavior
+  - no command replay.
+- Preserved `shm` + named events as the hot-swappable diagnostic/reference
+  carrier on both sides.
+- Added the localhost TCP reference path on both sides:
+  - SmartDashboard now has TCP client + TCP test-authority support under the
+    carrier boundary
+  - Robot_Simulation now has TCP reference authority + TCP test-client support
+    under the same semantic contract.
+- Proved the real runtime TCP path without introducing a public SHM/TCP chooser:
+  - `Native Link` now defaults to TCP at the plugin/runtime boundary when
+    `carrier` is omitted
+  - SHM remains explicitly selectable for internal diagnostics/support only
+  - added environment-driven runtime proof via
+    `tools/native_link_tcp_runtime_probe.py`.
+- Updated the SmartDashboard Native Link settings dialog shape to feel familiar
+  for students moving from Legacy NT workflows:
+  - `Use team number`
+  - `Team number`
+  - `Host / IP`
+  - `Client name`
+  - the dialog still does not expose SHM/TCP as a normal user-facing carrier
+    choice; transport defaults remain TCP unless a developer override says
+    otherwise.
+- Restabilized the broader SmartDashboard Native Link baseline after the latest
+  merged `main` changes by:
+  - queuing plugin transport callbacks onto the Qt thread
+  - tightening real multi-instance startup ordering in the probe helpers
+  - confirming the intermittent plugin DLL copy issue was just stale
+    `SmartDashboardApp.exe` processes holding the deployed DLL open.
+- Current pre-merge validation checkpoint:
+  - SmartDashboard SHM shared-state probe passes
+  - SmartDashboard TCP runtime probe passes
+  - SmartDashboard Native Link focused `ctest` slice passes
+  - Robot_Simulation Native Link focused tests pass.
+
 ## 2026-03-19 - Native Link IPC carrier hardening checkpoint
 
 - Continued the SmartDashboard-side real IPC transition after the earlier in-process scaffold removal.
@@ -34,6 +334,11 @@ Curated milestone history for this repository.
   - focused SmartDashboard and Robot_Simulation Native Link automated checks are green
   - but the older two-real-dashboard shared-state probe still does not complete end-to-end against the current real IPC path, so paired app-level validation needs another pass before being treated as fully confirmed.
   - the first follow-up cleanup on that probe was to realign it with simulator-owned authority truth (`Just Move Forward`, `TestMove=3.5`) instead of the old dashboard-local scaffold defaults; the helper assertion is now corrected, but the real app-level retained-update gap still remains.
+- Persistence debugging follow-up from the next pass:
+  - a real SmartDashboard-local persistence bug did exist: incoming telemetry for operator widgets could still flow into `m_rememberedControlValues` on the `Direct` path, so retained transport state could later masquerade as dashboard-owned startup memory
+  - the fix now keeps remembered-control writes behind explicit local edit handlers only and prevents startup/reconnect refresh from inventing new remembered entries from live tiles
+  - the debugging also confirmed a second important lesson: even after the persistence fix, values like `TestMove=3.5` can still reappear from transport-retained state or authority-side test seeds, so future triage must check both `QSettings` and retained transport replay before concluding persistence regressed
+  - durable notes for that triage now live in `docs/persistence_debugging.md` and focused regression coverage was added in `SmartDashboard/tests/main_window_persistence_tests.cpp`.
 - Follow-up paired-validation fix:
   - the real two-dashboard helper was still launching both SmartDashboard processes with the same persisted Native Link client identity, which undercut the intended many-client proof against the simulator-owned authority
   - the helper now rewrites the persisted client name between launches and auto-starts the local `DriverStation_TransportSmoke.exe` authority when available

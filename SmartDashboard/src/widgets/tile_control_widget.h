@@ -19,6 +19,8 @@ namespace sd::widgets
     public:
         explicit TileControlWidget(VariableType type, QWidget* parent = nullptr);
 
+        void SetInteractionEnabled(bool enabled);
+        void SetValueAvailable(bool available);
         void SetBoolValue(bool value);
         void SetDoubleValue(double value);
         void SetDoubleRange(double lowerLimit, double upperLimit);
@@ -34,8 +36,12 @@ namespace sd::widgets
         void StringEdited(const QString& value);
 
     private:
+        void UpdateInteractivity();
+
         VariableType m_type;
         bool m_settingProgrammatically = false;
+        bool m_interactionEnabled = true;
+        bool m_valueAvailable = false;
         double m_doubleLowerLimit = -1.0;
         double m_doubleUpperLimit = 1.0;
         QCheckBox* m_checkBox = nullptr;

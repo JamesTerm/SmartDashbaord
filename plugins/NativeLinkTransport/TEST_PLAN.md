@@ -164,6 +164,29 @@ Diagnostic policy:
 - use `shm` as the reference path when isolating new ordering/reconnect bugs in
   `tcp`.
 
+Build/run hygiene note:
+
+- SmartDashboard plugin rebuilds can fail if `SmartDashboardApp.exe` is still
+  running and holding the deployed plugin DLL open in `build/SmartDashboard`.
+- Preferred workflow for Native Link validation is:
+  1. stop SmartDashboard processes first
+  2. build plugin/app targets
+  3. launch probes or manual dashboards after the build completes
+- If a rebuild fails during the `copy_if_different` deploy step, treat it as a
+  runtime file-lock issue first rather than a transport regression.
+- Confirmed cause: the deployed plugin DLL beside `SmartDashboardApp.exe` is
+  writable once every `SmartDashboardApp.exe` process has actually exited.
+  Intermittent copy failures were stale dashboard processes, not an unknown
+  hidden lock source.
+
+Current checkpoint additions:
+
+- validate carrier-name parsing independently from transport startup
+- validate that explicit `tcp` selection fails cleanly until the TCP carrier is
+  implemented, rather than silently reusing the SHM backend.
+- use `tools/native_link_tcp_runtime_probe.py` for the first environment-driven
+  runtime TCP proof before adding user-facing carrier-selection plumbing.
+
 ## Acceptance signal for first implementation slice
 
 Do not treat Native Link v1 as ready until these all pass:

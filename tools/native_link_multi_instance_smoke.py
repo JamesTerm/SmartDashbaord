@@ -1,4 +1,5 @@
 import os
+import re
 import subprocess
 import sys
 import time
@@ -8,6 +9,23 @@ from pathlib import Path
 APP_PATH = Path(r"D:\code\SmartDashboard\build\SmartDashboard\Debug\SmartDashboardApp.exe")
 PROCESS_NAME = "SmartDashboardApp.exe"
 REGISTRY_KEY = r"HKCU\Software\SmartDashboard\SmartDashboardApp\connection"
+DEBUG_DIR = Path(r"D:\code\SmartDashboard\.debug")
+
+
+def read_log(path: Path) -> str:
+    if not path.exists():
+        return ""
+    return path.read_text(encoding="utf-8", errors="replace")
+
+
+def wait_for_log_pattern(path: Path, pattern: str, timeout_seconds: float) -> bool:
+    deadline = time.time() + timeout_seconds
+    while time.time() < deadline:
+        contents = read_log(path)
+        if contents and re.search(pattern, contents) is not None:
+            return True
+        time.sleep(0.2)
+    return False
 
 
 def configure_native_link_settings(client_name: str) -> None:
@@ -18,7 +36,7 @@ def configure_native_link_settings(client_name: str) -> None:
         ("transportKind", "REG_DWORD", "1"),
         ("transportId", "REG_SZ", "native-link"),
         ("ntClientName", "REG_SZ", client_name),
-        ("pluginSettingsJson", "REG_SZ", '{"client_name":"' + client_name + '"}'),
+        ("pluginSettingsJson", "REG_SZ", '{"carrier":"shm","channel_id":"native-link-default","client_name":"' + client_name + '"}'),
     ]
 
     for name, reg_type, value in settings:
@@ -49,7 +67,7 @@ def close_all() -> None:
 def launch_instance(name: str, allow_multi_instance: bool) -> subprocess.Popen:
     env = os.environ.copy()
     env["SMARTDASHBOARD_WORKSPACE_ROOT"] = r"D:\code\SmartDashboard"
-    env.pop("SMARTDASHBOARD_INSTANCE_TAG", None)
+    env["SMARTDASHBOARD_INSTANCE_TAG"] = name
     args = [str(APP_PATH)]
     # Ian: Pass the instance tag on argv as well as through the environment
     # path in the app. That makes the per-process log naming resilient even if
@@ -84,9 +102,12 @@ def wait_for_instance_count(expected: int, timeout_seconds: float) -> bool:
 
 def main() -> int:
     linger_seconds = 0.0
+    leave_running = False
     for i in range(1, len(sys.argv)):
         if sys.argv[i] == "--linger-seconds" and i + 1 < len(sys.argv):
             linger_seconds = float(sys.argv[i + 1])
+        if sys.argv[i] == "--leave-running":
+            leave_running = True
 
     if not APP_PATH.exists():
         print(f"missing_app={APP_PATH}")
@@ -105,6 +126,21 @@ def main() -> int:
     first = launch_instance("dashboard-a", allow_multi_instance=False)
     if not wait_for_instance_count(1, 10.0):
         print("first_launch_failed")
+        close_all()
+        return 1
+
+    first_log = DEBUG_DIR / "native_link_ui_dashboard-a.log"
+    if not wait_for_log_pattern(
+        first_log,
+        r"update key=Test/Auton_Selection/AutoChooser/selected value=Just Move Forward",
+        8.0,
+    ):
+        # Ian: Launch the second real dashboard only after the first one proves
+        # it crossed the retained snapshot boundary. That keeps this smoke aimed
+        # at true multi-instance behavior instead of measuring arbitrary startup
+        # overlap between two fresh GUI processes.
+        print("first_instance_retained_startup_failed")
+        first.poll()
         close_all()
         return 1
 
@@ -137,10 +173,16 @@ def main() -> int:
 
     if linger_seconds > 0.0:
         # Ian: The shared-state probe reads per-process UI logs after this
-        # helper returns. Keep the dashboards alive briefly so those logs have a
-        # stable chance to flush and appear on disk.
+        # helper returns. Keep the dashboards alive briefly so queued retained
+        # updates have a stable chance to reach the UI thread before teardown.
         print(f"linger_seconds={linger_seconds}")
         time.sleep(linger_seconds)
+
+    if leave_running:
+        # Ian: Returning while the dashboards are still alive gives the parent
+        # probe a deterministic window to inspect real-process UI logs before a
+        # forced cleanup can race the last retained updates.
+        return 0
 
     first.poll()
     second.poll()

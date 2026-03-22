@@ -38,6 +38,15 @@ namespace sd::widgets
         MoveAndResize
     };
 
+    enum class ValueOrigin
+    {
+        None,
+        TemporaryDefault,
+        RememberedControl,
+        LiveTransport,
+        LocalEdit
+    };
+
     class VariableTile final : public QFrame
     {
         Q_OBJECT
@@ -46,9 +55,13 @@ namespace sd::widgets
         explicit VariableTile(const QString& key, VariableType type, QWidget* parent = nullptr);
 
         void SetEditable(bool editable);
+        void ClearValue();
         void SetBoolValue(bool value);
         void SetDoubleValue(double value);
         void SetStringValue(const QString& value);
+        void SetTemporaryDefaultBoolValue(bool value);
+        void SetTemporaryDefaultDoubleValue(double value);
+        void SetTemporaryDefaultStringValue(const QString& value);
         void SetShowEditHandles(bool showHandles);
         void SetSnapToGrid(bool enabled, int gridSize = 8);
         void SetEditInteractionMode(EditInteractionMode mode);
@@ -66,11 +79,16 @@ namespace sd::widgets
         void SetBoolCheckboxShowLabel(bool showLabel);
         void SetStringChooserMode(bool chooserMode);
         void SetStringChooserOptions(const QStringList& options);
+        bool IsLinePlotWidget() const;
         void ResetLinePlotGraph();
 
         QString GetKey() const;
         VariableType GetType() const;
         QString GetWidgetType() const;
+        bool HasValue() const;
+        bool HasLiveValue() const;
+        bool IsShowingTemporaryDefault() const;
+        ValueOrigin GetValueOrigin() const;
         bool GetBoolValue() const;
         double GetDoubleValue() const;
         QString GetStringValue() const;
@@ -115,11 +133,13 @@ namespace sd::widgets
         QString FormatValueText() const;
         void UpdateWidgetPresentation();
         void UpdateValueDisplay();
+        void SetBoolValueInternal(bool value, ValueOrigin origin);
+        void SetDoubleValueInternal(double value, ValueOrigin origin);
+        void SetStringValueInternal(const QString& value, ValueOrigin origin);
         int DoubleToPercent(double value) const;
         int ValueToPercentForProgressBar(double value) const;
         void UpdateBoolLedAppearance();
         bool IsGaugeWidget() const;
-        bool IsLinePlotWidget() const;
         bool IsDoubleNumericWidget() const;
         bool IsPropertiesSupported() const;
         void OpenPropertiesDialog();
@@ -143,6 +163,8 @@ namespace sd::widgets
         QPoint m_dragStartGlobal;
         QRect m_dragStartGeometry;
         DragMode m_dragMode = DragMode::None;
+        bool m_hasValue = false;
+        ValueOrigin m_valueOrigin = ValueOrigin::None;
         bool m_boolValue = false;
         double m_doubleValue = 0.0;
         bool m_settingGaugeProgrammatically = false;

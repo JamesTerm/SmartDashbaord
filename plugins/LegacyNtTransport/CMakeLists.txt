@@ -25,6 +25,7 @@ target_link_libraries(LegacyNtTransportPlugin
 
 set_target_properties(LegacyNtTransportPlugin PROPERTIES
     OUTPUT_NAME "SmartDashboardTransport_LegacyNt"
+    FOLDER "plugins/LegacyNt"
 )
 
 add_custom_command(TARGET LegacyNtTransportPlugin POST_BUILD
