@@ -13,7 +13,7 @@
 
 ## Active Native Link context
 
-- Current stable branch head is on `feature/native-link-tcpip-carrier`.
+- `feature/native-link-tcpip-carrier` is merged to `main`. Active development is on `main`.
 - Baseline comparison repo is parked at `c8a1f0e` in `D:\code\SmartDashboard_baseline` for future regression checks.
 - `plugins/NativeLinkTransport/include/native_link_carrier_client.h` is the active client-side carrier boundary.
 - `shm` remains the diagnostic/reference backend and must stay hot-swappable.
@@ -48,6 +48,7 @@
 
 - Branch `feature/native-link-tcpip-carrier` is **merged to main and pushed** in both repos.
 - All known bugs are fixed. 74/74 tests pass.
+- Near-term roadmap items 1-5 from `docs/native_link_rollout_strategy.md` are complete on both sides.
 - Ian confirmed the UI-freeze fix. The auto-connect fix is ready for follow-up manual verification next time the DS is available.
 
 ## Hand-off checkpoint commit hashes
@@ -57,9 +58,17 @@
 | SmartDashboard | `main` | post-merge (see git log) |
 | Robot_Simulation | `main` | post-merge (see git log) |
 
+## Cross-repo sync rule
+
+- This repo and `D:\code\Robot_Simulation` share the Native Link contract, carrier implementations, and plugin boundary.
+- When either repo's session notes or strategy docs change, check the other side for consistency — especially around invariants, carrier defaults, and plugin support iterations.
+- The canonical long-term rollout strategy lives in `docs/native_link_rollout_strategy.md` (this repo).
+
 ## Next session starting point
 
-**No blocking work.** The project is fully merged. Candidate follow-on tasks (pick any):
+**No blocking work.** The near-term roadmap (items 1-5) is complete on both repos. Awaiting direction for next iteration.
+
+Candidate follow-on tasks from previous sessions (pick any):
 
 - **Manual verify auto-connect checkbox** with a live DS: uncheck it in settings while connected, confirm the transport stops immediately and Connect becomes available.
 - Write-ack protocol on TCP `Publish` (currently fire-and-forget).
