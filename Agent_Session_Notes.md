@@ -46,10 +46,20 @@
 
 ## Current status
 
+### Native Link (main branch)
+
 - Branch `feature/native-link-tcpip-carrier` is **merged to main and pushed** in both repos.
 - All known bugs are fixed. 74/74 tests pass.
 - Near-term roadmap items 1-5 from `docs/native_link_rollout_strategy.md` are complete on both sides.
 - Ian confirmed the UI-freeze fix. The auto-connect fix is ready for follow-up manual verification next time the DS is available.
+
+### Shuffleboard transport (`feature/shuffleboard-transport`)
+
+- **Plugin structure complete:** `plugins/ShuffleboardTransport/` with NT4 client, plugin ABI bridge, CMake build, and 17 tests — all passing.
+- **NT4 client** (`nt4_client.h` / `nt4_client.cpp`, ~700 lines) — IXWebSocket-based NT4 v4.1 client: subscribe-on-connect, binary MsgPack decoding, JSON announce parsing, topic prefix stripping, auto-reconnect, publish stubs for phase 2.
+- **Plugin entry** (`shuffleboard_transport_plugin.cpp`, ~400 lines) — Full `sd_transport_plugin_descriptor_v1` ABI: connection fields (host, use_team_number, team_number, client_name, auto_connect), JSON settings, team-number host resolution, update callback bridge, plugin_id `"shuffleboard"`, display_name `"Shuffleboard (NT4)"`.
+- **Phase 1 is receive-only.** `supports_chooser` returns false. The publish path (`PublishBool/Double/String`) is implemented but not wired — waiting for end-to-end validation before flipping the flag.
+- **Build dependency:** `ixwebsocket::ixwebsocket` (STATIC from vcpkg) + `bcrypt` (Windows system lib for mbedTLS). Stock vcpkg ixwebsocket is fine for the client side (no overlay port needed — the subprotocol fix is server-side only).
 
 ## Hand-off checkpoint commit hashes
 
@@ -63,11 +73,15 @@
 - This repo and `D:\code\Robot_Simulation` share the Native Link contract, carrier implementations, and plugin boundary.
 - When either repo's session notes or strategy docs change, check the other side for consistency — especially around invariants, carrier defaults, and plugin support iterations.
 - The canonical long-term rollout strategy lives in `docs/native_link_rollout_strategy.md` (this repo).
-- **Shuffleboard transport:** Robot_Simulation's `feature/shuffleboard-transport` branch takes the lead on NT4 protocol work. This repo's `feature/shuffleboard-transport` branch is reserved for the SmartDashboard plugin side once the simulator proves the protocol works against the official Shuffleboard app.
+- **Shuffleboard transport:** Robot_Simulation's `feature/shuffleboard-transport` branch has a working NT4 server. This repo's `feature/shuffleboard-transport` branch has the SmartDashboard NT4 client plugin (receive-only, phase 1 complete, 17 tests passing). See `plugins/ShuffleboardTransport/`.
 
 ## Next session starting point
 
-**Shuffleboard transport work is active on the Robot_Simulation side.** This repo is not involved yet — the simulator will prove NT4 protocol compatibility with the official Shuffleboard app first, then findings inform the SmartDashboard plugin.
+**Shuffleboard transport plugin phase 1 is code-complete** on `feature/shuffleboard-transport`. Next steps:
+
+1. **End-to-end integration test:** Run SmartDashboard with the Shuffleboard plugin against Robot_Simulation's `DriverStation_TransportSmoke.exe --mode shuffle` to verify live telemetry display through the full pipeline.
+2. **Phase 2 — Chooser write-back:** Validate the NT4 publish+value flow end-to-end, then flip `supports_chooser` to true.
+3. **Expand published keys:** Smoke test publishes ~6 keys + chooser. Full TeleAutonV2 publishes ~49 keys.
 
 Candidate follow-on tasks (independent of Shuffleboard work):
 
