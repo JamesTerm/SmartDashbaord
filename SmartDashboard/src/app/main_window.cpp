@@ -2394,8 +2394,12 @@ void MainWindow::OnDebugCommandReceived()
             socket->deleteLater();
             continue;
         }
-        const QString cmd = QString::fromUtf8(socket->readAll()).trimmed().toLower();
-        DebugLogUiEvent(QString("debug_cmd_received cmd=%1").arg(cmd));
+        // Ian: Keep the original (case-sensitive) string for publish commands
+        // where key and value casing matters, but use a lowered copy for
+        // command dispatch so "Connect" / "DISCONNECT" etc. still work.
+        const QString rawCmd = QString::fromUtf8(socket->readAll()).trimmed();
+        const QString cmd = rawCmd.toLower();
+        DebugLogUiEvent(QString("debug_cmd_received cmd=%1").arg(rawCmd));
         socket->write("ok\n");
         socket->flush();
         socket->deleteLater();
@@ -2415,6 +2419,45 @@ void MainWindow::OnDebugCommandReceived()
         {
             m_userDisconnected = false;
             StartTransport();
+        }
+        // Ian: "publish double <key> <value>" and "publish string <key> <value>"
+        // allow test automation to write values back through the transport without
+        // requiring manual UI interaction. Uses the raw (case-sensitive) command
+        // so key names and string values preserve their original casing.
+        else if (cmd.startsWith("publish ") && m_transport)
+        {
+            // Parse: "publish <type> <key> <value...>"
+            // Split on the raw string to preserve casing.
+            const int typeStart = rawCmd.indexOf(' ') + 1;
+            const int keyStart = rawCmd.indexOf(' ', typeStart) + 1;
+            const int valStart = rawCmd.indexOf(' ', keyStart) + 1;
+            if (typeStart > 0 && keyStart > typeStart && valStart > keyStart)
+            {
+                const QString type = rawCmd.mid(typeStart, keyStart - typeStart - 1).toLower();
+                const QString key = rawCmd.mid(keyStart, valStart - keyStart - 1);
+                const QString val = rawCmd.mid(valStart);
+                if (type == "double")
+                {
+                    bool ok = false;
+                    const double d = val.toDouble(&ok);
+                    if (ok)
+                    {
+                        m_transport->PublishDouble(key, d);
+                        DebugLogUiEvent(QString("debug_publish_double key=%1 value=%2").arg(key).arg(d));
+                    }
+                }
+                else if (type == "string")
+                {
+                    m_transport->PublishString(key, val);
+                    DebugLogUiEvent(QString("debug_publish_string key=%1 value=%2").arg(key, val));
+                }
+                else if (type == "bool")
+                {
+                    const bool b = (val == "1" || val.toLower() == "true");
+                    m_transport->PublishBool(key, b);
+                    DebugLogUiEvent(QString("debug_publish_bool key=%1 value=%2").arg(key).arg(b));
+                }
+            }
         }
     }
 }

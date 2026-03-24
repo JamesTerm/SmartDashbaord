@@ -1,4 +1,5 @@
 #include "nt4_client.h"
+#include <IXNetSystem.h>
 #include <IXWebSocket.h>
 
 #include <atomic>
@@ -649,6 +650,11 @@ struct NT4Client::Impl
     std::atomic<bool> connected{false};
     std::atomic<bool> stopping{false};
 
+    // Ian: Winsock initialisation is deferred until Start() so that sessions
+    // using Direct or NativeLink transport never pay the WSAStartup cost.
+    // ix::initNetSystem() wraps WSAStartup on Windows and is a no-op elsewhere.
+    bool netInitialized{false};
+
     // Ian: Topic map is keyed by server-assigned topic ID. The server sends
     // the ID in every binary value frame, so lookups here happen on the hot
     // path. An unordered_map is fine for the ~50 topics we expect.
@@ -1074,6 +1080,16 @@ bool NT4Client::Start(
     // thread which handles connect, read, reconnect. This matches the
     // NativeLink TCP client convention: Start() returns immediately, state
     // changes arrive via callbacks.
+    // Ian: Initialise Winsock on first use. ix::initNetSystem() calls
+    // WSAStartup on Windows — without this, every socket call fails with
+    // WSANOTINITIALISED. Deferred to Start() so Direct/NativeLink sessions
+    // never trigger it; those plugins have their own WSAStartup calls.
+    if (!m_impl->netInitialized)
+    {
+        ix::initNetSystem();
+        m_impl->netInitialized = true;
+    }
+
     m_impl->ws.start();
 
     return true;
@@ -1084,6 +1100,12 @@ void NT4Client::Stop()
     m_impl->stopping.store(true);
     m_impl->ws.stop();
     m_impl->connected.store(false);
+
+    if (m_impl->netInitialized)
+    {
+        ix::uninitNetSystem();
+        m_impl->netInitialized = false;
+    }
 }
 
 bool NT4Client::IsConnected() const

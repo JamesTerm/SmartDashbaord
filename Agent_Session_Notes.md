@@ -105,12 +105,34 @@ Reconnect logic lifted out of all three plugins into `MainWindow`. Every plugin 
 - The canonical long-term rollout strategy lives in `docs/native_link_rollout_strategy.md` (this repo).
 - **Shuffleboard transport:** Robot_Simulation's `feature/shuffleboard-transport` branch has a working NT4 server with full bidirectional support. This repo's `feature/shuffleboard-transport` branch has the SmartDashboard NT4 client plugin with write-back and host-level auto-connect.
 
+### WSAStartup fix (BUG 4)
+
+The Shuffleboard transport uses IXWebSocket, which requires Winsock to be initialized on Windows. `WSAStartup()` was never called — NativeLink and LegacyNt each called it in their own transport code, but Shuffleboard didn't.
+
+**Error:** `Unable to connect to 127.0.0.1 on port 5810, error: Either the application has not called WSAStartup, or WSAStartup failed.`
+
+**Fix:** Added `ix::initNetSystem()` in `NT4Client::Start()` (before `ws.start()`) and `ix::uninitNetSystem()` in `Stop()`, guarded by `bool netInitialized` flag in Impl. Defers Winsock initialization to first Shuffleboard use — Direct/NativeLink sessions never trigger it.
+
+### Debug command: `publish` support
+
+Extended `OnDebugCommandReceived()` in `main_window.cpp` to accept `publish double|string|bool <key> <value>` commands via the named pipe (`SmartDashboardApp_DebugCmd_<PID>`). This enables test automation to write values back through the transport without manual UI interaction. Uses case-sensitive raw command string so key names and string values preserve casing.
+
+**Tool:** `tools/sdcmd.ps1` — PowerShell named-pipe client for sending debug commands.
+
+### End-to-end verification: PASSED
+
+Full bidirectional flow verified with real DriverStation (not just smoke test):
+1. SmartDashboard connects to DriverStation NT4 server (port 5810)
+2. Telemetry streams continuously (Velocity, X_ft, Y_ft, Timer, wheel velocities)
+3. `publish double TestMove 3.5` and `publish string .../AutoChooser/selected Just Move Forward` sent via debug pipe
+4. NT4 server echoed values back to SmartDashboard (confirmed in debug log: `update key=TestMove value=3.5`)
+5. Auton started via `dsctl.ps1 auton-enable` — robot drove forward, `Y_ft = 3.029`
+
 ## Next session starting point
 
-**Write-back + auto-connect refactoring is code-complete** on `feature/shuffleboard-transport`. Both repos build clean and SmartDashboard tests pass (91/91). Next steps:
+**Shuffleboard transport is end-to-end verified** on `feature/shuffleboard-transport`. Both repos build clean, tests pass (91/91), and the full bidirectional flow works: telemetry display AND write-back producing observable robot movement.
 
-1. **End-to-end feedback verification:** Run SmartDashboard with Shuffleboard plugin against Robot_Simulation's `DriverStation_TransportSmoke.exe --mode shuffle`. Verify that dashboard edits (chooser selection, TestMove slider) reach the simulator and produce observable effects. The smoke test reads auton selection, moves forward, and the Y-ft value can be monitored to validate the full feedback loop.
-2. **Git commit** both repos on `feature/shuffleboard-transport`.
+**Close to merge.** User will run additional manual tests before merging to main.
 
 Candidate follow-on tasks:
 
