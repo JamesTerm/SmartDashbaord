@@ -7,7 +7,7 @@
 
 ## Workflow
 
-- **Use CRLF line endings** for all source files (`.cpp`, `.h`, `.cmake`, `.ps1`, `.py`, `.md`, `.rc`, `.gitignore`). Both repos standardized CRLF as of the Shuffleboard merge.
+- **Use CRLF line endings** for all source files (`.cpp`, `.h`, `.cmake`, `.ps1`, `.py`, `.md`, `.rc`, `.gitignore`). Both repos standardized CRLF as of the NT4 transport merge.
 - Read nearby `Ian:` comments before editing and add new ones where transport, protocol, lifecycle, or ownership lessons would be expensive to rediscover.
 - Never mix `SetEnvironmentVariableA` (Win32 write) with `_dupenv_s` (CRT read) for the same variable. Use `GetEnvironmentVariableA` on the read side to match the Win32 write.
 - `gtest_discover_tests` calls all use `DISCOVERY_MODE PRE_TEST`.
@@ -73,12 +73,12 @@ Current plugins:
 | Feature | Branch | Status |
 |---|---|---|
 | Native Link TCP carrier | `feature/native-link-tcpip-carrier` | Merged to main |
-| Shuffleboard NT4 transport | `feature/shuffleboard-transport` | Merged to main |
-| Glass NT4 transport + Shuffleboard→NT4 rename | `feature/glass-transport` | Active |
+| NT4 transport (originally "Shuffleboard") | `feature/shuffleboard-transport` | Merged to main |
+| Glass verification + Shuffleboard→NT4 rename | `feature/glass-transport` | Merged to main |
 
-## Glass transport (active — `feature/glass-transport`)
+## Glass support (complete — no separate plugin needed)
 
-Glass is the next dashboard integration target. It uses the same NT4 protocol as Shuffleboard — same WebSocket transport, same MsgPack binary frames, same JSON control messages, same port 5810. Because the NT4 plugin already implements a full NT4 client, the Glass plugin may share most of that code.
+Glass uses the same NT4 protocol as Shuffleboard — same WebSocket transport, same MsgPack binary frames, same JSON control messages, same port 5810. It connects to the existing NT4Transport plugin with zero changes. No `plugins/GlassTransport/` is needed.
 
 ### Glass installation
 
@@ -95,47 +95,6 @@ Glass 2026.2.2 is installed at `D:\code\Glass` (portable directory, same pattern
 
 **Source:** `https://frcmaven.wpi.edu/artifactory/release/edu/wpi/first/tools/Glass/2026.2.2/Glass-2026.2.2-windowsx86-64.zip`
 
-### Plan
-
-1. ~~Pull Glass into `D:\code\Glass`~~ — Done
-2. **Make Robot_Simulation work with Glass** — likely zero server changes since Glass speaks the same NT4 protocol on port 5810
-3. **Create SmartDashboard Glass plugin** under `plugins/GlassTransport/`
-
-### Lessons from the Shuffleboard integration to apply to Glass
-
-**Protocol:**
-- NT4 is subscription-driven. The server must NOT send `announce` messages until the client sends `subscribe`. This was the #1 silent failure with Shuffleboard.
-- When a client sends binary value frames, it uses its **pubuid** (from the JSON `publish` message), NOT the server-assigned topic ID. The server must maintain a per-client `pubuid -> topicId` map.
-- The server should echo values back to the sender (not skip the originating client). The server is the single source of truth.
-- Binary MsgPack frames may contain multiple concatenated messages per WebSocket frame.
-- Subprotocol negotiation is critical. IXWebSocket needed a patch to echo exactly ONE selected protocol (RFC 6455). The overlay port at `D:\code\Robot_Simulation\overlay-ports\ixwebsocket/` has this fix. Glass may use a different subprotocol string — check its source.
-
-**SmartDashboard plugin side:**
-- WSAStartup must be called before any IXWebSocket operations. Use `ix::initNetSystem()` in `Start()`, `ix::uninitNetSystem()` in `Stop()`, guarded by a flag. Do NOT initialize Winsock globally.
-- Stock vcpkg ixwebsocket works fine for the client side (no overlay port needed).
-- Topic prefix: NT4 uses `/SmartDashboard/<key>`. Glass may use a different prefix — check its NT4 topic namespace.
-- `EnsurePublished` must build the correct full topic path for the publish JSON message.
-- The chooser protocol (`.type`, `options`, `default`, `active`, `selected` sub-keys) is a WPILib convention. Glass should support it too, but verify.
-
-**Simulator side (Robot_Simulation):**
-- The NT4 server binds to port 5810. Glass also uses port 5810 in NT4 client mode (same as Shuffleboard) — no port changes needed. The old note about "Glass defaults to port 1735" was wrong; 1735 is the NT3 fallback port.
-- `IsChooserEnabledForCurrentConnection()` in `AI_Input_Example.cpp` must include the new mode.
-- `UsesLegacyTransportPath()` in `Transport.cpp` must return false for the new mode.
-- A new `ConnectionMode` enum value and `IConnectionBackend` subclass are needed.
-- See the `Ian:` comment on `Transport.h` for the full checklist of files to update.
-
-**Testing & automation:**
-- `tools/sdcmd.ps1` sends debug commands (including `publish`) to SmartDashboard via named pipe.
-- `dsctl.ps1` (Robot_Simulation) automates DriverStation button clicks.
-- Use `--instance-tag` when launching SmartDashboard for debug logging.
-- Process detection: use `Get-Process -Name <name> -ErrorAction SilentlyContinue` (NOT `tasklist | findstr` which breaks in Git Bash).
-- Killing processes: use PowerShell `Stop-Process` (NOT `taskkill` through Git Bash — flag mangling).
-
-**Common pitfalls:**
-- `sdcmd.ps1` parameter must NOT be named `$Pid` — it shadows PowerShell's automatic `$PID` variable.
-- No value persistence by design — TestMove and chooser start at 0/"Do Nothing" each launch.
-- The smoke test seeds values synthetically; real DriverStation flow requires a client to write values.
-
 ### NT4 protocol quick reference
 
 - **Transport:** WebSocket, resource path `/nt/<clientname>`
@@ -148,7 +107,7 @@ Glass 2026.2.2 is installed at `D:\code\Glass` (portable directory, same pattern
 - **Timestamp sync:** topicID=-1, client sends local time, server responds with `[-1, serverTime, typeCode, clientTime]`
 - **Full spec:** https://github.com/wpilibsuite/allwpilib/blob/main/ntcore/doc/networktables4.adoc
 
-## Deferred work (not blocking Glass)
+## Deferred work
 
 - Wire a UI toolbar/status-bar Connect button
 - Write-ack protocol on TCP Publish (currently fire-and-forget)
