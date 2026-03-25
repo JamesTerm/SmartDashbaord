@@ -6,11 +6,12 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-if(MSVC)
-    set(CMAKE_VS_GLOBALS
-        "${CMAKE_VS_GLOBALS};VcpkgXUseBuiltInApplocalDeps=true"
-    )
-endif()
+# Ian: vcpkg's built-in applocal DLL deploy (VCPKG_APPLOCAL_DEPS) stays ON
+# so that all executable targets (tests, samples, the app) automatically get
+# runtime DLLs (zlib, mbedtls, etc.) copied next to them. Qt runtime
+# deployment is handled separately by CopyQtRuntime.cmake — the windeployqt
+# detection in SmartDashboard/CMakeLists.txt is deliberately suppressed for
+# vcpkg Qt to avoid path misresolution in manifest mode.
 
 include(CTest)
 

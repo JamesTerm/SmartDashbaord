@@ -1,0 +1,14 @@
+{
+  "name": "smartdashboard",
+  "version-string": "0.1.0",
+  "description": "Lightweight C++ dashboard for FRC",
+  "dependencies": [
+    {
+      "name": "qtbase",
+      "features": [
+        "widgets"
+      ]
+    },
+    "ixwebsocket"
+  ]
+}

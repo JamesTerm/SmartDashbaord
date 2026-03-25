@@ -11,6 +11,7 @@
 - Read nearby `Ian:` comments before editing and add new ones where transport, protocol, lifecycle, or ownership lessons would be expensive to rediscover.
 - Never mix `SetEnvironmentVariableA` (Win32 write) with `_dupenv_s` (CRT read) for the same variable. Use `GetEnvironmentVariableA` on the read side to match the Win32 write.
 - `gtest_discover_tests` calls all use `DISCOVERY_MODE PRE_TEST`.
+- `vcpkg.json` manifest in repo root auto-installs all C++ dependencies (qtbase, ixwebsocket) during CMake configure. No manual `vcpkg install` needed — just pass `-DCMAKE_TOOLCHAIN_FILE=...` and the manifest handles the rest.
 - Solution Explorer folder grouping is in place (`USE_FOLDERS ON`).
 - Debug logs only write when `--instance-tag` is passed or `SMARTDASHBOARD_INSTANCE_TAG` env var is set. Logs go to `.debug/native_link_ui_<tag>.log`.
 - SmartDashboard settings are persisted in Windows Registry under `HKCU:\Software\SmartDashboard\SmartDashboardApp`.
@@ -18,8 +19,8 @@
 ## Build
 
 ```bash
-# Configure
-cmake -G "Visual Studio 17 2022" -B build -DCMAKE_TOOLCHAIN_FILE="D:/code/vcpkg/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows
+# Configure (vcpkg.json manifest auto-installs Qt6, ixwebsocket, etc.)
+cmake -G "Visual Studio 17 2022" -B build -DCMAKE_TOOLCHAIN_FILE="<your-vcpkg-root>/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows
 
 # Build
 cmake --build build --config Debug

@@ -122,13 +122,20 @@ Current focus is architecture validation, workflow clarity, and test-backed beha
 
 ## Quick start (Windows + MSVC + vcpkg)
 
-1. Install Qt6 in vcpkg (at minimum):
-   - `vcpkg install qtbase --triplet x64-windows`
-2. Configure:
-   - `cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DCMAKE_TOOLCHAIN_FILE="D:/code/vcpkg/scripts/buildsystems/vcpkg.cmake"`
-3. Build:
+### Prerequisites
+
+- Visual Studio 2022 (with C++ desktop development workload)
+- CMake 3.24+ (ships with VS, or install separately)
+- [vcpkg](https://github.com/microsoft/vcpkg) — cloned and bootstrapped (`bootstrap-vcpkg.bat`)
+
+### Build steps
+
+1. Configure (vcpkg manifest auto-installs Qt6, ixwebsocket, and all other dependencies):
+   - `cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DCMAKE_TOOLCHAIN_FILE="<your-vcpkg-root>/scripts/buildsystems/vcpkg.cmake"`
+   - First configure takes a few minutes while vcpkg downloads and builds dependencies.
+2. Build:
    - `cmake --build build --config Debug`
-4. Run:
+3. Run:
    - `build/SmartDashboard/Debug/SmartDashboardApp.exe`
 
 ## Automated tests
@@ -136,7 +143,7 @@ Current focus is architecture validation, workflow clarity, and test-backed beha
 This repo includes an automated GoogleTest suite for direct transport and client behaviors.
 
 1. Configure with tests enabled:
-   - `cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DBUILD_TESTING=ON -DCMAKE_TOOLCHAIN_FILE="D:/code/vcpkg/scripts/buildsystems/vcpkg.cmake"`
+   - `cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DBUILD_TESTING=ON -DCMAKE_TOOLCHAIN_FILE="<your-vcpkg-root>/scripts/buildsystems/vcpkg.cmake"`
 2. Build tests:
    - `cmake --build build --config Debug --target ClientInterface_direct_tests`
 3. Run tests:
@@ -196,7 +203,7 @@ Use this check for dashboard -> app/client command flow:
 
 ## Windows build note (vcpkg + PowerShell)
 
-- This repo sets Visual Studio global `VcpkgXUseBuiltInApplocalDeps=true` in `CMakeLists.txt` to avoid recurring `pwsh.exe` lookup noise on machines that only have Windows PowerShell.
+- This repo intentionally disables vcpkg's built-in `VcpkgXUseBuiltInApplocalDeps` DLL deploy. In manifest mode, its `applocal.ps1` script misresolves debug-vs-release DLL paths. The custom `cmake/CopyQtRuntime.cmake` handles Qt runtime deployment instead.
 - If you copy this setup into other projects, you can reuse the same `CMAKE_VS_GLOBALS` setting for cleaner MSBuild output.
 - Optional Qt runtime companion DLL misses (`dxcompiler.dll`, `dxil.dll`, `opengl32sw.dll`) are hidden by default to keep build output clean.
 - Enable deploy diagnostics only when needed with `-DSMARTDASHBOARD_VERBOSE_QT_DEPLOY=ON`.
