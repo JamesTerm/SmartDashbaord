@@ -276,4 +276,28 @@ if(WIN32)
         endif()
         set_property(TARGET SmartDashboardApp PROPERTY VS_DEBUGGER_ENVIRONMENT "${_vs_debug_env}")
     endif()
+
+    # Ian: After a plugin rename or deletion, stale SmartDashboardTransport_*.dll
+    # files linger in the output directory because CMake incremental builds never
+    # remove old artifacts.  LoadPlugins() scans for that glob pattern, so any
+    # leftover DLL shows up in the Connection menu as a ghost transport.
+    # This POST_BUILD step compares what's on disk against the set of plugin
+    # OUTPUT_NAMEs that are actually configured and removes anything extra.
+    # The allowlist must mirror the OUTPUT_NAME values set in each plugin's
+    # CMakeLists.txt — update it here whenever a plugin is added or renamed.
+    set(_valid_transport_dlls
+        "SmartDashboardTransport_NativeLink.dll"
+        "SmartDashboardTransport_NT4.dll"
+    )
+    if(SMARTDASHBOARD_BUILD_PLUGIN_LEGACY_NT)
+        list(APPEND _valid_transport_dlls "SmartDashboardTransport_LegacyNt.dll")
+    endif()
+
+    add_custom_command(TARGET SmartDashboardApp POST_BUILD
+        COMMAND "${CMAKE_COMMAND}"
+            -DDEPLOY_DIR="$<TARGET_FILE_DIR:SmartDashboardApp>"
+            "-DVALID_TRANSPORT_DLLS=${_valid_transport_dlls}"
+            -P "${CMAKE_SOURCE_DIR}/cmake/PruneStaleTransportPlugins.cmake"
+        COMMENT "Pruning stale transport plugin DLLs from output directory"
+    )
 endif()
