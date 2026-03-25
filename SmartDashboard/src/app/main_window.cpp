@@ -1584,7 +1584,7 @@ void MainWindow::OnConnectionStateChanged(int state)
         // restart and republish before another instance has finished applying its
         // snapshot-driven tiles.
         PublishRememberedControlValues();
-        RepublishPluginChooserSelections();
+        RepublishPluginControlEdits();
     }
     else if (state == disconnected)
     {
@@ -1654,48 +1654,66 @@ void MainWindow::PublishRememberedControlValues()
     }
 }
 
-// Ian: On plugin transport reconnect the server's snapshot resets /selected to
-// its seed default (e.g. "Do Nothing").  This method re-publishes the user's
-// last local chooser edit — captured in OnControlStringEdited — so the
-// operator's intent survives a DS restart cycle.  Called from
+// Ian: On plugin transport reconnect the server's snapshot resets controls to
+// their seed defaults (e.g. /selected -> "Do Nothing", doubles -> 0.0).
+// This method re-publishes *all* operator control edits — choosers, doubles,
+// bools, and plain strings — captured by the three OnControl*Edited handlers,
+// so the operator's intent survives a DS restart cycle.  Called from
 // OnConnectionStateChanged(Connected), which fires after the snapshot has
 // already been consumed (see native_link_tcp_client.cpp: Connected fires
 // after __live_begin__).
-void MainWindow::RepublishPluginChooserSelections()
+void MainWindow::RepublishPluginControlEdits()
 {
     if (!m_transport || m_connectionConfig.kind != sd::transport::TransportKind::Plugin)
     {
         return;
     }
 
-    for (const auto& [keyStd, selectedValue] : m_pluginChooserSelections)
+    for (const auto& [keyStd, edit] : m_pluginControlEdits)
     {
-        if (selectedValue.isEmpty())
+        const QString key = QString::fromStdString(keyStd);
+        if (key.isEmpty())
         {
             continue;
         }
 
         const auto tileIt = m_tiles.find(keyStd);
-        if (tileIt == m_tiles.end() || tileIt->second == nullptr)
+        sd::widgets::VariableTile* tile = (tileIt != m_tiles.end()) ? tileIt->second : nullptr;
+
+        if (edit.valueType == static_cast<int>(sd::direct::ValueType::Bool))
         {
-            continue;
+            const bool boolVal = edit.value.toBool();
+            if (tile) { tile->SetBoolValue(boolVal); }
+            m_transport->PublishBool(key, boolVal);
+            DebugLogUiEvent(QString("republish_plugin_control key=%1 bool=%2").arg(key).arg(boolVal));
         }
-
-        sd::widgets::VariableTile* tile = tileIt->second;
-        if (tile->GetWidgetType() != "string.chooser")
+        else if (edit.valueType == static_cast<int>(sd::direct::ValueType::Double))
         {
-            continue;
+            const double dblVal = edit.value.toDouble();
+            if (tile) { tile->SetDoubleValue(dblVal); }
+            m_transport->PublishDouble(key, dblVal);
+            DebugLogUiEvent(QString("republish_plugin_control key=%1 double=%2").arg(key).arg(dblVal));
         }
+        else if (edit.valueType == static_cast<int>(sd::direct::ValueType::String))
+        {
+            const QString strVal = edit.value.toString();
+            if (strVal.isEmpty()) { continue; }
 
-        // Re-apply the user's last selection to the tile (overriding the
-        // server's seed default that arrived in the snapshot).
-        tile->SetStringValue(selectedValue);
-
-        // Re-publish to the server so the authority sees the operator's intent.
-        const QString key = QString::fromStdString(keyStd);
-        m_transport->PublishString(key + "/selected", selectedValue);
-
-        DebugLogUiEvent(QString("republish_chooser key=%1 value=%2").arg(key, selectedValue));
+            // Ian: Choosers publish to /selected (a sub-key), not to the
+            // base key.  Non-chooser strings publish to the key directly.
+            if (tile && tile->GetWidgetType() == "string.chooser")
+            {
+                tile->SetStringValue(strVal);
+                m_transport->PublishString(key + "/selected", strVal);
+                DebugLogUiEvent(QString("republish_plugin_control key=%1 chooser=%2").arg(key, strVal));
+            }
+            else
+            {
+                if (tile) { tile->SetStringValue(strVal); }
+                m_transport->PublishString(key, strVal);
+                DebugLogUiEvent(QString("republish_plugin_control key=%1 string=%2").arg(key, strVal));
+            }
+        }
     }
 }
 
@@ -1834,7 +1852,7 @@ void MainWindow::OnClearWidgets()
     m_tiles.clear();
     m_savedLayoutByKey.clear();
     m_variableStore.Clear();
-    m_pluginChooserSelections.clear();
+    m_pluginControlEdits.clear();
     m_nextTileOffset = 0;
     m_lastTransportSeq = 0;
     MarkLayoutDirty();
@@ -2123,6 +2141,15 @@ void MainWindow::OnControlBoolEdited(const QString& key, bool value)
 {
     RememberControlValueIfAllowed(key, static_cast<int>(sd::direct::ValueType::Bool), QVariant(value), true);
 
+    // Ian: Track for plugin reconnect republishing (see RepublishPluginControlEdits).
+    if (m_connectionConfig.kind == sd::transport::TransportKind::Plugin)
+    {
+        PluginControlEdit edit;
+        edit.valueType = static_cast<int>(sd::direct::ValueType::Bool);
+        edit.value = QVariant(value);
+        m_pluginControlEdits[key.toStdString()] = edit;
+    }
+
     if (m_transport)
     {
         m_transport->PublishBool(key, value);
@@ -2152,6 +2179,15 @@ void MainWindow::OnControlDoubleEdited(const QString& key, double value)
 {
     RememberControlValueIfAllowed(key, static_cast<int>(sd::direct::ValueType::Double), QVariant(value), true);
 
+    // Ian: Track for plugin reconnect republishing (see RepublishPluginControlEdits).
+    if (m_connectionConfig.kind == sd::transport::TransportKind::Plugin)
+    {
+        PluginControlEdit edit;
+        edit.valueType = static_cast<int>(sd::direct::ValueType::Double);
+        edit.value = QVariant(value);
+        m_pluginControlEdits[key.toStdString()] = edit;
+    }
+
     if (m_transport)
     {
         m_transport->PublishDouble(key, value);
@@ -2162,20 +2198,20 @@ void MainWindow::OnControlStringEdited(const QString& key, const QString& value)
 {
     RememberControlValueIfAllowed(key, static_cast<int>(sd::direct::ValueType::String), QVariant(value), true);
 
+    // Ian: Track for plugin reconnect republishing (see RepublishPluginControlEdits).
+    if (m_connectionConfig.kind == sd::transport::TransportKind::Plugin)
+    {
+        PluginControlEdit edit;
+        edit.valueType = static_cast<int>(sd::direct::ValueType::String);
+        edit.value = QVariant(value);
+        m_pluginControlEdits[key.toStdString()] = edit;
+    }
+
     if (m_transport)
     {
         const auto chooserIt = m_tiles.find(key.toStdString());
         if (chooserIt != m_tiles.end() && chooserIt->second != nullptr && chooserIt->second->GetWidgetType() == "string.chooser")
         {
-            // Ian: For plugin transports (Native Link, NT4) the server's retained
-            // /selected value resets to its seed default whenever the server
-            // process restarts.  Track the user's last local chooser edit so
-            // RepublishPluginChooserSelections() can restore it on reconnect.
-            if (m_connectionConfig.kind == sd::transport::TransportKind::Plugin)
-            {
-                m_pluginChooserSelections[key.toStdString()] = value;
-            }
-
             m_transport->PublishString(key + "/selected", value);
             return;
         }
