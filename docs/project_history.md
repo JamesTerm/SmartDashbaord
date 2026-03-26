@@ -7,6 +7,88 @@ Curated milestone history for this repository.
 - Keep milestone sections in descending chronological order (newest first) so recent changes are immediately visible.
 - Historical branch/status wording in older entries is time-bound; read each section as a snapshot from that date.
 
+## 2026-03-26 - Run Browser dock complete (`feature/run-browser-dock`)
+
+Dockable tree panel for browsing signal key hierarchies in the dashboard. The Run Browser is an **optional navigational filter** — it never blocks tile creation or visibility by default. Designed as a simple decluttering convenience for new FRC students.
+
+### Two-mode architecture
+
+The dock operates in two fully isolated modes, selected automatically by transport kind:
+
+- **Reading mode (Replay)**: Tree populated up front from JSON replay file via `AddRunFromFile`. Groups start unchecked — user opts in. Persists checked keys.
+- **Streaming / Layout-mirror mode (Live)**: Tree mirrors the layout's tile collection via `TileAdded` / `TileRemoved` / `TilesCleared` Qt signals from `MainWindow`. Groups start checked — user opts out. Persists hidden keys.
+
+The two modes share tree-building utilities but are kept deliberately isolated so each can evolve independently.
+
+### Layout-mirror design (streaming mode)
+
+The key architectural decision: instead of listening to raw transport key discovery, the streaming tree **mirrors the layout's tile collection**. `MainWindow` emits signals from tile lifecycle points:
+
+- `TileAdded(key, type)` — emitted after `m_tiles.emplace()` in `GetOrCreateTile`
+- `TileRemoved(key)` — emitted after `m_tiles.erase()` in `OnRemoveWidgetRequested`
+- `TilesCleared()` — emitted after `m_tiles.clear()` in `OnClearWidgets`
+
+The dock connects to these signals. The tree is always a 1:1 reflection of what tiles exist on the layout.
+
+### Key implementation details
+
+- `SetStreamingRootLabel()` initializes streaming mode — always fully reinitializes (clears model, nulls root, resets discovered keys, creates fresh root). This guarantees correct root label when switching transports.
+- `ClearDiscoveredKeys()` stays in streaming mode — clears tree contents, recreates root via `EnsureStreamingRootNode()`, ready for incoming `TileAdded` signals. Critical for layout-replace (`OnClearWidgets` → `LoadLayoutFromPath`) where `TilesCleared` is immediately followed by `TileAdded` per tile.
+- `ClearAllRuns()` is the **only** method that exits streaming mode (`m_streamingMode = false`). Called when switching to replay.
+- Reading mode is fully immune to layout operations — `OnTileAdded`, `OnTileRemoved`, and `ClearDiscoveredKeys` all guard on `!m_streamingMode`.
+- Root checkbox push-down uses `item->setCheckState(childState)` instead of recomputing from children, so the user's explicit uncheck is authoritative.
+- `UpdateRunCheckState` counts single-segment keys (no `/`) as implicitly checked children.
+- No Clear button — dock content driven entirely by layout lifecycle and transport state.
+
+### Bugs found and fixed during stress testing
+
+1. **NativeLink blanking**: `ClearDiscoveredKeys()` emitted `CheckedSignalsChanged({})` while `m_runBrowserActive==true`, hiding all tiles. Fixed by temporarily setting `m_runBrowserActive = false` around the clear in `StartTransport()`.
+2. **MOC duplicate symbols**: Adding `signals:` before `#ifdef SMARTDASHBOARD_TESTS` caused MOC to treat `ForTesting` methods as signals. Fixed by adding `public:` to end the signals section.
+3. **Root checkbox recompute override**: `OnModelItemChanged` for `kNodeKindRun` was calling `UpdateRunCheckState` after pushing state to children, overriding user's explicit uncheck. Fixed by forcing the state directly.
+4. **Root label stale on transport switch**: `SetStreamingRootLabel` had branching on `m_streamingMode` — if already true, it tried to update an invalidated root item after `m_treeModel->clear()`. Fixed by always fully reinitializing.
+5. **Layout-replace leaves tree empty**: `ClearDiscoveredKeys` was exiting streaming mode, making all subsequent `OnTileAdded` calls no-ops. Fixed by staying in streaming mode and recreating the root.
+
+### Test coverage
+
+104 RunBrowser-specific GTest tests covering:
+- JSON parsing (13 tests)
+- Tree structure and reading-mode checkbox propagation (17 tests)
+- Streaming mode tree building, visibility, persistence (42 tests)
+- `OnTileRemoved` pruning and tri-state updates (12 tests)
+- Reading-mode isolation from layout operations (4 tests)
+- Streaming layout-replace rebuild (2 tests)
+- Mode switching, signal emission, edge cases (14 tests)
+
+### Files changed
+
+| File | Change |
+|---|---|
+| `src/widgets/run_browser_dock.h` | Added `OnTileAdded`, `OnTileRemoved`, `RemoveStreamingLeafAndPruneAncestors`, `EnsureStreamingRootNode`; removed Clear button |
+| `src/widgets/run_browser_dock.cpp` | Full layout-mirror implementation; `ClearDiscoveredKeys` stays streaming; root push-down fix; signal child counting |
+| `src/app/main_window.h` | Added `TileAdded`, `TileRemoved`, `TilesCleared` signals |
+| `src/app/main_window.cpp` | Signal emission from tile lifecycle; signal connections; `StartTransport` streaming setup with tile scan |
+| `tests/run_browser_dock_tests.cpp` | 104 tests (20 new, ~60 renamed from `AddDiscoveredKey` → `OnTileAdded`) |
+
+---
+
+## 2026-03-26 - Glass support verified (no separate plugin needed)
+
+Glass uses the same NT4 protocol as Shuffleboard — same WebSocket transport, same MsgPack binary frames, same JSON control messages, same port 5810. It connects to the existing NT4Transport plugin with zero changes. No `plugins/GlassTransport/` is needed.
+
+Glass 2026.2.2 is installed at `D:\code\Glass` (portable directory). `run_glass_local.bat` passes `config_local\` which contains a pre-seeded `glass.json` for localhost:5810. Source: `https://frcmaven.wpi.edu/artifactory/release/edu/wpi/first/tools/Glass/2026.2.2/Glass-2026.2.2-windowsx86-64.zip`
+
+### NT4 protocol quick reference
+
+- **Transport:** WebSocket, resource path `/nt/<clientname>`
+- **Subprotocols:** `v4.1.networktables.first.wpi.edu` (preferred), `networktables.first.wpi.edu` (v4.0)
+- **Control messages:** JSON text frames — each frame is a JSON array of message objects with `method` and `params`
+- **Server→client:** `announce`, `unannounce`, `properties`
+- **Client→server:** `subscribe`, `unsubscribe`, `publish`, `unpublish`, `setproperties`
+- **Value updates:** MsgPack binary frames — `[topicID, timestamp_us, dataType, value]`
+- **Data types:** boolean=0, double=1, int=2, float=3, string=4, raw=5, boolean[]=16, double[]=17, int[]=18, float[]=19, string[]=20
+- **Timestamp sync:** topicID=-1, client sends local time, server responds with `[-1, serverTime, typeCode, clientTime]`
+- **Full spec:** https://github.com/wpilibsuite/allwpilib/blob/main/ntcore/doc/networktables4.adoc
+
 ## 2026-03-21 - UI freeze during auton fixed: drain budget cap and key coalescing
 
 ### Root cause

@@ -5,6 +5,7 @@
 #include "layout/layout_serializer.h"
 #include "sd_direct_types.h"
 #include "widgets/playback_timeline_widget.h"
+#include "widgets/run_browser_dock.h"
 
 #include <QAction>
 #include <QActionGroup>
@@ -433,6 +434,10 @@ MainWindow::MainWindow(QWidget* parent, bool startTransportOnInit)
     m_replayTimelineViewAction->setCheckable(true);
     m_replayTimelineViewAction->setChecked(true);
     m_replayTimelineViewAction->setEnabled(false);
+
+    m_runBrowserViewAction = viewMenu->addAction("Run Browser");
+    m_runBrowserViewAction->setCheckable(true);
+    m_runBrowserViewAction->setChecked(false);
 
     viewMenu->addSeparator();
     m_resetAllLinePlotsAction = viewMenu->addAction("Reset All Line Plots");
@@ -1034,6 +1039,67 @@ MainWindow::MainWindow(QWidget* parent, bool startTransportOnInit)
     connect(m_replayMarkerList, &QListWidget::itemActivated, this, &MainWindow::OnReplayMarkerActivated);
     connect(m_replayMarkerList, &QListWidget::itemClicked, this, &MainWindow::OnReplayMarkerActivated);
 
+    // Ian: Run Browser dock — dockable tree view for browsing signal key
+    // hierarchies in loaded replay files.  Starts hidden on first-ever launch;
+    // subsequent launches restore visibility via Qt's saveState/restoreState.
+    // When a replay transport starts, PopulateRunBrowserFromReplayFile() shows
+    // it automatically and restores persisted checked/expanded state.
+    m_runBrowserDock = new sd::widgets::RunBrowserDock(this);
+    addDockWidget(Qt::LeftDockWidgetArea, m_runBrowserDock);
+    m_runBrowserDock->setVisible(false);
+    connect(
+        m_runBrowserViewAction,
+        &QAction::toggled,
+        this,
+        [this](bool checked)
+        {
+            if (m_runBrowserDock != nullptr)
+            {
+                m_runBrowserDock->setVisible(checked);
+            }
+        }
+    );
+    connect(
+        m_runBrowserDock,
+        &QDockWidget::visibilityChanged,
+        this,
+        [this](bool visible)
+        {
+            if (m_runBrowserViewAction != nullptr)
+            {
+                const bool prior = m_runBrowserViewAction->blockSignals(true);
+                m_runBrowserViewAction->setChecked(visible);
+                m_runBrowserViewAction->blockSignals(prior);
+            }
+        }
+    );
+
+    // Ian: When the user checks/unchecks groups in the Run Browser, show or
+    // hide tiles on the dashboard canvas.  The tiles are created by the
+    // transport pipeline — the Run Browser only controls visibility.
+    connect(
+        m_runBrowserDock,
+        &sd::widgets::RunBrowserDock::CheckedSignalsChanged,
+        this,
+        [this](const QSet<QString>& checkedKeys, const QMap<QString, QString>& keyToType)
+        {
+            OnRunBrowserCheckedSignalsChanged(checkedKeys, keyToType);
+        }
+    );
+
+    // Ian: Layout-mirror wiring.  The Run Browser dock (streaming mode) builds
+    // its tree as a 1:1 mirror of whatever tiles exist on the layout.  These
+    // signals decouple the dock from transport details — it never listens to
+    // the transport directly.  Tiles loaded from saved layouts, created by any
+    // transport, or added by future mechanisms all flow through here.
+    connect(this, &MainWindow::TileAdded, m_runBrowserDock, &sd::widgets::RunBrowserDock::OnTileAdded);
+    connect(this, &MainWindow::TileRemoved, m_runBrowserDock, &sd::widgets::RunBrowserDock::OnTileRemoved);
+    // Ian: TilesCleared → ClearDiscoveredKeys handles the user's "Clear All"
+    // action during streaming mode.  ClearDiscoveredKeys is a no-op when not
+    // in streaming mode, so layout operations during replay (Clear Widgets,
+    // Load Layout) leave the file-driven tree untouched.
+    connect(this, &MainWindow::TilesCleared, m_runBrowserDock, &sd::widgets::RunBrowserDock::ClearDiscoveredKeys);
+
     QSettings settings("SmartDashboard", "SmartDashboardApp");
     const int persistedKindValue = settings.value("connection/transportKind", static_cast<int>(sd::transport::TransportKind::Direct)).toInt();
     m_connectionConfig.kind = static_cast<sd::transport::TransportKind>(persistedKindValue);
@@ -1075,6 +1141,13 @@ MainWindow::MainWindow(QWidget* parent, bool startTransportOnInit)
     m_replayMarkersPreferredVisible = settings.value("replay/markersVisible", true).toBool();
     m_clearLinePlotsOnRewind = settings.value("replay/clearLinePlotsOnRewind", false).toBool();
     m_clearLinePlotsOnBackwardSeek = settings.value("replay/clearLinePlotsOnBackwardSeek", false).toBool();
+
+    // Ian: Load persisted Run Browser state.  The checked keys are loaded into
+    // m_runBrowserCheckedKeys now (before StartTransport) so that GetOrCreateTile
+    // can correctly hide/show tiles as the transport creates them.  The actual
+    // tree population and visual state (expanded paths) is applied later in
+    // PopulateRunBrowserFromReplayFile(), called from StartTransport().
+    LoadRunBrowserState();
     if (m_telemetryFeatureViewAction != nullptr)
     {
         m_telemetryFeatureViewAction->setChecked(m_telemetryFeatureEnabled);
@@ -1856,6 +1929,9 @@ void MainWindow::OnClearWidgets()
     m_nextTileOffset = 0;
     m_lastTransportSeq = 0;
     MarkLayoutDirty();
+
+    // Ian: Notify observers (Run Browser dock) that all tiles were removed.
+    emit TilesCleared();
 }
 
 sd::widgets::VariableTile* MainWindow::GetOrCreateTile(const QString& key, sd::widgets::VariableType type)
@@ -1924,13 +2000,55 @@ sd::widgets::VariableTile* MainWindow::GetOrCreateTile(const QString& key, sd::w
     tile->setProperty("variableKey", key);
     tile->setProperty("widgetType", tile->GetWidgetType());
     tile->installEventFilter(this);
-    tile->show();
+
+    // Ian: If the Run Browser has an active session (reading or streaming),
+    // only show the tile if its key is in the checked set.  An empty checked
+    // set with an active session means "nothing checked" — hide all.  When no
+    // Run Browser session is active (m_runBrowserActive == false), show
+    // everything.
+    //
+    // Layout-mirror mode: the Run Browser tree is populated via the TileAdded
+    // signal (emitted below after m_tiles.emplace), not by direct calls here.
+    // The dock builds its tree as a 1:1 mirror of whatever tiles exist on the
+    // layout.  Groups start checked, so the key will be in
+    // m_runBrowserCheckedKeys after the dock emits CheckedSignalsChanged.
+
+    if (m_runBrowserActive)
+    {
+        if (m_runBrowserCheckedKeys.isEmpty() || !m_runBrowserCheckedKeys.contains(key))
+        {
+            tile->hide();
+        }
+        else
+        {
+            tile->show();
+        }
+    }
+    else
+    {
+        tile->show();
+    }
 
     m_tiles.emplace(keyStd, tile);
 
     if (!m_suppressLayoutDirty)
     {
         MarkLayoutDirty();
+    }
+
+    // Ian: Notify observers (Run Browser dock) that a tile now exists on the
+    // layout.  Emitted after emplace so the tile is findable in m_tiles.
+    // The Run Browser uses this to build its streaming-mode tree as a mirror
+    // of the layout, rather than listening to raw transport keys.
+    {
+        QString typeStr;
+        switch (type)
+        {
+            case sd::widgets::VariableType::Bool:   typeStr = QStringLiteral("bool");   break;
+            case sd::widgets::VariableType::Double:  typeStr = QStringLiteral("double"); break;
+            case sd::widgets::VariableType::String:  typeStr = QStringLiteral("string"); break;
+        }
+        emit TileAdded(key, typeStr);
     }
 
     return tile;
@@ -2071,6 +2189,107 @@ void MainWindow::SaveWindowGeometry() const
     settings.setValue("replay/markersVisible", m_replayMarkersPreferredVisible);
 
     PersistUserReplayBookmarks();
+    PersistRunBrowserState();
+}
+
+// Ian: Populate the Run Browser dock from the current replay file path.
+// If the dock is already loaded with the same file, skip the reload to avoid
+// losing user's current check/expand state.  After (re)loading, restore
+// persisted checked keys and expanded paths so the UI looks the same as the
+// user left it.
+void MainWindow::PopulateRunBrowserFromReplayFile()
+{
+    if (m_runBrowserDock == nullptr)
+    {
+        return;
+    }
+
+    const QString replayPath = m_connectionConfig.replayFilePath.trimmed();
+    if (replayPath.isEmpty())
+    {
+        return;
+    }
+
+    // Avoid redundant reload if the dock already has this file loaded.
+    if (m_runBrowserDock->RunCount() > 0 && m_runBrowserDock->GetLoadedFilePath() == replayPath)
+    {
+        return;
+    }
+
+    // Save the checked keys before clearing — ClearAllRuns emits
+    // CheckedSignalsChanged with an empty set, which would overwrite
+    // m_runBrowserCheckedKeys.
+    const QSet<QString> savedCheckedKeys = m_runBrowserCheckedKeys;
+
+    m_runBrowserDock->ClearAllRuns();
+    m_runBrowserDock->AddRunFromFile(replayPath);
+    m_runBrowserActive = true;
+
+    // Restore persisted checked state (which groups are checked).
+    if (!savedCheckedKeys.isEmpty())
+    {
+        m_runBrowserDock->SetCheckedGroupsBySignalKeys(savedCheckedKeys);
+    }
+
+    // Restore persisted expanded/collapsed tree state.
+    if (!m_runBrowserExpandedPaths.isEmpty())
+    {
+        m_runBrowserDock->SetExpandedPaths(m_runBrowserExpandedPaths);
+    }
+
+    m_runBrowserDock->show();
+    m_runBrowserDock->raise();
+}
+
+void MainWindow::PersistRunBrowserState() const
+{
+    QSettings settings("SmartDashboard", "SmartDashboardApp");
+
+    settings.setValue("runBrowser/active", m_runBrowserActive);
+
+    // Save checked keys as a string list (used by reading mode).
+    const QStringList checkedList(m_runBrowserCheckedKeys.begin(), m_runBrowserCheckedKeys.end());
+    settings.setValue("runBrowser/checkedKeys", checkedList);
+
+    // Ian: Save streaming-mode hidden keys.  In streaming mode we persist the
+    // hidden set (opt-outs) rather than the checked set (which starts as
+    // "everything") because that's what we need to re-apply on reconnect.
+    if (m_runBrowserDock != nullptr && m_runBrowserDock->IsStreamingModeForTesting())
+    {
+        const QSet<QString> hidden = m_runBrowserDock->GetHiddenDiscoveredKeys();
+        const QStringList hiddenList(hidden.begin(), hidden.end());
+        settings.setValue("runBrowser/hiddenKeys", hiddenList);
+    }
+    else
+    {
+        const QStringList hiddenList(m_runBrowserHiddenKeys.begin(), m_runBrowserHiddenKeys.end());
+        settings.setValue("runBrowser/hiddenKeys", hiddenList);
+    }
+
+    // Save expanded paths.
+    if (m_runBrowserDock != nullptr)
+    {
+        settings.setValue("runBrowser/expandedPaths", m_runBrowserDock->GetExpandedPaths());
+    }
+    else
+    {
+        settings.setValue("runBrowser/expandedPaths", m_runBrowserExpandedPaths);
+    }
+}
+
+void MainWindow::LoadRunBrowserState()
+{
+    QSettings settings("SmartDashboard", "SmartDashboardApp");
+
+    m_runBrowserActive = settings.value("runBrowser/active", false).toBool();
+
+    const QStringList checkedList = settings.value("runBrowser/checkedKeys").toStringList();
+    m_runBrowserCheckedKeys = QSet<QString>(checkedList.begin(), checkedList.end());
+
+    const QStringList hiddenList = settings.value("runBrowser/hiddenKeys").toStringList();
+    m_runBrowserHiddenKeys = QSet<QString>(hiddenList.begin(), hiddenList.end());
+
+    m_runBrowserExpandedPaths = settings.value("runBrowser/expandedPaths").toStringList();
 }
 
 void MainWindow::RestoreDefaultReplayWorkspaceLayout()
@@ -2173,6 +2392,63 @@ void MainWindow::OnRemoveWidgetRequested(const QString& key)
     m_tiles.erase(it);
     m_savedLayoutByKey.erase(keyStd);
     MarkLayoutDirty();
+
+    // Ian: Notify observers (Run Browser dock) that a tile was removed from
+    // the layout.  The dock removes the corresponding tree node so the tree
+    // stays a 1:1 mirror of what tiles exist.
+    emit TileRemoved(key);
+}
+
+// Ian: Called when the user checks/unchecks groups in the Run Browser dock.
+// We show tiles whose keys are in the checked set and hide tiles whose keys
+// are not.  The tiles themselves are created by the replay transport pipeline
+// (via OnVariableUpdateReceived -> GetOrCreateTile) — the Run Browser only
+// controls their visibility.  We also persist the checked state immediately
+// so that the user sees the same configuration on next launch.
+//
+// Important: an empty checkedKeys set does NOT mean "show all."  It means
+// "nothing is checked" — which should hide all tiles when the Run Browser
+// has a replay loaded (m_runBrowserActive).  The only time an empty set
+// means "show all" is when m_runBrowserActive is false (no replay loaded,
+// e.g. after switching to a live transport).
+void MainWindow::OnRunBrowserCheckedSignalsChanged(const QSet<QString>& checkedKeys, const QMap<QString, QString>& /*keyToType*/)
+{
+    m_runBrowserCheckedKeys = checkedKeys;
+
+    // Walk all existing tiles and show/hide based on the checked set.
+    for (auto& [keyStd, tile] : m_tiles)
+    {
+        if (tile == nullptr)
+        {
+            continue;
+        }
+
+        if (!m_runBrowserActive)
+        {
+            // No Run Browser session — show everything.
+            tile->show();
+        }
+        else if (checkedKeys.isEmpty())
+        {
+            // Run Browser is active but nothing checked — hide all.
+            tile->hide();
+        }
+        else
+        {
+            const QString key = QString::fromStdString(keyStd);
+            if (checkedKeys.contains(key))
+            {
+                tile->show();
+            }
+            else
+            {
+                tile->hide();
+            }
+        }
+    }
+
+    // Persist checked keys so the next launch restores the same state.
+    PersistRunBrowserState();
 }
 
 void MainWindow::OnControlDoubleEdited(const QString& key, double value)
@@ -2783,6 +3059,14 @@ void MainWindow::OnOpenReplayFile()
     }
 
     m_connectionConfig.replayFilePath = selected;
+
+    // Ian: New file selected — clear the persisted checked keys so the user
+    // starts fresh.  The Run Browser tree will be populated by
+    // PopulateRunBrowserFromReplayFile() inside StartTransport().
+    m_runBrowserCheckedKeys.clear();
+    m_runBrowserExpandedPaths.clear();
+    PersistRunBrowserState();
+
     SelectTransport("replay");
     StartTransport();
 }
@@ -3350,6 +3634,80 @@ void MainWindow::StartTransport()
         if (m_transport->SupportsPlayback() && m_playbackRateCombo != nullptr)
         {
             m_transport->SetPlaybackRate(m_playbackRateCombo->currentData().toDouble());
+        }
+
+        // Ian: If this is a replay transport, populate the Run Browser dock
+        // with the replay file's signal hierarchy and restore persisted
+        // checked/expanded state.  This covers all replay start paths:
+        // OnOpenReplayFile (fresh file), persisted restart, OnUseReplayTransport.
+        //
+        // For non-replay (layout-mirror) transports, activate the Run Browser
+        // in streaming mode.  The tree mirrors whatever tiles exist on the
+        // layout.  New tiles arriving from the transport will emit TileAdded
+        // (via GetOrCreateTile), which the dock handles via OnTileAdded.
+        // We also scan existing tiles (from saved layouts) so they appear in
+        // the tree immediately.
+        if (m_connectionConfig.kind == sd::transport::TransportKind::Replay)
+        {
+            PopulateRunBrowserFromReplayFile();
+        }
+        else
+        {
+            // Ian: Switching to a live transport — set up layout-mirror mode.
+            // ClearDiscoveredKeys() resets prior streaming state; it is a
+            // no-op when coming from replay mode (the guard inside skips
+            // when m_streamingMode is false).  SetStreamingRootLabel() then
+            // fully reinitializes streaming mode regardless.  Pre-load
+            // the persisted hidden keys so OnTileAdded can lazily apply
+            // opt-outs as groups are created.
+            //
+            // Ian: We must temporarily disable m_runBrowserActive around the
+            // clear call.  ClearDiscoveredKeys() emits CheckedSignalsChanged
+            // with an empty set, and the OnRunBrowserCheckedSignalsChanged
+            // handler interprets "active + empty checked set" as "hide all
+            // tiles".  If a previous session left m_runBrowserActive == true
+            // (persisted), the empty emission would hide every tile that
+            // ReplayRetainedControls just created — and since GetOrCreateTile
+            // returns early for existing tiles, they would never be re-shown.
+            // Disabling the flag ensures the empty emission is harmless (the
+            // handler takes the "not active → show all" path).
+            m_runBrowserActive = false;
+            if (m_runBrowserDock != nullptr)
+            {
+                m_runBrowserDock->ClearDiscoveredKeys();
+                // Ian: Set the root label before keys arrive so the
+                // synthetic root node is named after the transport
+                // (e.g. "Direct", "Native Link", "NT4").
+                m_runBrowserDock->SetStreamingRootLabel(GetSelectedTransportDisplayName());
+                if (!m_runBrowserHiddenKeys.isEmpty())
+                {
+                    m_runBrowserDock->SetHiddenDiscoveredKeys(m_runBrowserHiddenKeys);
+                }
+
+                // Ian: Scan existing tiles (loaded from saved layout or
+                // created by ReplayRetainedControls above) and feed them
+                // into the dock.  This ensures tiles that existed before
+                // the transport started appear in the tree immediately,
+                // rather than waiting for the transport to re-deliver keys.
+                for (const auto& [tileKeyStd, tile] : m_tiles)
+                {
+                    if (tile == nullptr)
+                    {
+                        continue;
+                    }
+                    QString typeStr;
+                    const auto tileType = tile->GetType();
+                    switch (tileType)
+                    {
+                        case sd::widgets::VariableType::Bool:   typeStr = QStringLiteral("bool");   break;
+                        case sd::widgets::VariableType::Double:  typeStr = QStringLiteral("double"); break;
+                        case sd::widgets::VariableType::String:  typeStr = QStringLiteral("string"); break;
+                    }
+                    m_runBrowserDock->OnTileAdded(QString::fromStdString(tileKeyStd), typeStr);
+                }
+            }
+            m_runBrowserActive = true;
+            PersistRunBrowserState();
         }
     }
 

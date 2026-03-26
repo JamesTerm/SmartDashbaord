@@ -25,8 +25,8 @@ cmake -G "Visual Studio 17 2022" -B build -DCMAKE_TOOLCHAIN_FILE="<your-vcpkg-ro
 # Build
 cmake --build build --config Debug
 
-# Test (91 tests)
-cd build && ctest -C Debug --output-on-failure
+# Test (197 tests, 2 disabled)
+ctest -C Debug --output-on-failure
 ```
 
 ## Key invariants (do not break)
@@ -69,44 +69,63 @@ Current plugins:
 - Canonical rollout strategy: `docs/native_link_rollout_strategy.md` (this repo).
 - When either repo's session notes change, check the other side for consistency.
 
+## Complete: Run Browser dock (`feature/run-browser-dock`)
+
+Dockable tree panel for browsing signal key hierarchies. The Run Browser is an **optional navigational filter** — it never blocks tile creation or visibility by default.
+
+### Two-mode design
+
+| | Reading mode (Replay) | Streaming / Layout-mirror mode (Live) |
+|---|---|---|
+| Transport kinds | `TransportKind::Replay` | Direct, NativeLink, NT4, LegacyNT |
+| Tree population | Up front from JSON parse (`AddRunFromFile`) | Driven by layout tile lifecycle (`OnTileAdded` / `OnTileRemoved`) |
+| Default visibility | **Off** — user opts in via checkboxes | **On** — everything visible, user opts out |
+| Top-level node | Named run from file label/metadata | Transport-labeled root node (`kNodeKindRun`) |
+| Persistence | Checked keys (`runBrowser/checkedKeys`) | Hidden keys (`runBrowser/hiddenKeys`) |
+
+MainWindow drives mode selection:
+- **Reading mode:** `ClearAllRuns()` → `AddRunFromFile(path)` → groups start unchecked → user opts in
+- **Streaming mode:** `ClearDiscoveredKeys()` → `SetStreamingRootLabel(name)` → `OnTileAdded()` per tile → groups start checked → user opts out
+
+### Architecture (streaming mode)
+
+- MainWindow emits `TileAdded`, `TileRemoved`, `TilesCleared` signals from tile lifecycle points (`GetOrCreateTile`, `OnRemoveWidgetRequested`, `OnClearWidgets`)
+- Dock connects to these signals — tree is a 1:1 mirror of the layout's tile collection
+- `SetStreamingRootLabel()` initializes streaming mode (always fully reinitializes — clears model, creates fresh root)
+- `ClearDiscoveredKeys()` stays in streaming mode (clears tree, recreates root) — only `ClearAllRuns()` exits streaming mode
+- Reading mode is fully immune to layout operations — all three signal handlers guard on `!m_streamingMode`
+- No Clear button — dock content is driven entirely by layout lifecycle and transport state
+
+### Files
+
+| File | What |
+|---|---|
+| `src/widgets/run_browser_dock.h` | `RunBrowserDock` QDockWidget, structs, persistence API |
+| `src/widgets/run_browser_dock.cpp` | JSON parse, tree model, checkbox propagation, layout-mirror, persistence |
+| `src/app/main_window.h` | `TileAdded`, `TileRemoved`, `TilesCleared` signals |
+| `src/app/main_window.cpp` | Integration — dock lifecycle, visibility filtering, persistence, signal wiring |
+| `tests/run_browser_dock_tests.cpp` | 104 GTest tests |
+| `CMakeLists.txt` | Sources in app + test targets |
+
+### Known limitations
+
+- `SignalActivated` / `RunActivated` signals have no downstream consumer (future: comparison plots)
+- `runIndex` is a vector index — unstable across operations
+- No `RemoveRun(int)` API — only bulk clear
+- No duplicate-file detection
+- No `qWarning()` on parse failures
+- Slash-only keys produce no tree nodes
+
 ## Completed milestones
 
 | Feature | Branch | Status |
 |---|---|---|
+| Run Browser dock | `feature/run-browser-dock` | Complete, pending merge to main |
 | Native Link TCP carrier | `feature/native-link-tcpip-carrier` | Merged to main |
 | NT4 transport (originally "Shuffleboard") | `feature/shuffleboard-transport` | Merged to main |
 | Glass verification + Shuffleboard→NT4 rename | `feature/glass-transport` | Merged to main |
 
-## Glass support (complete — no separate plugin needed)
-
-Glass uses the same NT4 protocol as Shuffleboard — same WebSocket transport, same MsgPack binary frames, same JSON control messages, same port 5810. It connects to the existing NT4Transport plugin with zero changes. No `plugins/GlassTransport/` is needed.
-
-### Glass installation
-
-Glass 2026.2.2 is installed at `D:\code\Glass` (portable directory, same pattern as `D:\code\Shuffleboard`):
-
-| File | Purpose |
-|---|---|
-| `glass.exe` | Glass application (native C++ binary — no JRE needed) |
-| `run_glass.bat` | Launch Glass (default config from `%APPDATA%`) |
-| `run_glass_local.bat` | Launch Glass pre-configured for localhost:5810 |
-| `config_local\glass.json` | Pre-configured: NT4 client mode, `localhost`, port 5810 |
-
-**How local config works:** Glass takes one CLI argument — a save directory for its JSON config files. `run_glass_local.bat` passes `config_local\` which contains a pre-seeded `glass.json`. Default `run_glass.bat` uses `%APPDATA%` and requires manual GUI configuration.
-
-**Source:** `https://frcmaven.wpi.edu/artifactory/release/edu/wpi/first/tools/Glass/2026.2.2/Glass-2026.2.2-windowsx86-64.zip`
-
-### NT4 protocol quick reference
-
-- **Transport:** WebSocket, resource path `/nt/<clientname>`
-- **Subprotocols:** `v4.1.networktables.first.wpi.edu` (preferred), `networktables.first.wpi.edu` (v4.0)
-- **Control messages:** JSON text frames — each frame is a JSON array of message objects with `method` and `params`
-- **Server→client:** `announce`, `unannounce`, `properties`
-- **Client→server:** `subscribe`, `unsubscribe`, `publish`, `unpublish`, `setproperties`
-- **Value updates:** MsgPack binary frames — `[topicID, timestamp_us, dataType, value]`
-- **Data types:** boolean=0, double=1, int=2, float=3, string=4, raw=5, boolean[]=16, double[]=17, int[]=18, float[]=19, string[]=20
-- **Timestamp sync:** topicID=-1, client sends local time, server responds with `[-1, serverTime, typeCode, clientTime]`
-- **Full spec:** https://github.com/wpilibsuite/allwpilib/blob/main/ntcore/doc/networktables4.adoc
+Glass support details and NT4 protocol reference moved to `docs/project_history.md`.
 
 ## Deferred work
 

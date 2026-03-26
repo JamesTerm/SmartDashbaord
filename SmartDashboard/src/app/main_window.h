@@ -7,6 +7,8 @@
 
 #include <QMainWindow>
 #include <QByteArray>
+#include <QMap>
+#include <QSet>
 #include <QVariant>
 #include <QVector>
 
@@ -47,6 +49,7 @@ class QLocalSocket;
 namespace sd::widgets
 {
     class PlaybackTimelineWidget;
+    class RunBrowserDock;
 }
 
 class MainWindow final : public QMainWindow
@@ -57,6 +60,18 @@ public:
     explicit MainWindow(QWidget* parent = nullptr, bool startTransportOnInit = true);
     ~MainWindow() override;
 
+signals:
+    // Ian: Layout-tile lifecycle signals.  The Run Browser dock (streaming mode)
+    // subscribes to these to mirror the layout — it builds its tree from what
+    // tiles actually exist, not from raw transport keys.  This decouples the
+    // Run Browser from transport details and means the tree reflects tiles
+    // loaded from saved layouts, created by transports, or added by any future
+    // mechanism.
+    void TileAdded(const QString& key, const QString& type);
+    void TileRemoved(const QString& key);
+    void TilesCleared();
+
+public:
 #ifdef SMARTDASHBOARD_TESTS
     void SetTransportSelectionForTesting(const QString& transportId, sd::transport::TransportKind kind);
     void SimulateVariableUpdateForTesting(const QString& key, int valueType, const QVariant& value, quint64 seq = 0);
@@ -88,6 +103,7 @@ private slots:
     void OnImportLegacyXmlLayout();
     void OnClearWidgets();
     void OnRemoveWidgetRequested(const QString& key);
+    void OnRunBrowserCheckedSignalsChanged(const QSet<QString>& checkedKeys, const QMap<QString, QString>& keyToType);
     void OnControlBoolEdited(const QString& key, bool value);
     void OnControlDoubleEdited(const QString& key, double value);
     void OnControlStringEdited(const QString& key, const QString& value);
@@ -158,6 +174,9 @@ private:
     void PersistUserReplayBookmarks() const;
     void RestoreDefaultReplayWorkspaceLayout();
     void UpdateReplayDockHeightLock();
+    void PopulateRunBrowserFromReplayFile();
+    void PersistRunBrowserState() const;
+    void LoadRunBrowserState();
     void ResetAllLinePlots();
     void SeekPlaybackToUs(std::int64_t targetUs, bool rewindToStart = false);
     void StepPlaybackByUs(std::int64_t deltaUs);
@@ -205,6 +224,7 @@ private:
     QAction* m_replayTimelineViewAction = nullptr;
     QAction* m_replayMarkersViewAction = nullptr;
     QAction* m_openReplayFileAction = nullptr;
+    QAction* m_runBrowserViewAction = nullptr;
     QAction* m_resetAllLinePlotsAction = nullptr;
     QAction* m_clearLinePlotsOnRewindAction = nullptr;
     QAction* m_clearLinePlotsOnBackwardSeekAction = nullptr;
@@ -220,6 +240,19 @@ private:
     QDockWidget* m_replayControlsDock = nullptr;
     QDockWidget* m_replayTimelineDock = nullptr;
     QDockWidget* m_replayMarkerDock = nullptr;
+    sd::widgets::RunBrowserDock* m_runBrowserDock = nullptr;
+    QSet<QString> m_runBrowserCheckedKeys;  ///< Signal keys currently checked in Run Browser (controls tile visibility, persisted to QSettings).
+    QStringList m_runBrowserExpandedPaths;  ///< Persisted expanded tree paths for Run Browser.
+    // Ian: m_runBrowserActive distinguishes "no Run Browser session" (show all
+    // tiles) from "Run Browser has a replay loaded but nothing checked" (hide
+    // all replay tiles).  Without this flag, unchecking the last group would
+    // make checkedKeys empty, which the old logic treated as "no filtering."
+    bool m_runBrowserActive = false;  ///< True when the Run Browser dock has a replay file loaded.
+    // Ian: m_runBrowserHiddenKeys stores streaming-mode opt-outs.  In streaming
+    // mode we persist hidden keys (the inverse of checked keys) because the
+    // default is "everything visible."  On reconnect, as keys re-arrive via
+    // OnTileAdded, we re-apply this hidden set.  Not used in reading mode.
+    QSet<QString> m_runBrowserHiddenKeys;  ///< Streaming-mode: keys the user has hidden (persisted).
     QListWidget* m_replayMarkerList = nullptr;
     QLabel* m_replaySelectionSummaryLabel = nullptr;
     sd::widgets::PlaybackTimelineWidget* m_playbackTimeline = nullptr;

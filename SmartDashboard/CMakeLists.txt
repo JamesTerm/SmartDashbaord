@@ -34,6 +34,8 @@ qt_add_executable(SmartDashboardApp WIN32
     src/widgets/line_plot_widget.cpp
     src/widgets/playback_timeline_widget.h
     src/widgets/playback_timeline_widget.cpp
+    src/widgets/run_browser_dock.h
+    src/widgets/run_browser_dock.cpp
     src/widgets/tile_control_widget.h
     src/widgets/tile_control_widget.cpp
 )
@@ -81,6 +83,7 @@ if(BUILD_TESTING)
         tests/line_plot_widget_tests.cpp
         tests/main_window_persistence_tests.cpp
         tests/playback_timeline_widget_tests.cpp
+        tests/run_browser_dock_tests.cpp
         tests/tile_control_widget_tests.cpp
         tests/variable_tile_tests.cpp
         tests/startup_instance_gate_tests.cpp
@@ -99,6 +102,7 @@ if(BUILD_TESTING)
         src/widgets/variable_tile.cpp
         src/widgets/line_plot_widget.cpp
         src/widgets/playback_timeline_widget.cpp
+        src/widgets/run_browser_dock.cpp
         src/widgets/tile_control_widget.cpp
     )
 
