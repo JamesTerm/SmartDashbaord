@@ -25,7 +25,7 @@ cmake -G "Visual Studio 17 2022" -B build -DCMAKE_TOOLCHAIN_FILE="<your-vcpkg-ro
 # Build
 cmake --build build --config Debug
 
-# Test (197 tests, 2 disabled)
+# Test (225 tests, 2 disabled, 1 pre-existing failure)
 ctest -C Debug --output-on-failure
 ```
 
@@ -168,8 +168,9 @@ These serve different purposes and live in different codebases.
 ### Implementation phases
 
 1. ~~MJPEG stream reader + display widget + dock + CameraPublisher discovery + MainWindow wiring (MVP)~~ **COMPLETE**
+1b. ~~Auto-connect on discovery, auto-reconnect on error, dock visibility auto-connect, 28 unit tests~~ **COMPLETE**
 2. Targeting reticle overlay (dashboard-side, crosshair + circle)
-3. ~~Robot Simulation MJPEG server (Robot_Simulation repo)~~ **IN PROGRESS** — code written, pending build/test
+3. ~~Robot Simulation MJPEG server (Robot_Simulation repo)~~ **COMPLETE** — built and verified
 4. Backup camera guide lines (Robot_Simulation repo, OSG-side)
 
 Ian: Phase 3 implementation in Robot_Simulation (`feature/camera-widget` branch):
@@ -190,7 +191,8 @@ synthetic render.  Test with a machine that has a USB camera connected.
 
 ### Current status
 
-Phase 1 (MVP) is **complete and building clean** with all 137 existing tests passing.
+Phase 1 (MVP) is **complete** including auto-connect/auto-reconnect wiring and
+28 unit tests.  225 total tests (224 pass, 1 pre-existing failure, 2 disabled).
 
 **All source files created and integrated:**
 - `camera_stream_source.h`, `mjpeg_stream_source.h/.cpp`, `camera_publisher_discovery.h/.cpp`
@@ -198,16 +200,32 @@ Phase 1 (MVP) is **complete and building clean** with all 137 existing tests pas
 - `main_window.h` modified (forward decls, 3 member variables)
 - `main_window.cpp` modified (7 integration points: includes, View menu action, dock+discovery creation, variable update routing, StopTransport camera stop, disconnect camera clear)
 - `CMakeLists.txt` modified (new sources in both app and test targets)
+- `tests/camera_viewer_dock_tests.cpp` — 28 GTest tests (11 CameraPublisherDiscovery, 13 CameraViewerDock, 4 Discovery→Dock integration)
+
+**Auto-connect / auto-reconnect wiring (Phase 1b):**
+- `AddDiscoveredCamera`: auto-connects when dock is visible + idle
+- Error-state auto-reconnect via 2-second single-shot `QTimer` (`m_reconnectTimer`)
+- `m_userDisconnected` flag: manual Disconnect suppresses auto-reconnect; new discovery or dock re-show clears the flag (mirrors MainWindow transport reconnect pattern)
+- `TryAutoConnect()` fires on dock visibility change — connects if idle and cameras are available
 
 **Build fixes applied during integration:**
 - `camera_viewer_dock.h`: Changed forward declaration of `CameraStreamSource` to full `#include "camera/camera_stream_source.h"` — the header uses `CameraStreamSource::State` enum in a slot signature, which requires the full type definition
 - `mjpeg_stream_source.cpp`: Fixed Most Vexing Parse — `QNetworkRequest request(QUrl(url))` was parsed as a function declaration; changed to brace-init `QNetworkRequest request{QUrl(url)}`
 - `CMakeLists.txt` (test target): Added `camera_stream_source.h` to sources so MOC generates the QObject meta-object for the abstract base class (Q_OBJECT signals need MOC even in header-only classes)
 
+**NT4 data flow verified (7 stages):**
+Robot_Simulation publishes `/CameraPublisher/SimCamera/streams` on NT4 port 5810
+→ SmartDashboard NT4 plugin subscribes to all (topics `[""]`, prefix true)
+→ plugin delivers TopicUpdate with `StripSmartDashboardPrefix` (pass-through for `/CameraPublisher/` keys)
+→ ABI bridge converts `std::vector<std::string>` to `sd_transport_value_v1` StringArray
+→ host-side `OnPluginVariableUpdate` converts to `QVariant(QStringList)`
+→ MainWindow forwards to `CameraPublisherDiscovery::OnVariableUpdate`
+→ Discovery emits `CameraDiscovered("SimCamera", ["http://..."])` → Dock auto-connects
+
 **Next steps:**
-- Unit tests for `MjpegStreamSource` (boundary parsing, frame decode, error handling)
-- Unit tests for `CameraDisplayWidget` (aspect ratio, reticle positioning)
-- Manual testing with a real MJPEG stream or test server
+- H.264 discussion (options only, no implementation)
+- Targeting reticle overlay (Phase 2)
+- Manual end-to-end test with running Robot_Simulation
 
 ### Files
 
@@ -216,8 +234,9 @@ Phase 1 (MVP) is **complete and building clean** with all 137 existing tests pas
 | `src/camera/camera_stream_source.h` | Abstract frame source interface |
 | `src/camera/mjpeg_stream_source.h/.cpp` | MJPEG HTTP stream reader |
 | `src/camera/camera_publisher_discovery.h/.cpp` | NT4 CameraPublisher key watcher |
-| `src/widgets/camera_viewer_dock.h/.cpp` | Dock widget container |
+| `src/widgets/camera_viewer_dock.h/.cpp` | Dock widget container (auto-connect, auto-reconnect) |
 | `src/widgets/camera_display_widget.h/.cpp` | Custom paint widget + HUD overlay |
+| `tests/camera_viewer_dock_tests.cpp` | 28 GTest tests (discovery, dock, integration) |
 | `docs/camera_widget_design.md` | Full design document |
 
 ### 2014 reference codebase (read-only, at `D:\Stuff\BroncBotz\Code\BroncBotz_DashBoard\Source`)

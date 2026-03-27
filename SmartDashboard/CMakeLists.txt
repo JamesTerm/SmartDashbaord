@@ -89,6 +89,7 @@ if(BUILD_TESTING)
     endif()
 
     add_executable(SmartDashboard_tests
+        tests/camera_viewer_dock_tests.cpp
         tests/line_plot_widget_tests.cpp
         tests/main_window_persistence_tests.cpp
         tests/playback_timeline_widget_tests.cpp
