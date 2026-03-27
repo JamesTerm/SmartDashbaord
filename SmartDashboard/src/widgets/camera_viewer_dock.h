@@ -43,12 +43,11 @@ namespace sd::widgets
 
     /// @brief Dockable panel for viewing camera streams.
     ///
-    /// Ian: Auto-connect behavior — three triggers:
-    ///   1. Camera discovered via NT4 and dock is idle → connect immediately
-    ///   2. MJPEG stream drops (error/server close) → retry after 2 seconds
-    ///   3. Dock becomes visible and a camera is available → connect if idle
-    /// The user can always disconnect manually, which suppresses auto-reconnect
-    /// until a new camera is discovered or the dock is re-shown.
+    /// Ian: Auto-connect is disabled — the user must click Connect manually.
+    /// Auto-reconnect still works: if the user connects and the stream drops
+    /// (error/server close), it retries after 2 seconds.  Manual Disconnect
+    /// suppresses auto-reconnect until the user clicks Connect again or a
+    /// new camera is discovered.
     class CameraViewerDock final : public QDockWidget
     {
         Q_OBJECT

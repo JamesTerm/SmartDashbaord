@@ -1,6 +1,9 @@
-// Ian: Tests for CameraViewerDock — auto-connect on discovery, auto-reconnect
-// on error, manual disconnect suppression, and CameraPublisherDiscovery
-// key parsing / signal emission.
+// Ian: Tests for CameraViewerDock — discovery populates combo, manual connect/
+// disconnect, auto-reconnect on error, manual disconnect suppression, and
+// CameraPublisherDiscovery key parsing / signal emission.
+//
+// Auto-connect on discovery was removed — the user must click Connect manually.
+// Auto-reconnect after stream errors is still active.
 //
 // These tests use the dock's public API without a real MJPEG server.
 // The MjpegStreamSource will go to Error state when connecting to a
@@ -295,22 +298,18 @@ TEST_F(CameraViewerDockTest, MultipleDiscoveredCamerasTracked)
     EXPECT_EQ(m_dock->DiscoveredCameraCount(), 2);
 }
 
-TEST_F(CameraViewerDockTest, AutoConnectSetsLastConnectedUrl)
+TEST_F(CameraViewerDockTest, DiscoveryDoesNotAutoConnect)
 {
-    // Ian: When a camera is discovered and the dock is visible + idle,
-    // auto-connect should kick in.  We can verify by checking the
-    // last connected URL.
-    //
-    // Note: The dock must be visible for auto-connect.  In tests, the
-    // dock is hidden by default, so we show it first.
+    // Ian: Auto-connect was removed.  Discovering a camera should NOT
+    // automatically connect.  The user must click Connect manually.
     m_dock->show();
     QApplication::processEvents();
 
     m_dock->AddDiscoveredCamera("SimCamera",
         QStringList() << "http://127.0.0.1:1181/?action=stream");
 
-    EXPECT_EQ(m_dock->GetLastConnectedUrl(),
-        "http://127.0.0.1:1181/?action=stream");
+    // No auto-connect — last connected URL stays empty.
+    EXPECT_TRUE(m_dock->GetLastConnectedUrl().isEmpty());
 }
 
 TEST_F(CameraViewerDockTest, AutoConnectDoesNotFireWhenHidden)
@@ -391,18 +390,18 @@ TEST_F(CameraViewerDockTest, StopStreamSuppressesReconnect)
     EXPECT_TRUE(m_dock->IsAutoReconnectSuppressed());
 }
 
-TEST_F(CameraViewerDockTest, AutoConnectStripsMjpgPrefix)
+TEST_F(CameraViewerDockTest, DiscoveryDoesNotAutoConnectEvenWithMjpgPrefix)
 {
+    // Ian: Auto-connect was removed.  Even with mjpg: prefix URLs,
+    // no auto-connect should happen.
     m_dock->show();
     QApplication::processEvents();
 
-    // URL still has the mjpg: prefix (discovery strips it, but test directly).
     m_dock->AddDiscoveredCamera("SimCamera",
         QStringList() << "mjpg:http://127.0.0.1:1181/?action=stream");
 
-    // ConnectToUrl strips the mjpg: prefix.
-    EXPECT_EQ(m_dock->GetLastConnectedUrl(),
-        "http://127.0.0.1:1181/?action=stream");
+    // No auto-connect — URL stays empty.
+    EXPECT_TRUE(m_dock->GetLastConnectedUrl().isEmpty());
 }
 
 TEST_F(CameraViewerDockTest, EmptyUrlsDoNotTriggerAutoConnect)
@@ -463,8 +462,10 @@ TEST_F(CameraDiscoveryDockIntegrationTest, NT4KeyPopulatesDockCombo)
     EXPECT_EQ(m_dock->DiscoveredCameraCount(), 1);
 }
 
-TEST_F(CameraDiscoveryDockIntegrationTest, DiscoveryAutoConnectsWhenVisible)
+TEST_F(CameraDiscoveryDockIntegrationTest, DiscoveryDoesNotAutoConnectWhenVisible)
 {
+    // Ian: Auto-connect was removed.  Even when the dock is visible,
+    // discovering a camera should NOT trigger a connection.
     m_dock->show();
     QApplication::processEvents();
 
@@ -473,9 +474,8 @@ TEST_F(CameraDiscoveryDockIntegrationTest, DiscoveryAutoConnectsWhenVisible)
     m_discovery->OnVariableUpdate(
         "/CameraPublisher/SimCamera/streams", 20, QVariant(urls));
 
-    // Discovery strips mjpg: and dock's ConnectToUrl strips it again safely.
-    EXPECT_EQ(m_dock->GetLastConnectedUrl(),
-        "http://127.0.0.1:1181/?action=stream");
+    // No auto-connect — last connected URL stays empty.
+    EXPECT_TRUE(m_dock->GetLastConnectedUrl().isEmpty());
 }
 
 TEST_F(CameraDiscoveryDockIntegrationTest, ClearDiscoveryClearsDock)

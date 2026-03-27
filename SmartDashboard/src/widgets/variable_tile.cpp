@@ -1334,6 +1334,25 @@ namespace sd::widgets
             m_layout->setRowStretch(0, 0);
             m_layout->setRowStretch(1, 0);
         }
+        else if (!showControl && showDoubleNumeric)
+        {
+            // Ian: Numeric text gap fix — same pattern as string.text.  Set
+            // column-0 min width to 0 so the label column sizes naturally to
+            // its text width, allowing the tile to be made narrow without a
+            // forced 90px gap between the label and the value.
+            m_layout->setColumnMinimumWidth(0, 0);
+            m_layout->addWidget(m_titleLabel, 0, 0, 1, 1, Qt::AlignLeft | Qt::AlignVCenter);
+            if (m_doubleNumericEditable)
+            {
+                m_layout->addWidget(m_doubleEdit, 0, 1, 1, 1);
+            }
+            else
+            {
+                m_layout->addWidget(m_valueLabel, 0, 1, 1, 1);
+            }
+            m_layout->setRowStretch(0, 0);
+            m_layout->setRowStretch(1, 0);
+        }
         else if (!showControl && showStringText)
         {
             // Ian: Read-only label optional label with gap fix.  When the label

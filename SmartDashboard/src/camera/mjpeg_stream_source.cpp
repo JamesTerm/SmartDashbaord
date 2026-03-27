@@ -3,6 +3,7 @@
 
 #include "camera/mjpeg_stream_source.h"
 
+#include <QDebug>
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QUrl>
@@ -42,6 +43,7 @@ void MjpegStreamSource::Start(const QString& url)
     // multipart stream instead of a single JPEG snapshot.
     request.setRawHeader("Accept", "multipart/x-mixed-replace");
 
+    qDebug() << "[MjpegStream] Connecting to:" << url;
     m_reply = m_networkManager.get(request);
 
     connect(m_reply, &QNetworkReply::readyRead, this, &MjpegStreamSource::OnReadyRead);
@@ -102,6 +104,8 @@ void MjpegStreamSource::OnReadyRead()
     if (!m_boundaryParsed)
     {
         const QString contentType = m_reply->header(QNetworkRequest::ContentTypeHeader).toString();
+        qDebug() << "[MjpegStream] First readyRead — Content-Type:" << contentType
+                 << "  bytes available:" << m_reply->bytesAvailable();
         if (!contentType.isEmpty())
         {
             if (!ParseBoundaryFromContentType(contentType))
@@ -130,10 +134,12 @@ void MjpegStreamSource::OnStreamFinished()
     // streams are meant to run indefinitely until the client disconnects.
     if (m_reply != nullptr && m_reply->error() == QNetworkReply::NoError)
     {
+        qDebug() << "[MjpegStream] Stream finished (server closed connection)";
         SetError(QStringLiteral("Stream ended (server closed connection)"));
     }
     else if (m_reply != nullptr)
     {
+        qDebug() << "[MjpegStream] Stream finished with error:" << m_reply->errorString();
         SetError(m_reply->errorString());
     }
     Stop();
@@ -149,6 +155,8 @@ void MjpegStreamSource::OnStreamError()
         {
             return;
         }
+        qDebug() << "[MjpegStream] Stream error:" << m_reply->errorString()
+                 << "  code:" << m_reply->error();
         SetError(m_reply->errorString());
     }
     Stop();
@@ -297,11 +305,14 @@ void MjpegStreamSource::ProcessJpegFrame(const QByteArray& jpegData)
         // Ian: Silently skip corrupt frames.  This can happen if we
         // get a partial frame during stream startup or a network glitch.
         // Don't set an error state — the stream is still alive.
+        qDebug() << "[MjpegStream] Failed to decode JPEG frame, size:" << jpegData.size();
         return;
     }
 
     if (m_state != State::Streaming)
     {
+        qDebug() << "[MjpegStream] First frame decoded — entering Streaming state."
+                 << "Size:" << frame.width() << "x" << frame.height();
         SetState(State::Streaming);
     }
 

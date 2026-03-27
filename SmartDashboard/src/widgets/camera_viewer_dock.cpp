@@ -51,19 +51,16 @@ CameraViewerDock::CameraViewerDock(QWidget* parent)
     );
 
     // Ian: When the dock becomes visible and there's a discovered camera but
-    // no active stream, try to auto-connect.  This handles the case where
-    // the user opens the camera dock after the transport is already connected
-    // and cameras have been discovered.
+    // no active stream, populate the URL field for convenience — but do NOT
+    // auto-connect.  The user must click Connect manually.
     connect(
         this,
         &QDockWidget::visibilityChanged,
         this,
         [this](bool visible)
         {
-            if (visible)
-            {
-                TryAutoConnect();
-            }
+            Q_UNUSED(visible);
+            // Ian: Auto-connect removed.  The user clicks Connect explicitly.
         }
     );
 }
@@ -81,7 +78,7 @@ void CameraViewerDock::SetupUi()
     mainLayout->setContentsMargins(2, 2, 2, 2);
     mainLayout->setSpacing(2);
 
-    // Toolbar row.
+    // Toolbar row: camera selector + buttons + reticle.
     auto* toolbarLayout = new QHBoxLayout();
     toolbarLayout->setSpacing(4);
 
@@ -90,11 +87,6 @@ void CameraViewerDock::SetupUi()
     m_cameraCombo->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     m_cameraCombo->setMinimumWidth(100);
     toolbarLayout->addWidget(m_cameraCombo);
-
-    m_urlEdit = new QLineEdit();
-    m_urlEdit->setPlaceholderText(QStringLiteral("mjpeg:// stream URL"));
-    m_urlEdit->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-    toolbarLayout->addWidget(m_urlEdit);
 
     m_connectButton = new QPushButton(QStringLiteral("Connect"));
     m_connectButton->setFixedWidth(70);
@@ -109,6 +101,21 @@ void CameraViewerDock::SetupUi()
     toolbarLayout->addWidget(m_reticleCheckBox);
 
     mainLayout->addLayout(toolbarLayout);
+
+    // Ian: URL row — full width on its own line so the URL is actually readable.
+    // Previously it was crammed into the toolbar row and too narrow to show anything.
+    auto* urlLayout = new QHBoxLayout();
+    urlLayout->setSpacing(4);
+
+    auto* urlLabel = new QLabel(QStringLiteral("URL:"));
+    urlLayout->addWidget(urlLabel);
+
+    m_urlEdit = new QLineEdit();
+    m_urlEdit->setPlaceholderText(QStringLiteral("mjpeg:// stream URL"));
+    m_urlEdit->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    urlLayout->addWidget(m_urlEdit);
+
+    mainLayout->addLayout(urlLayout);
 
     // Status label.
     m_statusLabel = new QLabel(QStringLiteral("Disconnected"));
@@ -201,11 +208,11 @@ void CameraViewerDock::AddDiscoveredCamera(const QString& name, const QStringLis
         }
     }
 
-    // Ian: Auto-connect trigger — a new camera was discovered.  Clear the
-    // manual-disconnect flag since this is a fresh discovery (the server just
-    // announced a camera), and try to auto-connect if we're idle.
+    // Ian: Auto-connect removed — the user must click Connect manually.
+    // We still clear the manual-disconnect flag on discovery so that
+    // auto-reconnect (after stream error) works if the user has previously
+    // connected and the stream drops.
     m_userDisconnected = false;
-    TryAutoConnect();
 }
 
 int CameraViewerDock::DiscoveredCameraCount() const
@@ -418,49 +425,11 @@ void CameraViewerDock::ConnectToUrl(const QString& url)
 
 void CameraViewerDock::TryAutoConnect()
 {
-    // Ian: Auto-connect conditions:
-    //   1. Not manually disconnected by the user
-    //   2. Not already streaming or connecting
-    //   3. At least one camera has been discovered with a non-empty URL
-    //   4. Dock is visible (no point connecting to a hidden dock)
-    //
-    // The priority is: m_lastConnectedUrl (reconnect to same camera) >
-    // first discovered camera URL > nothing.
-
-    if (m_userDisconnected)
-    {
-        return;
-    }
-
-    if (!isVisible())
-    {
-        return;
-    }
-
-    if (m_streamSource != nullptr
-        && m_streamSource->GetState() != sd::camera::CameraStreamSource::State::Disconnected
-        && m_streamSource->GetState() != sd::camera::CameraStreamSource::State::Error)
-    {
-        // Already streaming or connecting — nothing to do.
-        return;
-    }
-
-    // Ian: Try the last connected URL first (reconnect to same camera).
-    if (!m_lastConnectedUrl.isEmpty())
-    {
-        ConnectToUrl(m_lastConnectedUrl);
-        return;
-    }
-
-    // Ian: No previous URL — pick the first discovered camera that has URLs.
-    for (auto it = m_discoveredCameras.constBegin(); it != m_discoveredCameras.constEnd(); ++it)
-    {
-        if (!it.value().isEmpty() && !it.value().first().isEmpty())
-        {
-            ConnectToUrl(it.value().first());
-            return;
-        }
-    }
+    // Ian: Auto-connect disabled.  The user must click Connect manually.
+    // This method is kept as a no-op so that call sites don't need to be
+    // wrapped in #ifdefs.  Auto-reconnect after stream errors still works
+    // via OnReconnectTimer() if the user has previously connected.
+    Q_UNUSED(this);
 }
 
 }  // namespace sd::widgets
