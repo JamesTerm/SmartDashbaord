@@ -7,6 +7,165 @@ Curated milestone history for this repository.
 - Keep milestone sections in descending chronological order (newest first) so recent changes are immediately visible.
 - Historical branch/status wording in older entries is time-bound; read each section as a snapshot from that date.
 
+## 2026-03-27 - Camera viewer dock MVP complete (`feature/camera-widget`)
+
+MJPEG camera stream viewer as a dockable panel. Full design in `docs/camera_widget_design.md`.
+
+### Research completed
+
+- Analyzed 2014 BroncBotz Dashboard video pipeline (FrameGrabber, Preview, ProcessingVision, ProcAmp, Controls, FrameWork library).
+- Documented complete NT4 CameraPublisher key schema and stream URL format (`/CameraPublisher/{Name}/streams` -> `mjpg:http://...`, base port 1181).
+- Confirmed Glass has no built-in camera viewer.
+- Confirmed SmartDashboard has zero existing camera/video code.
+
+### Architecture
+
+- **MjpegStreamSource**: `QNetworkAccessManager` HTTP client that parses `multipart/x-mixed-replace` boundaries and decodes JPEG frames via `QImage::loadFromData()`. No new dependencies.
+- **CameraDisplayWidget**: Custom `QWidget::paintEvent()` with aspect-ratio scaling and fighter-jet style targeting reticle overlay (dashboard-side, QPainter, click-drag positionable).
+- **CameraViewerDock**: `QDockWidget` following `RunBrowserDock` pattern — toolbar with camera selector combo, URL field, connect/disconnect, reticle toggle. View menu "Camera" checkbox, starts hidden.
+- **CameraPublisherDiscovery**: Watches NT4 `/CameraPublisher/` keys to auto-populate the camera selector.
+- **CameraStreamSource**: Abstract interface so display widget accepts frames from any backend (MJPEG, future Robot_Simulation, test pattern).
+
+Ian: Two separate overlay concepts exist and must not be conflated:
+1. **Targeting reticle** (SmartDashboard): Dashboard-side QPainter overlay drawn on top of the video widget. Fighter-jet crosshair + circle.
+2. **Backup camera guide lines** (Robot_Simulation): Simulator-side OSG overlay drawn in 3D and baked into MJPEG frames. Honda-style curved path lines driven by velocity/angular velocity.
+These serve different purposes and live in different codebases.
+
+### Phase 1 (MVP) — complete
+
+All source files created and integrated:
+- `camera_stream_source.h`, `mjpeg_stream_source.h/.cpp`, `camera_publisher_discovery.h/.cpp`
+- `camera_display_widget.h/.cpp`, `camera_viewer_dock.h/.cpp`
+- `main_window.h` modified (forward decls, 3 member variables)
+- `main_window.cpp` modified (7 integration points: includes, View menu action, dock+discovery creation, variable update routing, StopTransport camera stop, disconnect camera clear)
+- `CMakeLists.txt` modified (new sources in both app and test targets)
+- `tests/camera_viewer_dock_tests.cpp` — 28 GTest tests (11 CameraPublisherDiscovery, 13 CameraViewerDock, 4 Discovery→Dock integration)
+
+### Phase 1b (auto-connect / auto-reconnect) — complete
+
+- `AddDiscoveredCamera`: auto-connects when dock is visible + idle
+- Error-state auto-reconnect via 2-second single-shot `QTimer` (`m_reconnectTimer`)
+- `m_userDisconnected` flag: manual Disconnect suppresses auto-reconnect; new discovery or dock re-show clears the flag (mirrors MainWindow transport reconnect pattern)
+- `TryAutoConnect()` fires on dock visibility change — connects if idle and cameras are available
+
+### Phase 3 (Robot Simulation MJPEG server) — complete
+
+Built and verified in Robot_Simulation (`feature/camera-widget` branch):
+- MjpegServer subclasses ix::SocketServer (not ix::HttpServer — that's request-response only)
+- SimCameraSource generates 320x240@15fps synthetic frames via stb_image_write JPEG encoding
+- NT4Backend publishes /CameraPublisher/SimCamera/streams for auto-discovery
+- Stream URL: mjpg:http://127.0.0.1:1181/?action=stream
+
+Ian: Phase 3/4 design note — the simulator's MJPEG server should support two source modes: (a) OSG framebuffer readback (vector graphics on black, the default) and (b) real USB camera feed with OSG guide-line overlay composited on top. When a USB camera is available, the simulator can grab frames from it, draw the backup-camera guide lines over the live video, encode to JPEG, and serve via MJPEG. When no camera is available, fall back to the existing pure-OSG render. This keeps the MJPEG server API identical either way — the dashboard doesn't care whether frames come from a real camera or a synthetic render.
+
+### Build fixes applied during integration
+
+- `camera_viewer_dock.h`: Changed forward declaration of `CameraStreamSource` to full `#include "camera/camera_stream_source.h"` — the header uses `CameraStreamSource::State` enum in a slot signature, which requires the full type definition
+- `mjpeg_stream_source.cpp`: Fixed Most Vexing Parse — `QNetworkRequest request(QUrl(url))` was parsed as a function declaration; changed to brace-init `QNetworkRequest request{QUrl(url)}`
+- `CMakeLists.txt` (test target): Added `camera_stream_source.h` to sources so MOC generates the QObject meta-object for the abstract base class (Q_OBJECT signals need MOC even in header-only classes)
+
+### NT4 data flow verified (7 stages)
+
+Robot_Simulation publishes `/CameraPublisher/SimCamera/streams` on NT4 port 5810
+→ SmartDashboard NT4 plugin subscribes to all (topics `[""]`, prefix true)
+→ plugin delivers TopicUpdate with `StripSmartDashboardPrefix` (pass-through for `/CameraPublisher/` keys)
+→ ABI bridge converts `std::vector<std::string>` to `sd_transport_value_v1` StringArray
+→ host-side `OnPluginVariableUpdate` converts to `QVariant(QStringList)`
+→ MainWindow forwards to `CameraPublisherDiscovery::OnVariableUpdate`
+→ Discovery emits `CameraDiscovered("SimCamera", ["http://..."])` → Dock auto-connects
+
+### Files
+
+| File | What |
+|---|---|
+| `src/camera/camera_stream_source.h` | Abstract frame source interface |
+| `src/camera/mjpeg_stream_source.h/.cpp` | MJPEG HTTP stream reader |
+| `src/camera/camera_publisher_discovery.h/.cpp` | NT4 CameraPublisher key watcher |
+| `src/widgets/camera_viewer_dock.h/.cpp` | Dock widget container (auto-connect, auto-reconnect) |
+| `src/widgets/camera_display_widget.h/.cpp` | Custom paint widget + HUD overlay |
+| `tests/camera_viewer_dock_tests.cpp` | 28 GTest tests (discovery, dock, integration) |
+| `docs/camera_widget_design.md` | Full design document |
+
+### 2014 reference codebase (read-only, at `D:\Stuff\BroncBotz\Code\BroncBotz_DashBoard\Source`)
+
+Key files consulted during research:
+
+| File | What |
+|---|---|
+| `Dashboard/Dashboard.cpp` | Main app, video pipeline orchestration, ini parsing |
+| `FFMpeg121125/FrameGrabber.h` | FrameGrabber facade with FFMpeg/HTTP/TestPattern backends |
+| `FrameWork/Preview.h/.cpp` | DirectDraw 7 multi-buffer renderer |
+| `FrameWork/Bitmap.h` | Templatized bitmap containers |
+| `ProcessingVision/ProcessingVision.h/.cpp` | Vision processing plugin interface |
+| `ProcessingVision/NI_VisionProcessing.cpp` | NI Vision particle analysis |
+| `Controls/Controls.cpp/.h` | Controls DLL plugin (file controls, procamp controls) |
+| `ProcAmp/procamp_matrix.h` | 4x4 color correction matrix math |
+
+---
+
+## 2026-03-27 - Universal show-label toggle complete (`feature/camera-widget`)
+
+Consolidated the three per-widget-type show-label properties (`boolCheckboxShowLabel`, `boolLedShowLabel`, `stringTextShowLabel`) into a single universal `showLabel` property on `VariableTile`. Every widget type now has a "Show Label" checkbox in its Properties dialog.
+
+### Changes
+
+- `variable_tile.h`: Single `m_showLabel` member + `SetShowLabel(bool)` replaces 3 old members/setters
+- `variable_tile.cpp`: Universal `SetShowLabel()`, rewritten `UpdateWidgetPresentation()` with label-hidden layout paths for all 12 widget types, all property dialogs updated, `string.chooser` added to `IsPropertiesSupported()`
+- `layout_serializer.h`: Single `QVariant showLabel` replaces 3 old fields
+- `layout_serializer.cpp`: Saves/loads `"showLabel"` JSON key; backward-compat migration reads old per-widget keys from older layout files
+- `main_window.cpp`: Single `SetShowLabel()` call in `ApplyLayoutEntryToTile()`
+
+Ian: `double.gauge` previously always hid its label (hardcoded). Now it respects `m_showLabel` like every other widget type. If gauge layouts from before this change look different, that's why.
+
+Ian: `string.chooser` was missing from `IsPropertiesSupported()` — fixed during the show-label work. If a new widget type is added, remember to add it to that function or its Properties menu item will be grayed out.
+
+---
+
+## 2026-03-27 - Multi-select lasso + group drag complete (`feature/camera-widget`)
+
+Added rubber-band rectangle selection on the canvas in edit mode, with visual selection indicators and coordinated group drag for moving multiple tiles at once. There was no selection mechanism before this — no selected state, no multi-select, no rubber band.
+
+### Selection mechanics
+
+- Lasso: Click+drag on empty canvas draws a `QRubberBand`; on release, all tiles intersecting the rectangle become selected
+- Ctrl+click on a tile toggles its selection without clearing others
+- Click on an unselected tile (without Ctrl) clears selection and selects only that tile
+- Escape key clears selection
+- Selection auto-clears when: edit mode turns off, tiles are cleared, or a tile is removed
+
+### Group drag mechanics
+
+- The anchor tile (the one the user physically drags) moves itself via its own `mouseMoveEvent`
+- `MainWindow::eventFilter` detects the anchor's `QEvent::Move` and applies the same delta to all other selected tiles
+- `BeginGroupDrag` snapshots each selected tile's position; `UpdateGroupDrag` computes delta from anchor movement; `EndGroupDrag` resets state
+- The anchor is tracked explicitly by pointer (`m_groupDragAnchor`), not inferred from position changes
+
+### Visual indicator
+
+- Selected tiles in edit mode get a 2px blue dashed border (`#3a9bdc`) drawn in `VariableTile::paintEvent()`
+
+### Changes
+
+- `variable_tile.h`: Added `m_selected` flag, `SetSelected(bool)`, `IsSelected()`
+- `variable_tile.cpp`: `SetSelected()`/`IsSelected()` implementation, `paintEvent()` draws selection border
+- `main_window.h`: Selection state (`QSet<VariableTile*> m_selectedTiles`), lasso state (`QRubberBand*`, `m_lassoOrigin`, `m_lassoActive`), group drag state (`m_groupDragActive`, `m_groupDragAnchor`, `m_groupDragUpdating`, `m_groupDragEntries`), helper method declarations, `QRubberBand` forward decl
+- `main_window.cpp`: Event filter on canvas for lasso (press/move/release), tile events for group drag + Ctrl+click toggle, `ClearTileSelection()`, `SelectTilesInRect()`, `BeginGroupDrag()`, `UpdateGroupDrag()`, `EndGroupDrag()`, Escape in `keyPressEvent()`, selection cleared in `OnToggleEditable()`/`OnClearWidgets()`/`OnRemoveWidgetRequested()`
+
+### Bugs found and fixed during manual testing
+
+1. **Lasso started on tile clicks (not just empty canvas).** The tile's `mousePressEvent` calls `QFrame::mousePressEvent` which does `event->ignore()`, propagating the press up to `m_canvas`. The event filter saw `watched == m_canvas` and started the lasso even though the click was on a tile. Fix: added `m_canvas->childAt(me->pos()) == nullptr` guard in the MouseButtonPress handler, and added `m_lassoRubberBand->isVisible()` guard to the MouseButtonRelease handler so a stale rubber band from a prior lasso can't accidentally clear the selection.
+
+2. **Group drag broke apart after first frame.** Three interrelated bugs:
+   - Anchor was detected by position heuristic ("first tile that moved") — after the first frame ALL tiles had moved, so it picked the wrong tile. Fix: explicit `m_groupDragAnchor` pointer set in `BeginGroupDrag`.
+   - "Skip anchor" logic used `pos() != startPos` which matched ALL tiles after first frame, so siblings stopped moving. Fix: skip by pointer identity (`entry.tile == m_groupDragAnchor`).
+   - Moving siblings via `entry.tile->move()` fired `QEvent::Move` on each sibling, re-entering `UpdateGroupDrag` recursively. Fix: `m_groupDragUpdating` re-entry guard, plus event filter only triggers `UpdateGroupDrag` when the moving tile is `m_groupDragAnchor`.
+
+Ian: The anchor tile moves itself via its own drag handler. The event filter only moves the *other* selected tiles. If you change tile drag to use a different coordinate system, update `BeginGroupDrag`/`UpdateGroupDrag` to match — they rely on `tile->pos()` in canvas coordinates.
+
+Ian: The tiles' `mousePressEvent` calls `QFrame::mousePressEvent(event)` at the end, which does `event->ignore()`. This causes mouse presses to propagate from tiles up to the canvas. Any canvas event filter handler that assumes "if I see `watched == m_canvas`, the click was on empty space" is wrong — always check `m_canvas->childAt(pos)` first.
+
+---
+
 ## 2026-03-26 - Run Browser dock complete (`feature/run-browser-dock`)
 
 Dockable tree panel for browsing signal key hierarchies in the dashboard. The Run Browser is an **optional navigational filter** — it never blocks tile creation or visibility by default. Designed as a simple decluttering convenience for new FRC students.
@@ -68,6 +227,15 @@ The dock connects to these signals. The tree is always a 1:1 reflection of what 
 | `src/app/main_window.h` | Added `TileAdded`, `TileRemoved`, `TilesCleared` signals |
 | `src/app/main_window.cpp` | Signal emission from tile lifecycle; signal connections; `StartTransport` streaming setup with tile scan |
 | `tests/run_browser_dock_tests.cpp` | 104 tests (20 new, ~60 renamed from `AddDiscoveredKey` → `OnTileAdded`) |
+
+### Known limitations
+
+- `SignalActivated` / `RunActivated` signals have no downstream consumer (future: comparison plots)
+- `runIndex` is a vector index — unstable across operations
+- No `RemoveRun(int)` API — only bulk clear
+- No duplicate-file detection
+- No `qWarning()` on parse failures
+- Slash-only keys produce no tree nodes
 
 ---
 
