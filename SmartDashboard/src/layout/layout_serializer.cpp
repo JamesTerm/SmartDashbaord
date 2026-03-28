@@ -173,7 +173,7 @@ namespace sd::layout
             const QVariant linePlotYUpper = widget->property("linePlotYUpperLimit");
             const QVariant textFontPointSize = widget->property("textFontPointSize");
             const QVariant doubleNumericEditable = widget->property("doubleNumericEditable");
-            const QVariant boolCheckboxShowLabel = widget->property("boolCheckboxShowLabel");
+            const QVariant showLabel = widget->property("showLabel");
             const QVariant stringChooserMode = widget->property("stringChooserMode");
             const QVariant stringChooserOptions = widget->property("stringChooserOptions");
             if (gaugeLower.isValid())
@@ -260,19 +260,9 @@ namespace sd::layout
             {
                 entry["doubleNumericEditable"] = doubleNumericEditable.toBool();
             }
-            if (boolCheckboxShowLabel.isValid())
+            if (showLabel.isValid())
             {
-                entry["boolCheckboxShowLabel"] = boolCheckboxShowLabel.toBool();
-            }
-            const QVariant boolLedShowLabel = widget->property("boolLedShowLabel");
-            if (boolLedShowLabel.isValid())
-            {
-                entry["boolLedShowLabel"] = boolLedShowLabel.toBool();
-            }
-            const QVariant stringTextShowLabel = widget->property("stringTextShowLabel");
-            if (stringTextShowLabel.isValid())
-            {
-                entry["stringTextShowLabel"] = stringTextShowLabel.toBool();
+                entry["showLabel"] = showLabel.toBool();
             }
             if (stringChooserMode.isValid())
             {
@@ -435,17 +425,26 @@ namespace sd::layout
             {
                 layoutEntry.doubleNumericEditable = entry.value("doubleNumericEditable").toBool();
             }
-            if (entry.contains("boolCheckboxShowLabel"))
+            // Ian: Universal showLabel replaced the old per-widget-type fields
+            // (boolCheckboxShowLabel, boolLedShowLabel, stringTextShowLabel).
+            // For backward compatibility with older layout files, fall back to
+            // the legacy field that matches this widget type if "showLabel" is
+            // absent.
+            if (entry.contains("showLabel"))
             {
-                layoutEntry.boolCheckboxShowLabel = entry.value("boolCheckboxShowLabel").toBool();
+                layoutEntry.showLabel = entry.value("showLabel").toBool();
             }
-            if (entry.contains("boolLedShowLabel"))
+            else if (entry.contains("boolCheckboxShowLabel") && layoutEntry.widgetType == "bool.checkbox")
             {
-                layoutEntry.boolLedShowLabel = entry.value("boolLedShowLabel").toBool();
+                layoutEntry.showLabel = entry.value("boolCheckboxShowLabel").toBool();
             }
-            if (entry.contains("stringTextShowLabel"))
+            else if (entry.contains("boolLedShowLabel") && layoutEntry.widgetType == "bool.led")
             {
-                layoutEntry.stringTextShowLabel = entry.value("stringTextShowLabel").toBool();
+                layoutEntry.showLabel = entry.value("boolLedShowLabel").toBool();
+            }
+            else if (entry.contains("stringTextShowLabel") && layoutEntry.widgetType == "string.text")
+            {
+                layoutEntry.showLabel = entry.value("stringTextShowLabel").toBool();
             }
             if (entry.contains("stringChooserMode"))
             {
@@ -658,7 +657,7 @@ namespace sd::layout
 
             if (widgetType == "bool.checkbox")
             {
-                entry.boolCheckboxShowLabel = false;
+                entry.showLabel = false;
             }
 
             for (const auto& [name, _] : properties)

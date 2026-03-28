@@ -39,6 +39,7 @@ class QListWidget;
 class QListWidgetItem;
 class QPushButton;
 class QToolButton;
+class QRubberBand;
 class QTimer;
 class QGroupBox;
 #ifdef _DEBUG
@@ -210,6 +211,11 @@ private:
     void SetNativeLinkCarrierSetting(const QString& carrier);
     bool ShouldShowNativeLinkCarrierDebugOptions() const;
     void ApplyTemporaryDefaultValuesToTiles();
+    void ClearTileSelection();
+    void SelectTilesInRect(const QRect& selectionRect);
+    void BeginGroupDrag(sd::widgets::VariableTile* anchorTile, const QPoint& globalPos);
+    void UpdateGroupDrag(const QPoint& globalPos);
+    void EndGroupDrag();
 
     QWidget* m_canvas = nullptr;
     QLabel* m_statusLabel = nullptr;
@@ -340,6 +346,26 @@ private:
     bool m_clearLinePlotsOnRewind = false;
     bool m_clearLinePlotsOnBackwardSeek = false;
     bool m_syncingReplayControlsDockVisibility = false;
+
+    // Ian: Multi-select lasso + group drag state.  The rubber band is drawn on
+    // the canvas during a lasso drag (mouse press on empty canvas space then
+    // drag).  On release, tiles whose geometry intersects the rubber band rect
+    // join the selection.  When a selected tile is dragged, all selected tiles
+    // move as a group.  Selection is cleared on Escape, click on empty space,
+    // or when editable mode is turned off.
+    QSet<sd::widgets::VariableTile*> m_selectedTiles;
+    QRubberBand* m_lassoRubberBand = nullptr;
+    QPoint m_lassoOrigin;
+    bool m_lassoActive = false;
+    bool m_groupDragActive = false;
+    sd::widgets::VariableTile* m_groupDragAnchor = nullptr;
+    bool m_groupDragUpdating = false;  // Ian: Re-entry guard — prevents sibling Move events from cascading.
+    struct GroupDragEntry
+    {
+        sd::widgets::VariableTile* tile = nullptr;
+        QPoint startPos;
+    };
+    std::vector<GroupDragEntry> m_groupDragEntries;
     bool m_syncingReplayTimelineDockVisibility = false;
     bool m_syncingReplayMarkerDockVisibility = false;
     bool m_syncingMarkerSelection = false;

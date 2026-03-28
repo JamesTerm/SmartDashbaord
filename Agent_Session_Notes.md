@@ -120,12 +120,68 @@ MainWindow drives mode selection:
 
 | Feature | Branch | Status |
 |---|---|---|
+| Universal show-label toggle | `feature/camera-widget` | Complete (UI housekeeping) |
+| Multi-select lasso + group drag | `feature/camera-widget` | Complete (UI housekeeping) |
 | Run Browser dock | `feature/run-browser-dock` | Complete, pending merge to main |
 | Native Link TCP carrier | `feature/native-link-tcpip-carrier` | Merged to main |
 | NT4 transport (originally "Shuffleboard") | `feature/shuffleboard-transport` | Merged to main |
 | Glass verification + Shuffleboard→NT4 rename | `feature/glass-transport` | Merged to main |
 
 Glass support details and NT4 protocol reference moved to `docs/project_history.md`.
+
+## Complete: Universal show-label toggle
+
+Consolidated the three per-widget-type show-label properties (`boolCheckboxShowLabel`, `boolLedShowLabel`, `stringTextShowLabel`) into a single universal `showLabel` property on `VariableTile`. Every widget type now has a "Show Label" checkbox in its Properties dialog.
+
+**Changes:**
+- `variable_tile.h`: Single `m_showLabel` member + `SetShowLabel(bool)` replaces 3 old members/setters
+- `variable_tile.cpp`: Universal `SetShowLabel()`, rewritten `UpdateWidgetPresentation()` with label-hidden layout paths for all 12 widget types, all property dialogs updated, `string.chooser` added to `IsPropertiesSupported()`
+- `layout_serializer.h`: Single `QVariant showLabel` replaces 3 old fields
+- `layout_serializer.cpp`: Saves/loads `"showLabel"` JSON key; backward-compat migration reads old per-widget keys from older layout files
+- `main_window.cpp`: Single `SetShowLabel()` call in `ApplyLayoutEntryToTile()`
+
+Ian: `double.gauge` previously always hid its label (hardcoded). Now it respects `m_showLabel` like every other widget type. If gauge layouts from before this change look different, that's why.
+
+## Complete: Multi-select lasso + group drag
+
+Added rubber-band rectangle selection on the canvas in edit mode, with visual selection indicators and coordinated group drag for moving multiple tiles at once. There was no selection mechanism before this — no selected state, no multi-select, no rubber band.
+
+**Selection mechanics:**
+- Lasso: Click+drag on empty canvas draws a `QRubberBand`; on release, all tiles intersecting the rectangle become selected
+- Ctrl+click on a tile toggles its selection without clearing others
+- Click on an unselected tile (without Ctrl) clears selection and selects only that tile
+- Escape key clears selection
+- Selection auto-clears when: edit mode turns off, tiles are cleared, or a tile is removed
+
+**Group drag mechanics:**
+- The anchor tile (the one the user physically drags) moves itself via its own `mouseMoveEvent`
+- `MainWindow::eventFilter` detects the anchor's `QEvent::Move` and applies the same delta to all other selected tiles
+- `BeginGroupDrag` snapshots each selected tile's position; `UpdateGroupDrag` computes delta from anchor movement; `EndGroupDrag` resets state
+- The anchor is tracked explicitly by pointer (`m_groupDragAnchor`), not inferred from position changes
+
+**Visual indicator:**
+- Selected tiles in edit mode get a 2px blue dashed border (`#3a9bdc`) drawn in `VariableTile::paintEvent()`
+
+**Changes:**
+- `variable_tile.h`: Added `m_selected` flag, `SetSelected(bool)`, `IsSelected()`
+- `variable_tile.cpp`: `SetSelected()`/`IsSelected()` implementation, `paintEvent()` draws selection border
+- `main_window.h`: Selection state (`QSet<VariableTile*> m_selectedTiles`), lasso state (`QRubberBand*`, `m_lassoOrigin`, `m_lassoActive`), group drag state (`m_groupDragActive`, `m_groupDragAnchor`, `m_groupDragUpdating`, `m_groupDragEntries`), helper method declarations, `QRubberBand` forward decl
+- `main_window.cpp`: Event filter on canvas for lasso (press/move/release), tile events for group drag + Ctrl+click toggle, `ClearTileSelection()`, `SelectTilesInRect()`, `BeginGroupDrag()`, `UpdateGroupDrag()`, `EndGroupDrag()`, Escape in `keyPressEvent()`, selection cleared in `OnToggleEditable()`/`OnClearWidgets()`/`OnRemoveWidgetRequested()`
+
+**Bugs found and fixed during manual testing:**
+
+1. **Lasso started on tile clicks (not just empty canvas).** The tile's `mousePressEvent` calls `QFrame::mousePressEvent` which does `event->ignore()`, propagating the press up to `m_canvas`. The event filter saw `watched == m_canvas` and started the lasso even though the click was on a tile. Fix: added `m_canvas->childAt(me->pos()) == nullptr` guard in the MouseButtonPress handler, and added `m_lassoRubberBand->isVisible()` guard to the MouseButtonRelease handler so a stale rubber band from a prior lasso can't accidentally clear the selection.
+
+2. **Group drag broke apart after first frame.** Three interrelated bugs:
+   - Anchor was detected by position heuristic ("first tile that moved") — after the first frame ALL tiles had moved, so it picked the wrong tile. Fix: explicit `m_groupDragAnchor` pointer set in `BeginGroupDrag`.
+   - "Skip anchor" logic used `pos() != startPos` which matched ALL tiles after first frame, so siblings stopped moving. Fix: skip by pointer identity (`entry.tile == m_groupDragAnchor`).
+   - Moving siblings via `entry.tile->move()` fired `QEvent::Move` on each sibling, re-entering `UpdateGroupDrag` recursively. Fix: `m_groupDragUpdating` re-entry guard, plus event filter only triggers `UpdateGroupDrag` when the moving tile is `m_groupDragAnchor`.
+
+Ian: The anchor tile moves itself via its own drag handler. The event filter only moves the *other* selected tiles. If you change tile drag to use a different coordinate system, update `BeginGroupDrag`/`UpdateGroupDrag` to match — they rely on `tile->pos()` in canvas coordinates.
+
+Ian: The tiles' `mousePressEvent` calls `QFrame::mousePressEvent(event)` at the end, which does `event->ignore()`. This causes mouse presses to propagate from tiles up to the canvas. Any canvas event filter handler that assumes "if I see `watched == m_canvas`, the click was on empty space" is wrong — always check `m_canvas->childAt(pos)` first.
+
+Ian: `string.chooser` was missing from `IsPropertiesSupported()` — fixed during the show-label work. If a new widget type is added, remember to add it to that function or its Properties menu item will be grayed out.
 
 ## In progress: Camera viewer dock (`feature/camera-widget`)
 

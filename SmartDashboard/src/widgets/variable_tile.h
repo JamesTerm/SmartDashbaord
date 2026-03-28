@@ -76,9 +76,9 @@ namespace sd::widgets
         void SetLinePlotGridLinesVisible(bool visible);
         void SetTextFontPointSize(int pointSize);
         void SetDoubleNumericEditable(bool editable);
-        void SetBoolCheckboxShowLabel(bool showLabel);
-        void SetBoolLedShowLabel(bool showLabel);
-        void SetStringTextShowLabel(bool showLabel);
+        void SetShowLabel(bool showLabel);
+        void SetSelected(bool selected);
+        bool IsSelected() const;
         void SetStringChooserMode(bool chooserMode);
         void SetStringChooserOptions(const QStringList& options);
         bool IsLinePlotWidget() const;
@@ -174,9 +174,8 @@ namespace sd::widgets
         QSize m_defaultSize;
         bool m_doubleNumericEditable = false;
         int m_textFontPointSize = 0;
-        bool m_boolCheckboxShowLabel = false;
-        bool m_boolLedShowLabel = true;
-        bool m_stringTextShowLabel = true;
+        bool m_showLabel = true;
+        bool m_selected = false;
         int m_widthBeforeCompact = 0;
         bool m_stringChooserMode = false;
         QStringList m_stringChooserOptions;
