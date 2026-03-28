@@ -46,6 +46,16 @@ Use these buckets to keep roadmap discussions grounded in product identity.
    - Layout/edit/save/load behavior, reconnect handling, and operator-controlled value survival should feel trustworthy.
    - Acceptance: a normal team can accomplish everyday dashboard tasks without first asking what is missing.
 
+6. **Command/Subsystem status display**
+   - Teams using command-based programming expect to see the Scheduler widget (running commands list), subsystem "required by" display, and command start/cancel buttons via `putData`.
+   - This is a core SmartDashboard feature that command-based teams rely on for debugging and development.
+   - Acceptance: `SmartDashboard.putData(CommandScheduler)`, `putData(subsystem)`, and `putData("name", command)` produce the expected interactive widgets.
+
+7. **Test Mode / LiveWindow support**
+   - SmartDashboard's Test Mode displays sensors and actuators grouped by subsystem with interactive sliders, plus PID tuning with live P/I/D parameter editing.
+   - Teams use this for mechanism bring-up, finding setpoints, and tuning PID controllers without writing throwaway code.
+   - Acceptance: entering Test Mode on the robot causes the dashboard to display LiveWindow sensor/actuator widgets with interactive controls.
+
 ### Want
 
 1. **Replay as a differentiator**
@@ -59,7 +69,7 @@ Use these buckets to keep roadmap discussions grounded in product identity.
 3. **High-value operational additions**
    - Add practical features that directly support common team workflows once the foundation is stable.
    - Current likely candidates:
-     - ~~camera stream support~~ (Phase 1/1b/3 complete — MJPEG viewer dock with auto-discovery and auto-reconnect)
+      - ~~camera stream support~~ (complete — all phases closed, MJPEG viewer dock with reticle overlay, auto-discovery, auto-reconnect)
      - lightweight alerts/notifications
      - a few more visual control variants where they materially improve migration comfort
 
@@ -69,14 +79,19 @@ Use these buckets to keep roadmap discussions grounded in product identity.
    - Add advanced analysis helpers only when they clearly help normal team workflows.
    - Acceptance: each addition saves real time during incident review instead of adding novelty.
 
-2. **Broader specialty widget surfaces**
+2. **Dedicated high-performance telemetry panel**
+   - A single panel widget with multiple traces/axes, shared timeline controls, and high-scale rendering — distinct from the per-tile multi-trace line plot.
+   - Evaluate how this affects buffer ownership, decimation strategy, rendering batching, and UI layout workflow.
+   - Only justified once the per-tile multi-trace line plot is proven in practice and teams need more.
+
+3. **Broader specialty widget surfaces**
    - Explore richer FRC-specific views only after core adoption is healthy.
    - Examples:
      - field/mechanism-style views
      - command/subsystem-oriented panels
      - other specialty semantic widgets that are useful but not foundational
 
-3. **Major UX polish layers**
+4. **Major UX polish layers**
    - Consider broader visual/design-system sophistication only after the product is already trusted for reliability and workflow fit.
 
 ---
@@ -91,21 +106,23 @@ Treat this as the readiness gate before presenting NetworkTables support as a co
 - [x] `SendableChooser`-style autonomous selection is supported
 - [x] Layout/edit/save/load workflow feels dependable enough for daily use
 - [x] Connection/reconnect/status behavior is trustworthy and unsurprising
-- [ ] Existing common scalar widgets feel complete for normal team use (bool indicators/text/control, numeric text/bar/slider/dial, string text/edit views)
+- [x] Existing common scalar widgets feel complete for normal team use (bool indicators/text/control, numeric text/bar/slider/dial, string text/edit views)
 - [ ] Common `SmartDashboard`/`Shuffleboard` publishing patterns are documented as: works unchanged / works through adapter / not yet supported
 - [ ] Legacy compatibility baseline is explicit (preserve `legacy-smartdashboard-baseline` behavior profile for validation; allow `shuffleboard-additive` behaviors only when they do not break legacy baseline)
 - [ ] Key migration policy is explicit for operator-controlled values (canonical scoped keys preferred, legacy flat aliases remain supported during migration)
-- [ ] Dashboard-owned control values replay/re-publish correctly across simulator reconnects in direct mode
+- [x] Dashboard-owned control values replay/re-publish correctly across simulator reconnects in direct mode
+- [ ] Command/Subsystem status display (`putData` for Scheduler, subsystems, and commands produces expected interactive widgets)
+- [ ] Test Mode / LiveWindow support (sensor/actuator display grouped by subsystem, interactive sliders, PID tuning)
 
 ### High-priority near-foundation items
 
-- [ ] Graph/plot support that covers normal `Shuffleboard` expectations for numeric telemetry
+- [x] Graph/plot support that covers normal `Shuffleboard` expectations for numeric telemetry
 - [x] Camera stream support for teams that rely on driver/diagnostic video in dashboard workflows (MJPEG MVP complete)
 - [ ] Visual control variants where they materially improve migration comfort (`Toggle Button`, `Toggle Switch`, voltage-view-style presentation if needed)
 
 ### Not required to unblock NT rollout
 
-- Enhanced multi-trace plotting beyond normal `Shuffleboard` graph expectations
+- ~~Enhanced multi-trace plotting beyond normal `Shuffleboard` graph expectations~~ (active — see "Multi-trace line plot" section below)
 - Compass widget
 - Deep replay-analysis additions beyond the current practical workflow
 - Broader specialty `Shuffleboard`/WPILib widgets such as `Field2d`, `Mechanism2d`, command/subsystem panels, or other advanced sendable surfaces
@@ -116,27 +133,32 @@ If a typical FRC team points an existing robot project at this dashboard, can th
 
 ---
 
-## Active: Camera widget remaining phases (`feature/camera-widget`)
+## Active: Abstract camera discovery from transport
 
-Phases 1 (MVP), 1b (auto-connect/reconnect), and 3 (Robot_Simulation MJPEG server) are **complete**. Full details in `docs/project_history.md` (2026-03-27 entry) and `docs/camera_widget_design.md`.
+Camera auto-discovery currently piggy-backs on the transport variable stream — `MainWindow` forwards every key update to `CameraPublisherDiscovery`, which filters for `/CameraPublisher/` keys. This only works when the active transport happens to deliver those keys as variable updates (NT4 does; Direct and Native Link do not).
 
-- [ ] **Phase 2:** Targeting reticle overlay — dashboard-side QPainter crosshair + circle on `CameraDisplayWidget`, click-drag positionable
-- [ ] **Phase 4:** Backup camera guide lines — Robot_Simulation repo, OSG-side overlay baked into MJPEG frames (Honda-style curved path lines driven by velocity/angular velocity) **(cross-repo)**
-- [ ] H.264 discussion (options only, no implementation decision yet)
-- [ ] Manual end-to-end test with running Robot_Simulation **(cross-repo)**
+Camera discovery is not part of the transport contract and should not be. A Direct-connected session should still be able to discover and connect to camera streams. The fix is to extract camera discovery into its own abstracted service that works independently of which transport plugin is active.
+
+- [ ] Define an `ICameraDiscoverySource` interface (or equivalent) that camera discovery providers implement
+- [ ] Move `CameraPublisherDiscovery` behind that interface as one concrete provider (NT4-style `/CameraPublisher/` key monitoring)
+- [ ] Wire `CameraViewerDock` to consume the abstract interface instead of being fed by `MainWindow` variable forwarding
+- [ ] Camera discovery works regardless of active transport plugin (Direct, Native Link, NT4, or none)
 
 ---
 
-## Recording / playback feature (next major feature)
+## Active: Multi-trace line plot
 
-- [ ] Dashboard can record bool/double/string telemetry updates to a session file during live operation
-- [ ] Replay mode can load a recorded session and feed updates through the same model/widget flow used for live transports
-- [ ] Global playback controls exist: `play`, `pause`, `seek`, and speed selection (`0.25x`, `0.5x`, `1x`, `2x` minimum)
-- [ ] All widgets stay synchronized to one shared global replay cursor
-- [ ] Timeline interactions support scrub, zoom, and pan for match-scale and sub-second analysis
-- [ ] Replay is deterministic: same recording + same cursor position produces the same displayed state
-- [ ] Replay seek performance is indexed or otherwise optimized to avoid full-file replay from time zero on typical jumps
-- [ ] Automated tests cover recorder/replay roundtrip and replay seek correctness
+Extend the existing `LinePlotWidget` to support multiple named traces in a single tile. The current widget accepts a single `AddSample(double)` call and draws one trace. Teams commonly need to overlay related signals (e.g. setpoint vs. actual, left vs. right motor output) to compare behavior at a glance.
+
+Architecture direction: option A (many independent lightweight line-plot widgets, extended to multi-trace). A dedicated high-performance telemetry panel (option B) is a separate Dream-tier feature for later.
+
+- [ ] `LinePlotWidget` accepts multiple named traces, each with its own color and sample buffer
+- [ ] Trace assignment UI — operator can add/remove traces and assign each to a variable key
+- [ ] Per-trace color selection (auto-assigned defaults, user-overridable)
+- [ ] Shared x-axis and configurable y-axis (auto-range across all visible traces, or per-trace manual limits)
+- [ ] Legend or trace labels visible on the plot for readability
+- [ ] Existing single-trace `double.lineplot` behavior is preserved as the default (one trace, no regression)
+- [ ] Properties dialog updated for multi-trace configuration and persistence through layout save/load
 
 ---
 
@@ -148,10 +170,6 @@ These are architectural directions that need discussion and decisions before imp
   - what works unchanged
   - what requires an adapter/bridge
   - what remains intentionally unsupported
-- Evaluate long-term line-plot architecture direction for higher-scale telemetry UX:
-  - option A: many independent lightweight line-plot widgets (legacy SmartDashboard style)
-  - option B: one high-performance telemetry panel with multiple traces/axes and shared timeline controls
-  - define how this choice affects buffer ownership, decimation strategy, rendering batching, and UI layout workflow
 - Evaluate a future telemetry event bus layer that decouples ingestion from UI rendering:
   - topic-based pub/sub subscription model
   - per-subscriber rate-limited delivery with coalescing
@@ -169,3 +187,4 @@ Lower-priority items parked for future consideration.
 - Wire a UI toolbar/status-bar Connect button
 - Write-ack protocol on TCP Publish (currently fire-and-forget)
 - Expand smoke test published keys from ~6 + chooser to full TeleAutonV2 (~49 keys)
+- Dedicated recorder-to-replay roundtrip test and replay seek correctness test (timeline widget and transport parity tests exist, but no end-to-end record → file → replay-load → seek → verify-state coverage)

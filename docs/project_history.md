@@ -7,6 +7,55 @@ Curated milestone history for this repository.
 - Keep milestone sections in descending chronological order (newest first) so recent changes are immediately visible.
 - Historical branch/status wording in older entries is time-bound; read each section as a snapshot from that date.
 
+## 2026-03-28 - Recording/playback feature complete (7 of 8 roadmap items)
+
+The recording/playback feature roadmap section is now closed. All functional items are implemented in production code; the remaining gap (dedicated recorder-to-replay roundtrip and seek correctness tests) is deferred to the roadmap's deferred-work section.
+
+Completed items:
+
+- **Session recording** — `MainWindow::StartSessionRecording` / `RecordVariableEvent` write bool/double/string telemetry updates to newline-delimited JSON session files during live operation.
+- **Replay transport** — `ReplayDashboardTransport` implements `IDashboardTransport`, loading recorded sessions and feeding updates through the same model/widget flow used by live transports.
+- **Playback controls** — play, pause, seek, and speed selection (0.25x, 0.5x, 1x, 2x) wired in `main_window.cpp` replay-mode toolbar.
+- **Shared global replay cursor** — all widgets synchronize to `ReplayDashboardTransport::m_cursorUs`.
+- **Timeline interactions** — `PlaybackTimelineWidget` supports left-drag scrub, wheel zoom, and right-drag pan for match-scale and sub-second analysis.
+- **Deterministic replay** — checkpoint + scan state reconstruction with no wall-clock dependence; same recording + same cursor position produces the same displayed state.
+- **Indexed seek** — checkpoints every 1000 events with binary search on timestamps; avoids full-file replay from time zero on typical jumps.
+
+Test coverage that exists today:
+
+- `PlaybackTimelineWidgetTests` (3 tests): `ClampsCursorAndWindowToDuration`, `TickStepAdaptsAcrossZoomSpans`, `TimeAndSpanLabelsUseReadableFormats`
+- `transport_parity_contract_tests.cpp`: telemetry roundtrip (bool/double/string), command roundtrip, retained reconnect replay behavior
+
+Not yet covered (deferred): dedicated recorder → file → replay-load → seek → verify-state roundtrip test, and explicit seek correctness test against known checkpoint/scan reconstruction.
+
+## 2026-03-28 - Camera widget phases 2 and 4 closed, H.264 dropped
+
+### Phase 2 — Targeting reticle overlay (complete)
+
+The targeting reticle was implemented as part of the initial `CameraDisplayWidget` build. QPainter draws a green crosshair + circle overlay on top of the video frame, click-drag positionable, toggled via checkbox in the dock toolbar. No stream modification — the overlay is purely dashboard-side.
+
+- `camera_display_widget.cpp`: `paintEvent()` draws reticle at normalized position; `mousePressEvent`/`mouseMoveEvent` update position on click-drag
+- `camera_viewer_dock.cpp`: "Reticle" checkbox wired to `SetReticleVisible()`
+
+### Phase 4 — Backup camera guide lines (closed, superseded by QPainter + The Grid)
+
+The original Phase 4 concept was OSG-side overlays baked into the MJPEG stream (Honda-style curved path lines driven by velocity/angular velocity). This was dropped in favor of:
+
+1. **QPainter overlays on the dashboard side** — keeps the stream untampered, keeps the code simpler, and aligns with how FRC teams handle camera overlays today. Any future guide-line or annotation overlay should follow the same QPainter pattern used by the targeting reticle.
+2. **"The Grid" (TronGridSource)** in Robot_Simulation — provides a first-person virtual field camera driven by robot position/heading, which serves the spatial awareness purpose that backup camera guide lines were intended to address, without baking anything into the video stream.
+
+Ian: The design principle is: overlays belong on the dashboard side (QPainter), not baked into the stream. This keeps the MJPEG server simple (just frames), keeps the stream reusable by any client, and makes overlay logic testable without a running camera.
+
+### H.264 — dropped
+
+Research concluded that FRC teams are not using H.264 for dashboard camera streams. FMS bandwidth standards have improved enough that MJPEG is adequate for team use. No implementation planned.
+
+### Manual end-to-end test — verified
+
+SmartDashboard camera viewer dock successfully receives and displays MJPEG streams from Robot_Simulation's NT4 backend across all video source modes (Synthetic Radar, The Grid, USB Camera). Auto-discovery via `/CameraPublisher/SimCamera/streams` works end-to-end.
+
+---
+
 ## 2026-03-27 - Camera viewer dock MVP complete (`feature/camera-widget`)
 
 MJPEG camera stream viewer as a dockable panel. Full design in `docs/camera_widget_design.md`.
@@ -26,10 +75,7 @@ MJPEG camera stream viewer as a dockable panel. Full design in `docs/camera_widg
 - **CameraPublisherDiscovery**: Watches NT4 `/CameraPublisher/` keys to auto-populate the camera selector.
 - **CameraStreamSource**: Abstract interface so display widget accepts frames from any backend (MJPEG, future Robot_Simulation, test pattern).
 
-Ian: Two separate overlay concepts exist and must not be conflated:
-1. **Targeting reticle** (SmartDashboard): Dashboard-side QPainter overlay drawn on top of the video widget. Fighter-jet crosshair + circle.
-2. **Backup camera guide lines** (Robot_Simulation): Simulator-side OSG overlay drawn in 3D and baked into MJPEG frames. Honda-style curved path lines driven by velocity/angular velocity.
-These serve different purposes and live in different codebases.
+Ian: Overlays belong on the dashboard side (QPainter), not baked into the stream. The targeting reticle is drawn via QPainter in `CameraDisplayWidget::paintEvent()`. Any future guide-line or annotation overlay should follow the same pattern. The original Phase 4 concept (OSG-side baked overlays) was dropped — see 2026-03-28 entry above.
 
 ### Phase 1 (MVP) — complete
 
@@ -236,6 +282,83 @@ The dock connects to these signals. The tree is always a 1:1 reflection of what 
 - No duplicate-file detection
 - No `qWarning()` on parse failures
 - Slash-only keys produce no tree nodes
+
+---
+
+## 2026-03-25 - vcpkg manifest for automatic dependency installation
+
+Added `vcpkg.json` manifest to the repository root so CMake configure automatically installs all C++ dependencies (Qt6 base, ixwebsocket, etc.) via vcpkg's manifest mode. No manual `vcpkg install` steps are needed — just pass `-DCMAKE_TOOLCHAIN_FILE=...` and the manifest handles the rest.
+
+- Commit: `d26e9d0`
+- This removes a common onboarding friction point for new contributors.
+
+---
+
+## 2026-03-25 - Preserve control edits and chooser selection across plugin reconnects
+
+Two fixes to ensure operator-controlled state survives transport reconnects on all plugin-based transports (NT4, Native Link).
+
+### Chooser selection preserved (`b4ef9d7`)
+
+- Chooser selection is now re-published to the transport after a plugin reconnect, so the operator's autonomous selection is not lost when the connection drops and recovers.
+
+### All control edits preserved (`4f2683b`)
+
+- Double, bool, and string control edits made by the operator are now cached and re-published after plugin reconnects. Previously, only chooser selection and a few specific keys were replayed — other editable widget values were silently lost on reconnect.
+
+---
+
+## 2026-03-25 - Prune stale transport plugin DLLs from build output
+
+Build hygiene fix (`9d2b5a1`): CMake now removes stale transport plugin DLLs from the build output directory on every build. This prevents a renamed or deleted plugin from lingering in the deploy folder and being discovered by the transport registry at runtime, which could cause confusing behavior or load failures.
+
+---
+
+## 2026-03-25 - NT4 Transport plugin complete (`feature/shuffleboard-transport` + `feature/glass-transport`)
+
+Full NetworkTables 4 WebSocket transport plugin enabling SmartDashboard to connect to any NT4 server (Shuffleboard, Glass, or Robot_Simulation's NT4 backend). This was a multi-commit feature across two branches, merged to `main` via `cc42cd5` and `bba7467`.
+
+### Phase 1 — receive-only NT4 plugin (`79e4d19`)
+
+- Created `plugins/ShuffleboardTransport/` with NT4 WebSocket client (`nt4_client.h/.cpp`)
+- IXWebSocket-based client connects to `ws://<host>:5810/nt/<clientname>`
+- Handles NT4 subscribe/announce/value-update cycle
+- JSON text frames for control, MsgPack binary frames for value updates
+- Plugin descriptor advertises `shuffleboard` transport ID with host/port connection fields
+
+### Phase 2 — host auto-connect/reconnect + write-back (`d904fd0`)
+
+- Lifted auto-connect and reconnect timer logic into the host transport layer so all plugin transports benefit
+- Added NT4 write-back: `PublishBool/Double/String` in the plugin ABI is fully wired; `EnsurePublished` path uses `/SmartDashboard/` prefix
+- Chooser support: `supports_chooser` returns true; inbound updates assemble into chooser widgets
+
+### Phase 3 — WSAStartup fix + end-to-end verification (`62c9718`)
+
+- Fixed Winsock initialization: `ix::initNetSystem()` is now deferred until a WebSocket-based transport actually connects, so Direct/NativeLink sessions never trigger it
+- Added debug publish command for manual testing
+- End-to-end verified: SmartDashboard connects to Robot_Simulation NT4 backend, receives all topics, writes back chooser selection and control values
+
+### CRLF normalization + Ian: comments (`0d0eac6`)
+
+- Normalized all source files to CRLF line endings
+- Added `Ian:` comments to `Transport.h`, `AutonChooser.h`, `AutonSelection.h`, and the plugin API header
+
+### Rename: ShuffleboardTransport → NT4Transport (`2e24b7b`, `7b179ec`)
+
+- Since Glass and Shuffleboard use the identical NT4 protocol, renamed the plugin from Shuffleboard-specific to dashboard-agnostic
+- Plugin directory: `plugins/ShuffleboardTransport/` (source name retained for now)
+- Plugin ID: `nt4`
+- All references updated across plugin, CMake, docs, and session notes
+
+### Files
+
+| File | What |
+|---|---|
+| `plugins/ShuffleboardTransport/include/nt4_client.h` | NT4 WebSocket client |
+| `plugins/ShuffleboardTransport/src/nt4_client.cpp` | NT4 client implementation (~1164 lines) |
+| `plugins/ShuffleboardTransport/src/shuffleboard_transport_plugin.cpp` | Plugin entry point + descriptor |
+| `plugins/ShuffleboardTransport/tests/shuffleboard_plugin_tests.cpp` | Plugin unit tests |
+| `plugins/ShuffleboardTransport/CMakeLists.txt` | Build configuration |
 
 ---
 

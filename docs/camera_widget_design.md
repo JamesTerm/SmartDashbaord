@@ -23,18 +23,20 @@ widget with an optional HUD-style vector graphics overlay.
    MJPEG from its OSG 3D viewer on port 1181, discovered identically to
    a real camera via CameraPublisher keys on its NT4 server (port 5810).
 
-Note: The Honda backup camera-style guide lines (curved path overlay driven
-by velocity/angular velocity, inspired by 2014 Compositor.cpp PathRenderer)
-are a **simulator-side** feature drawn in OSG and baked into the MJPEG
-frames before they reach the dashboard.  That is a Robot_Simulation feature,
-not a SmartDashboard feature.  The two overlays serve different purposes and
-live in different codebases.
+Note: The original design considered Honda backup camera-style guide lines
+(curved path overlay driven by velocity/angular velocity) as a simulator-side
+feature drawn in OSG and baked into MJPEG frames.  This was **dropped** in
+favor of dashboard-side QPainter overlays (keeping the stream untampered)
+and "The Grid" (TronGridSource) in Robot_Simulation for spatial awareness.
+See `docs/project_history.md` (2026-03-28 camera Phase 4 closure entry).
 
 ### Non-goals (explicitly out of scope)
 
 - In-dashboard computer vision / image processing (that belongs on
   robot-side coprocessors).
-- H.264 / RTSP decoding (would require FFmpeg; deferred until needed).
+- H.264 / RTSP decoding — dropped after research; FRC teams are not using
+  H.264 for dashboard streams, and FMS bandwidth standards are adequate
+  for MJPEG.
 - ProcAmp color correction (2014 feature; no modern use case).
 - Camera property control via NT4 CameraPublisher Property/ keys (can be
   added later as an enhancement).
@@ -318,21 +320,20 @@ camera-style guide lines, which are a simulator-side feature (Phase 5).
 20. Dashboard auto-discovers the simulator camera identically to a real camera
     -- zero special-case code on the dashboard side
 
-### Phase 5: Backup Camera Guide Lines (Robot_Simulation repo, OSG-side)
+### Phase 5: Backup Camera Guide Lines — DROPPED
 
-21. Implement PathRenderer-style overlay **in OSG on the simulator side**
-    using OSG's line drawing primitives (`osg::Geometry` with `GL_LINES`)
-22. Read velocity and angular velocity from the simulation to curve the path
-    lines (same math as 2014 Compositor.cpp `ComputePathPoints()`)
-23. Overlay is composited into the 3D scene before framebuffer capture, so
-    MJPEG frames include the overlay with no dashboard-side drawing needed
-24. Iterate: distance markers that animate with velocity, Star Wars Arcade
-    80s wireframe perspective effects
+~~The original plan was OSG-side overlays baked into MJPEG frames.~~
 
-Ian: Phase 5 is entirely in the Robot_Simulation codebase.  The dashboard
-has no awareness of it — it just displays whatever frames the MJPEG stream
-delivers.  The two overlay features (dashboard reticle vs. simulator guide
-lines) serve different purposes in different codebases.
+**Decision:** Overlays belong on the dashboard side (QPainter), not baked
+into the stream.  This keeps the MJPEG server simple, the stream reusable
+by any client, and aligns with how FRC teams handle camera overlays today.
+"The Grid" (TronGridSource) in Robot_Simulation provides first-person spatial
+awareness driven by robot position/heading, which serves the purpose backup
+camera guide lines were intended to address.
+
+Ian: The design principle is settled: any future guide-line or annotation
+overlay should follow the QPainter pattern used by the targeting reticle
+in CameraDisplayWidget, not bake into the stream.
 
 ---
 

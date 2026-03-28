@@ -93,4 +93,4 @@ Build an educational, community-friendly C++ dashboard prototype for FRC that de
 - [x] Editable mode prevents control writes.
 - [x] Non-editable mode restores control interactions, including gauge command writes.
 - [x] Layout serialization persists geometry and widget type.
-- [ ] Dashboard-owned control values replay/re-publish correctly across simulator reconnects in direct mode.
+- [x] Dashboard-owned control values replay/re-publish correctly across simulator reconnects in direct mode.
