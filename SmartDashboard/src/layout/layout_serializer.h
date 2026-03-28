@@ -37,7 +37,7 @@ namespace sd::layout
         QVariant linePlotYUpperLimit;
         QVariant textFontPointSize;
         QVariant doubleNumericEditable;
-        QVariant boolCheckboxShowLabel;
+        QVariant showLabel;
         QVariant stringChooserMode;
         QVariant stringChooserOptions;
     };

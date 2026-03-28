@@ -39,6 +39,7 @@ class QListWidget;
 class QListWidgetItem;
 class QPushButton;
 class QToolButton;
+class QRubberBand;
 class QTimer;
 class QGroupBox;
 #ifdef _DEBUG
@@ -46,8 +47,14 @@ class QLocalServer;
 class QLocalSocket;
 #endif
 
+namespace sd::camera
+{
+    class CameraPublisherDiscovery;
+}
+
 namespace sd::widgets
 {
+    class CameraViewerDock;
     class PlaybackTimelineWidget;
     class RunBrowserDock;
 }
@@ -204,6 +211,11 @@ private:
     void SetNativeLinkCarrierSetting(const QString& carrier);
     bool ShouldShowNativeLinkCarrierDebugOptions() const;
     void ApplyTemporaryDefaultValuesToTiles();
+    void ClearTileSelection();
+    void SelectTilesInRect(const QRect& selectionRect);
+    void BeginGroupDrag(sd::widgets::VariableTile* anchorTile, const QPoint& globalPos);
+    void UpdateGroupDrag(const QPoint& globalPos);
+    void EndGroupDrag();
 
     QWidget* m_canvas = nullptr;
     QLabel* m_statusLabel = nullptr;
@@ -253,6 +265,14 @@ private:
     // default is "everything visible."  On reconnect, as keys re-arrive via
     // OnTileAdded, we re-apply this hidden set.  Not used in reading mode.
     QSet<QString> m_runBrowserHiddenKeys;  ///< Streaming-mode: keys the user has hidden (persisted).
+    // Ian: Camera viewer dock — dockable MJPEG stream viewer.
+    // CameraPublisherDiscovery monitors /CameraPublisher/ keys from NT4
+    // to auto-populate the camera selector.  The dock + discovery lifecycle
+    // follows the same pattern as RunBrowserDock: StopTransport() stops
+    // the stream, disconnect clears discovered cameras.
+    QAction* m_cameraViewAction = nullptr;
+    sd::widgets::CameraViewerDock* m_cameraDock = nullptr;
+    sd::camera::CameraPublisherDiscovery* m_cameraDiscovery = nullptr;
     QListWidget* m_replayMarkerList = nullptr;
     QLabel* m_replaySelectionSummaryLabel = nullptr;
     sd::widgets::PlaybackTimelineWidget* m_playbackTimeline = nullptr;
@@ -326,6 +346,26 @@ private:
     bool m_clearLinePlotsOnRewind = false;
     bool m_clearLinePlotsOnBackwardSeek = false;
     bool m_syncingReplayControlsDockVisibility = false;
+
+    // Ian: Multi-select lasso + group drag state.  The rubber band is drawn on
+    // the canvas during a lasso drag (mouse press on empty canvas space then
+    // drag).  On release, tiles whose geometry intersects the rubber band rect
+    // join the selection.  When a selected tile is dragged, all selected tiles
+    // move as a group.  Selection is cleared on Escape, click on empty space,
+    // or when editable mode is turned off.
+    QSet<sd::widgets::VariableTile*> m_selectedTiles;
+    QRubberBand* m_lassoRubberBand = nullptr;
+    QPoint m_lassoOrigin;
+    bool m_lassoActive = false;
+    bool m_groupDragActive = false;
+    sd::widgets::VariableTile* m_groupDragAnchor = nullptr;
+    bool m_groupDragUpdating = false;  // Ian: Re-entry guard — prevents sibling Move events from cascading.
+    struct GroupDragEntry
+    {
+        sd::widgets::VariableTile* tile = nullptr;
+        QPoint startPos;
+    };
+    std::vector<GroupDragEntry> m_groupDragEntries;
     bool m_syncingReplayTimelineDockVisibility = false;
     bool m_syncingReplayMarkerDockVisibility = false;
     bool m_syncingMarkerSelection = false;

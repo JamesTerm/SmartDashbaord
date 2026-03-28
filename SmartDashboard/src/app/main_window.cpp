@@ -6,6 +6,8 @@
 #include "sd_direct_types.h"
 #include "widgets/playback_timeline_widget.h"
 #include "widgets/run_browser_dock.h"
+#include "widgets/camera_viewer_dock.h"
+#include "camera/camera_publisher_discovery.h"
 
 #include <QAction>
 #include <QActionGroup>
@@ -33,9 +35,11 @@
 #include <QKeySequence>
 #include <QLineEdit>
 #include <QMetaObject>
+#include <QMouseEvent>
 #include <QPalette>
 #include <QCoreApplication>
 #include <QPushButton>
+#include <QRubberBand>
 #include <QSaveFile>
 #include <QSettings>
 #include <QStringList>
@@ -276,9 +280,9 @@ namespace
             tile->SetTextFontPointSize(entry.textFontPointSize.toInt());
         }
 
-        if (entry.boolCheckboxShowLabel.isValid())
+        if (entry.showLabel.isValid())
         {
-            tile->SetBoolCheckboxShowLabel(entry.boolCheckboxShowLabel.toBool());
+            tile->SetShowLabel(entry.showLabel.toBool());
         }
 
         if (entry.stringChooserMode.isValid())
@@ -290,6 +294,15 @@ namespace
         {
             tile->SetStringChooserOptions(entry.stringChooserOptions.toStringList());
         }
+
+        // Ian: Re-apply saved geometry after all property setters have run.
+        // Several setters (show-label, progress bar percentage) call
+        // UpdateWidgetPresentation() which can resize the tile to enforce
+        // minimum/compact widths.  If the property application order means an
+        // intermediate state triggers a resize, the originally-loaded geometry
+        // gets overwritten.  This final setGeometry ensures the persisted
+        // layout always wins.
+        tile->setGeometry(entry.geometry);
 
     }
 
@@ -370,6 +383,7 @@ MainWindow::MainWindow(QWidget* parent, bool startTransportOnInit)
     m_canvas->setObjectName("dashboardCanvas");
     m_canvas->setAutoFillBackground(true);
     m_canvas->setBackgroundRole(QPalette::Window);
+    m_canvas->installEventFilter(this);
     setCentralWidget(m_canvas);
 
     QMenu* fileMenu = menuBar()->addMenu("&File");
@@ -438,6 +452,10 @@ MainWindow::MainWindow(QWidget* parent, bool startTransportOnInit)
     m_runBrowserViewAction = viewMenu->addAction("Run Browser");
     m_runBrowserViewAction->setCheckable(true);
     m_runBrowserViewAction->setChecked(false);
+
+    m_cameraViewAction = viewMenu->addAction("Camera");
+    m_cameraViewAction->setCheckable(true);
+    m_cameraViewAction->setChecked(false);
 
     viewMenu->addSeparator();
     m_resetAllLinePlotsAction = viewMenu->addAction("Reset All Line Plots");
@@ -1100,6 +1118,58 @@ MainWindow::MainWindow(QWidget* parent, bool startTransportOnInit)
     // Load Layout) leave the file-driven tree untouched.
     connect(this, &MainWindow::TilesCleared, m_runBrowserDock, &sd::widgets::RunBrowserDock::ClearDiscoveredKeys);
 
+    // Ian: Camera viewer dock — dockable MJPEG stream viewer.  Follows the
+    // same creation/wiring pattern as RunBrowserDock above: starts hidden,
+    // View menu action toggles visibility, visibilityChanged syncs the action
+    // state using blockSignals to avoid infinite loops.
+    m_cameraDock = new sd::widgets::CameraViewerDock(this);
+    addDockWidget(Qt::RightDockWidgetArea, m_cameraDock);
+    m_cameraDock->setVisible(false);
+    connect(
+        m_cameraViewAction,
+        &QAction::toggled,
+        this,
+        [this](bool checked)
+        {
+            if (m_cameraDock != nullptr)
+            {
+                m_cameraDock->setVisible(checked);
+            }
+        }
+    );
+    connect(
+        m_cameraDock,
+        &QDockWidget::visibilityChanged,
+        this,
+        [this](bool visible)
+        {
+            if (m_cameraViewAction != nullptr)
+            {
+                const bool prior = m_cameraViewAction->blockSignals(true);
+                m_cameraViewAction->setChecked(visible);
+                m_cameraViewAction->blockSignals(prior);
+            }
+        }
+    );
+
+    // Ian: CameraPublisherDiscovery monitors /CameraPublisher/ keys arriving
+    // via NT4 variable updates and emits CameraDiscovered / CamerasCleared
+    // signals.  The dock subscribes to these to auto-populate the camera
+    // selection combo.
+    m_cameraDiscovery = new sd::camera::CameraPublisherDiscovery(this);
+    connect(
+        m_cameraDiscovery,
+        &sd::camera::CameraPublisherDiscovery::CameraDiscovered,
+        m_cameraDock,
+        &sd::widgets::CameraViewerDock::AddDiscoveredCamera
+    );
+    connect(
+        m_cameraDiscovery,
+        &sd::camera::CameraPublisherDiscovery::CamerasCleared,
+        m_cameraDock,
+        &sd::widgets::CameraViewerDock::ClearDiscoveredCameras
+    );
+
     QSettings settings("SmartDashboard", "SmartDashboardApp");
     const int persistedKindValue = settings.value("connection/transportKind", static_cast<int>(sd::transport::TransportKind::Direct)).toInt();
     m_connectionConfig.kind = static_cast<sd::transport::TransportKind>(persistedKindValue);
@@ -1381,6 +1451,12 @@ void MainWindow::DrainPendingUiUpdates()
 void MainWindow::OnToggleEditable()
 {
     m_isEditable = m_editableAction->isChecked();
+
+    if (!m_isEditable)
+    {
+        ClearTileSelection();
+    }
+
     for (auto& [_, tile] : m_tiles)
     {
         tile->SetEditable(m_isEditable);
@@ -1453,6 +1529,14 @@ void MainWindow::OnVariableUpdateReceived(const QString& key, int valueType, con
 
         DebugLogUiEvent(QString("update key=%1 value=%2 seq=%3")
             .arg(key, valueText, QString::number(seq)));
+    }
+
+    // Ian: Forward every variable update to CameraPublisherDiscovery.  It
+    // filters internally for /CameraPublisher/ keys and ignores everything
+    // else, so the cost is a cheap string prefix check per update.
+    if (m_cameraDiscovery != nullptr)
+    {
+        m_cameraDiscovery->OnVariableUpdate(key, valueType, value);
     }
 
     if (valueType == static_cast<int>(sd::direct::ValueType::String)
@@ -1679,6 +1763,18 @@ void MainWindow::OnConnectionStateChanged(int state)
             {
                 m_reconnectTimer->start();
             }
+        }
+
+        // Ian: On disconnect, clear discovered cameras so stale entries don't
+        // linger in the combo.  If we reconnect, the server will re-announce
+        // /CameraPublisher/ keys and discovery will re-populate the list.
+        if (m_cameraDiscovery != nullptr)
+        {
+            m_cameraDiscovery->Clear();
+        }
+        if (m_cameraDock != nullptr)
+        {
+            m_cameraDock->ClearDiscoveredCameras();
         }
     }
 
@@ -1914,6 +2010,7 @@ void MainWindow::OnClearWidgets()
 {
     // Clear dashboard runtime state so repopulation behavior can be retested
     // without restarting the app process.
+    ClearTileSelection();
     for (auto& [_, tile] : m_tiles)
     {
         if (tile != nullptr)
@@ -2386,6 +2483,7 @@ void MainWindow::OnRemoveWidgetRequested(const QString& key)
 
     if (it->second != nullptr)
     {
+        m_selectedTiles.remove(it->second);
         it->second->deleteLater();
     }
 
@@ -2498,16 +2596,158 @@ void MainWindow::OnControlStringEdited(const QString& key, const QString& value)
 
 bool MainWindow::eventFilter(QObject* watched, QEvent* event)
 {
-    if (watched != nullptr && event != nullptr && !m_suppressLayoutDirty)
+    // Ian: Multi-select lasso on canvas.  When the user presses on empty
+    // canvas space and drags, a QRubberBand draws the selection rectangle.
+    // On release, tiles whose geometry intersects the rect join the selection.
+    // A plain click (no drag) on empty space clears the selection.
+    //
+    // Ian: The tiles' mousePressEvent calls QFrame::mousePressEvent which
+    // does event->ignore(), so the press propagates up to the canvas even
+    // when the click landed on a tile.  We must check childAt() to confirm
+    // the press is truly on empty space, not on a tile or its children.
+    if (watched == m_canvas && m_isEditable && event != nullptr)
+    {
+        if (event->type() == QEvent::MouseButtonPress)
+        {
+            auto* me = static_cast<QMouseEvent*>(event);
+            // Only start lasso if the click is on genuinely empty canvas space.
+            // childAt() returns the deepest child widget at the position; if
+            // non-null, the click landed on a tile (or one of its children).
+            // Ian: The tiles' mousePressEvent calls QFrame::mousePressEvent
+            // which does event->ignore(), so the press propagates up to the
+            // canvas even when the click landed on a tile.  The childAt()
+            // guard prevents the lasso from hijacking those propagated events.
+            if (me->button() == Qt::LeftButton && m_canvas->childAt(me->pos()) == nullptr)
+            {
+                m_lassoOrigin = me->pos();
+                m_lassoActive = false;
+
+                if (m_lassoRubberBand == nullptr)
+                {
+                    m_lassoRubberBand = new QRubberBand(QRubberBand::Rectangle, m_canvas);
+                }
+
+                m_lassoRubberBand->setGeometry(QRect(m_lassoOrigin, QSize()));
+                m_lassoRubberBand->show();
+                return true;
+            }
+        }
+        else if (event->type() == QEvent::MouseMove)
+        {
+            auto* me = static_cast<QMouseEvent*>(event);
+            if ((me->buttons() & Qt::LeftButton) && m_lassoRubberBand != nullptr && m_lassoRubberBand->isVisible())
+            {
+                m_lassoRubberBand->setGeometry(QRect(m_lassoOrigin, me->pos()).normalized());
+                m_lassoActive = true;
+                return true;
+            }
+        }
+        else if (event->type() == QEvent::MouseButtonRelease)
+        {
+            auto* me = static_cast<QMouseEvent*>(event);
+            if (me->button() == Qt::LeftButton && m_lassoRubberBand != nullptr && m_lassoRubberBand->isVisible())
+            {
+                m_lassoRubberBand->hide();
+
+                if (m_lassoActive)
+                {
+                    const QRect selRect = QRect(m_lassoOrigin, me->pos()).normalized();
+                    if (!(me->modifiers() & Qt::ControlModifier))
+                    {
+                        ClearTileSelection();
+                    }
+                    SelectTilesInRect(selRect);
+                }
+                else
+                {
+                    // Plain click on empty space — clear selection.
+                    ClearTileSelection();
+                }
+
+                m_lassoActive = false;
+                return true;
+            }
+        }
+    }
+
+    // Ian: Group drag coordination.  When a selected tile emits a MouseMove
+    // with left button held, and a group drag is active, move all selected
+    // tiles by the same delta.  The anchor tile moves itself via its own
+    // mouseMoveEvent; we move the others here.
+    if (watched != nullptr && event != nullptr && m_isEditable)
     {
         auto* tile = qobject_cast<sd::widgets::VariableTile*>(watched);
-        if (tile != nullptr && m_isEditable)
+        if (tile != nullptr)
         {
-            if (event->type() == QEvent::Move || event->type() == QEvent::Resize)
+            if (!m_suppressLayoutDirty)
             {
-                MarkLayoutDirty();
+                if (event->type() == QEvent::Move || event->type() == QEvent::Resize)
+                {
+                    MarkLayoutDirty();
+                }
+                else if (event->type() == QEvent::DynamicPropertyChange)
+                {
+                    MarkLayoutDirty();
+                }
             }
-            else if (event->type() == QEvent::DynamicPropertyChange)
+
+            if (event->type() == QEvent::MouseButtonPress)
+            {
+                auto* me = static_cast<QMouseEvent*>(event);
+                if (me->button() == Qt::LeftButton)
+                {
+                    const bool ctrlHeld = (me->modifiers() & Qt::ControlModifier);
+
+                    if (ctrlHeld)
+                    {
+                        // Ctrl+click: toggle this tile's selection.
+                        tile->SetSelected(!tile->IsSelected());
+                        if (tile->IsSelected())
+                        {
+                            m_selectedTiles.insert(tile);
+                        }
+                        else
+                        {
+                            m_selectedTiles.remove(tile);
+                        }
+                    }
+                    else if (!tile->IsSelected())
+                    {
+                        // Click on unselected tile without Ctrl: clear and select just this one.
+                        ClearTileSelection();
+                    }
+
+                    // If tile is selected and part of a group, prepare group drag.
+                    if (tile->IsSelected() && m_selectedTiles.size() > 1)
+                    {
+                        BeginGroupDrag(tile, me->globalPosition().toPoint());
+                    }
+                }
+            }
+            else if (event->type() == QEvent::MouseButtonRelease)
+            {
+                if (m_groupDragActive)
+                {
+                    EndGroupDrag();
+                }
+            }
+            else if (event->type() == QEvent::Move && m_groupDragActive && tile == m_groupDragAnchor)
+            {
+                // The anchor tile just moved itself via its own mouseMoveEvent.
+                // Apply the same delta to all sibling tiles.
+                UpdateGroupDrag(QCursor::pos());
+            }
+        }
+    }
+
+    // Non-editable tile dirty tracking (fallback for the old path that
+    // only ran when !m_suppressLayoutDirty; now handled in the block above).
+    if (watched != nullptr && event != nullptr && !m_suppressLayoutDirty && !m_isEditable)
+    {
+        auto* tile = qobject_cast<sd::widgets::VariableTile*>(watched);
+        if (tile != nullptr)
+        {
+            if (event->type() == QEvent::DynamicPropertyChange)
             {
                 MarkLayoutDirty();
             }
@@ -3723,6 +3963,13 @@ void MainWindow::StartTransport()
 
 void MainWindow::StopTransport()
 {
+    // Ian: Stop the camera stream before tearing down the transport so the
+    // dock doesn't keep retrying a connection to a server that's going away.
+    if (m_cameraDock != nullptr)
+    {
+        m_cameraDock->StopStream();
+    }
+
     if (m_transport)
     {
         RecordConnectionEvent(static_cast<int>(sd::transport::ConnectionState::Disconnected));
@@ -4227,11 +4474,123 @@ void MainWindow::StepPlaybackByUs(std::int64_t deltaUs)
     UpdatePlaybackUiState();
 }
 
+void MainWindow::ClearTileSelection()
+{
+    for (auto* tile : m_selectedTiles)
+    {
+        if (tile != nullptr)
+        {
+            tile->SetSelected(false);
+        }
+    }
+
+    m_selectedTiles.clear();
+    m_groupDragActive = false;
+    m_groupDragAnchor = nullptr;
+    m_groupDragUpdating = false;
+    m_groupDragEntries.clear();
+}
+
+void MainWindow::SelectTilesInRect(const QRect& selectionRect)
+{
+    for (auto& [_, tile] : m_tiles)
+    {
+        if (tile == nullptr || !tile->isVisible())
+        {
+            continue;
+        }
+
+        if (selectionRect.intersects(tile->geometry()))
+        {
+            tile->SetSelected(true);
+            m_selectedTiles.insert(tile);
+        }
+    }
+}
+
+void MainWindow::BeginGroupDrag(sd::widgets::VariableTile* anchorTile, const QPoint& globalPos)
+{
+    m_groupDragActive = true;
+    m_groupDragAnchor = anchorTile;
+    m_groupDragUpdating = false;
+    m_groupDragEntries.clear();
+    m_groupDragEntries.reserve(m_selectedTiles.size());
+    for (auto* tile : m_selectedTiles)
+    {
+        if (tile != nullptr)
+        {
+            m_groupDragEntries.push_back({ tile, tile->pos() });
+        }
+    }
+}
+
+// Ian: UpdateGroupDrag computes the delta from the anchor tile's current
+// position vs. its snapshotted start position, then applies that delta to
+// all sibling tiles.  The m_groupDragUpdating guard prevents re-entry:
+// moving a sibling fires QEvent::Move on that sibling, which would
+// re-enter this function if we didn't suppress it.
+void MainWindow::UpdateGroupDrag(const QPoint& globalPos)
+{
+    if (!m_groupDragActive || m_groupDragEntries.empty() || m_groupDragUpdating)
+    {
+        return;
+    }
+
+    // Find the anchor's start position from the snapshot.
+    QPoint anchorStartPos;
+    bool foundAnchor = false;
+    for (const auto& entry : m_groupDragEntries)
+    {
+        if (entry.tile == m_groupDragAnchor)
+        {
+            anchorStartPos = entry.startPos;
+            foundAnchor = true;
+            break;
+        }
+    }
+
+    if (!foundAnchor || m_groupDragAnchor == nullptr)
+    {
+        return;
+    }
+
+    const QPoint delta = m_groupDragAnchor->pos() - anchorStartPos;
+
+    // Apply the same delta to all sibling tiles (not the anchor — it already
+    // moved itself via its own mouseMoveEvent).
+    m_groupDragUpdating = true;
+    for (const auto& entry : m_groupDragEntries)
+    {
+        if (entry.tile == nullptr || entry.tile == m_groupDragAnchor)
+        {
+            continue;
+        }
+        entry.tile->move(entry.startPos + delta);
+    }
+    m_groupDragUpdating = false;
+}
+
+void MainWindow::EndGroupDrag()
+{
+    m_groupDragActive = false;
+    m_groupDragAnchor = nullptr;
+    m_groupDragUpdating = false;
+    m_groupDragEntries.clear();
+}
+
 void MainWindow::keyPressEvent(QKeyEvent* event)
 {
     if (event == nullptr)
     {
         QMainWindow::keyPressEvent(event);
+        return;
+    }
+
+    // Escape clears the multi-select tile selection.
+    if (event->key() == Qt::Key_Escape && m_isEditable && !m_selectedTiles.isEmpty())
+    {
+        ClearTileSelection();
+        event->accept();
         return;
     }
 

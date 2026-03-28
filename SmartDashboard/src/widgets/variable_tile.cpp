@@ -196,7 +196,7 @@ namespace sd::widgets
         SetLinePlotGridLinesVisible(m_linePlotShowGridLines);
         SetTextFontPointSize(m_textFontPointSize);
         SetDoubleNumericEditable(m_doubleNumericEditable);
-        SetBoolCheckboxShowLabel(m_boolCheckboxShowLabel);
+        SetShowLabel(m_showLabel);
         UpdateWidgetPresentation();
         UpdateValueDisplay();
         DebugTileLog(QString("tile.create key=%1 widget=%2 type=%3").arg(m_key).arg(m_widgetType).arg(static_cast<int>(m_type)));
@@ -463,11 +463,32 @@ namespace sd::widgets
         UpdateValueDisplay();
     }
 
-    void VariableTile::SetBoolCheckboxShowLabel(bool showLabel)
+    // Ian: Universal show-label toggle.  Replaces the former per-widget-type
+    // boolCheckboxShowLabel / boolLedShowLabel / stringTextShowLabel properties.
+    // Every widget type now respects this single flag.  Default is true (label
+    // visible).  When hidden, compact-width behavior fires for widgets that
+    // support it (checkbox, LED, etc.).
+    void VariableTile::SetShowLabel(bool showLabel)
     {
-        m_boolCheckboxShowLabel = showLabel;
-        setProperty("boolCheckboxShowLabel", m_boolCheckboxShowLabel);
+        m_showLabel = showLabel;
+        setProperty("showLabel", m_showLabel);
         UpdateWidgetPresentation();
+    }
+
+    void VariableTile::SetSelected(bool selected)
+    {
+        if (m_selected == selected)
+        {
+            return;
+        }
+
+        m_selected = selected;
+        update();
+    }
+
+    bool VariableTile::IsSelected() const
+    {
+        return m_selected;
     }
 
     void VariableTile::SetStringChooserMode(bool chooserMode)
@@ -512,7 +533,25 @@ namespace sd::widgets
     {
         QFrame::paintEvent(event);
 
-        if (!m_editable || !m_showEditHandles || !m_isHovering)
+        if (!m_editable)
+        {
+            return;
+        }
+
+        // Ian: Selection border draws even when not hovering so the user can
+        // see which tiles are part of the multi-select group at all times.
+        if (m_selected)
+        {
+            QPainter selPainter(this);
+            selPainter.setRenderHint(QPainter::Antialiasing, false);
+            QPen selPen(QColor("#3a9bdc"));
+            selPen.setWidth(2);
+            selPen.setStyle(Qt::DashLine);
+            selPainter.setPen(selPen);
+            selPainter.drawRect(rect().adjusted(1, 1, -2, -2));
+        }
+
+        if (!m_showEditHandles || !m_isHovering)
         {
             return;
         }
@@ -1167,19 +1206,27 @@ namespace sd::widgets
             m_settingDoubleEditProgrammatically = false;
         }
         m_doubleEdit->setEnabled(showDoubleEdit && !m_editable && m_hasValue);
-        m_titleLabel->setVisible(!showDoubleGauge);
+        // Ian: Universal label visibility — m_showLabel controls all widget types.
+        // Gauge previously always hid the label; it now respects the flag too.
+        m_titleLabel->setVisible(m_showLabel);
 
         const bool showControl = showBoolCheckbox || showDoubleSlider || showStringEdit || showStringChooser;
         m_controlWidget->setVisible(showControl);
 
         if (showBoolCheckbox)
         {
-            m_titleLabel->setVisible(m_boolCheckboxShowLabel);
+            m_titleLabel->setVisible(m_showLabel);
             m_layout->addWidget(m_titleLabel, 0, 0, 1, 1, Qt::AlignLeft | Qt::AlignVCenter);
             m_layout->addWidget(m_controlWidget, 0, 1, 1, 1, Qt::AlignRight | Qt::AlignVCenter);
 
-            if (!m_boolCheckboxShowLabel)
+            if (!m_showLabel)
             {
+                // Ian: Remember the current width before compacting so we can
+                // restore the user's layout when the label is shown again.
+                if (m_widthBeforeCompact == 0)
+                {
+                    m_widthBeforeCompact = width();
+                }
                 m_layout->setColumnMinimumWidth(0, 0);
                 const QMargins margins = m_layout->contentsMargins();
                 const int compactWidth = m_controlWidget->sizeHint().width() + margins.left() + margins.right() + 8;
@@ -1191,17 +1238,38 @@ namespace sd::widgets
             else
             {
                 m_layout->setColumnMinimumWidth(0, 90);
-                if (width() < 140)
+                // Ian: Only force a width restore when recovering from a
+                // hide->show cycle (m_widthBeforeCompact > 0).  When there
+                // was no prior hide, the tile's current geometry is the
+                // user's saved size -- don't override it.
+                if (m_widthBeforeCompact > 0)
                 {
-                    resize(140, height());
+                    const int restoreWidth = m_widthBeforeCompact;
+                    m_widthBeforeCompact = 0;
+                    if (width() < restoreWidth)
+                    {
+                        resize(restoreWidth, height());
+                    }
                 }
             }
         }
         else if (showControl)
         {
-            m_layout->setColumnMinimumWidth(0, 90);
-            m_layout->addWidget(m_titleLabel, 0, 0, 1, 2, Qt::AlignLeft | Qt::AlignTop);
-            m_layout->addWidget(m_controlWidget, 1, 0, 1, 2);
+            // Ian: Slider, string edit, string chooser -- label sits above the
+            // control spanning both columns.  When hidden the control gets the
+            // full vertical space.
+            m_titleLabel->setVisible(m_showLabel);
+            if (m_showLabel)
+            {
+                m_layout->setColumnMinimumWidth(0, 90);
+                m_layout->addWidget(m_titleLabel, 0, 0, 1, 2, Qt::AlignLeft | Qt::AlignTop);
+                m_layout->addWidget(m_controlWidget, 1, 0, 1, 2);
+            }
+            else
+            {
+                m_layout->setColumnMinimumWidth(0, 0);
+                m_layout->addWidget(m_controlWidget, 0, 0, 1, 2);
+            }
         }
         else
         {
@@ -1211,24 +1279,63 @@ namespace sd::widgets
 
         if (!showControl && showDoubleGauge)
         {
-            m_layout->addWidget(m_gauge, 1, 0, 1, 2, Qt::AlignHCenter | Qt::AlignVCenter);
-            m_layout->setRowStretch(0, 0);
-            m_layout->setRowStretch(1, 1);
+            // Ian: Gauge now respects m_showLabel.  When label is shown, the
+            // title sits in row 0 above the gauge.  When hidden, gauge gets
+            // the full tile.
+            m_titleLabel->setVisible(m_showLabel);
+            if (m_showLabel)
+            {
+                m_layout->addWidget(m_titleLabel, 0, 0, 1, 2, Qt::AlignHCenter | Qt::AlignVCenter);
+                m_layout->addWidget(m_gauge, 1, 0, 1, 2, Qt::AlignHCenter | Qt::AlignVCenter);
+                m_layout->setRowStretch(0, 0);
+                m_layout->setRowStretch(1, 1);
+            }
+            else
+            {
+                m_layout->addWidget(m_gauge, 0, 0, 1, 2, Qt::AlignHCenter | Qt::AlignVCenter);
+                m_layout->setRowStretch(0, 1);
+                m_layout->setRowStretch(1, 0);
+            }
         }
         else if (!showControl && showDoubleLinePlot)
         {
-            m_layout->addWidget(m_titleLabel, 0, 0, 1, 2, Qt::AlignHCenter | Qt::AlignVCenter);
-            m_layout->addWidget(m_linePlot, 1, 0, 1, 2);
-            m_layout->setRowStretch(0, 0);
-            m_layout->setRowStretch(1, 1);
+            // Ian: Line plot label -- centered title above the plot.  When
+            // hidden, the plot occupies the full tile height.
+            m_titleLabel->setVisible(m_showLabel);
+            if (m_showLabel)
+            {
+                m_layout->addWidget(m_titleLabel, 0, 0, 1, 2, Qt::AlignHCenter | Qt::AlignVCenter);
+                m_layout->addWidget(m_linePlot, 1, 0, 1, 2);
+                m_layout->setRowStretch(0, 0);
+                m_layout->setRowStretch(1, 1);
+            }
+            else
+            {
+                m_layout->addWidget(m_linePlot, 0, 0, 1, 2);
+                m_layout->setRowStretch(0, 1);
+                m_layout->setRowStretch(1, 0);
+            }
         }
         else if (!showControl && showDoubleProgress)
         {
-            m_layout->addWidget(m_titleLabel, 0, 0, 1, 2, Qt::AlignLeft | Qt::AlignTop);
-            m_layout->addWidget(m_progressBar, 1, 0, 1, 2);
-            m_layout->setVerticalSpacing(0);
-            m_layout->setRowStretch(0, 0);
-            m_layout->setRowStretch(1, 1);
+            // Ian: Progress bar label -- sits above the bar.  When hidden,
+            // the bar takes full tile height.
+            m_titleLabel->setVisible(m_showLabel);
+            if (m_showLabel)
+            {
+                m_layout->addWidget(m_titleLabel, 0, 0, 1, 2, Qt::AlignLeft | Qt::AlignTop);
+                m_layout->addWidget(m_progressBar, 1, 0, 1, 2);
+                m_layout->setVerticalSpacing(0);
+                m_layout->setRowStretch(0, 0);
+                m_layout->setRowStretch(1, 1);
+            }
+            else
+            {
+                m_layout->addWidget(m_progressBar, 0, 0, 1, 2);
+                m_layout->setVerticalSpacing(0);
+                m_layout->setRowStretch(0, 1);
+                m_layout->setRowStretch(1, 0);
+            }
 
             if (!m_progressBarShowPercentage)
             {
@@ -1242,8 +1349,124 @@ namespace sd::widgets
         }
         else if (!showControl && showStringMultiline)
         {
-            m_layout->addWidget(m_titleLabel, 0, 0, 1, 1, Qt::AlignLeft | Qt::AlignTop);
-            m_layout->addWidget(m_valueLabel, 1, 0, 1, 2);
+            // Ian: Multiline string -- label above, value below.  When hidden,
+            // value spans both columns from row 0.
+            m_titleLabel->setVisible(m_showLabel);
+            if (m_showLabel)
+            {
+                m_layout->addWidget(m_titleLabel, 0, 0, 1, 1, Qt::AlignLeft | Qt::AlignTop);
+                m_layout->addWidget(m_valueLabel, 1, 0, 1, 2);
+            }
+            else
+            {
+                m_layout->addWidget(m_valueLabel, 0, 0, 1, 2);
+            }
+            m_layout->setRowStretch(0, 0);
+            m_layout->setRowStretch(1, 0);
+        }
+        else if (!showControl && showBoolLed)
+        {
+            // Ian: LED indicator -- label + LED dot side by side, or LED
+            // centered when label is hidden with compact width.
+            m_titleLabel->setVisible(m_showLabel);
+            if (m_showLabel)
+            {
+                m_layout->setColumnMinimumWidth(0, 90);
+                m_layout->addWidget(m_titleLabel, 0, 0, 1, 1, Qt::AlignLeft | Qt::AlignVCenter);
+                m_layout->addWidget(m_boolLed, 0, 1, 1, 1, Qt::AlignLeft | Qt::AlignVCenter);
+                if (m_widthBeforeCompact > 0)
+                {
+                    const int restoreWidth = m_widthBeforeCompact;
+                    m_widthBeforeCompact = 0;
+                    if (width() < restoreWidth)
+                    {
+                        resize(restoreWidth, height());
+                    }
+                }
+            }
+            else
+            {
+                if (m_widthBeforeCompact == 0)
+                {
+                    m_widthBeforeCompact = width();
+                }
+                m_layout->setColumnMinimumWidth(0, 0);
+                m_layout->addWidget(m_boolLed, 0, 0, 1, 2, Qt::AlignCenter);
+                const QMargins margins = m_layout->contentsMargins();
+                const int compactWidth = m_boolLed->sizeHint().width() + margins.left() + margins.right() + 8;
+                if (width() > compactWidth)
+                {
+                    resize(compactWidth, height());
+                }
+            }
+            m_layout->setRowStretch(0, 0);
+            m_layout->setRowStretch(1, 0);
+        }
+        else if (!showControl && showDoubleNumeric)
+        {
+            // Ian: Numeric text -- label + value/edit side by side.  When
+            // hidden, value/edit spans both columns.
+            m_titleLabel->setVisible(m_showLabel);
+            m_layout->setColumnMinimumWidth(0, 0);
+            if (m_showLabel)
+            {
+                m_layout->addWidget(m_titleLabel, 0, 0, 1, 1, Qt::AlignLeft | Qt::AlignVCenter);
+                if (m_doubleNumericEditable)
+                {
+                    m_layout->addWidget(m_doubleEdit, 0, 1, 1, 1);
+                }
+                else
+                {
+                    m_layout->addWidget(m_valueLabel, 0, 1, 1, 1);
+                }
+            }
+            else
+            {
+                if (m_doubleNumericEditable)
+                {
+                    m_layout->addWidget(m_doubleEdit, 0, 0, 1, 2);
+                }
+                else
+                {
+                    m_layout->addWidget(m_valueLabel, 0, 0, 1, 2);
+                }
+            }
+            m_layout->setRowStretch(0, 0);
+            m_layout->setRowStretch(1, 0);
+        }
+        else if (!showControl && showStringText)
+        {
+            // Ian: Read-only string label -- label + value side by side.
+            // When hidden, value spans both columns for full-width display.
+            m_titleLabel->setVisible(m_showLabel);
+            m_layout->setColumnMinimumWidth(0, 0);
+            if (m_showLabel)
+            {
+                m_layout->addWidget(m_titleLabel, 0, 0, 1, 1, Qt::AlignLeft | Qt::AlignVCenter);
+                m_layout->addWidget(m_valueLabel, 0, 1, 1, 1);
+            }
+            else
+            {
+                m_layout->addWidget(m_valueLabel, 0, 0, 1, 2);
+            }
+            m_layout->setRowStretch(0, 0);
+            m_layout->setRowStretch(1, 0);
+        }
+        else if (!showControl && showBoolText)
+        {
+            // Ian: Bool text (True/False) -- label + value side by side.
+            // When hidden, value spans both columns.
+            m_titleLabel->setVisible(m_showLabel);
+            m_layout->setColumnMinimumWidth(0, 0);
+            if (m_showLabel)
+            {
+                m_layout->addWidget(m_titleLabel, 0, 0, 1, 1, Qt::AlignLeft | Qt::AlignVCenter);
+                m_layout->addWidget(m_valueLabel, 0, 1, 1, 1);
+            }
+            else
+            {
+                m_layout->addWidget(m_valueLabel, 0, 0, 1, 2);
+            }
             m_layout->setRowStretch(0, 0);
             m_layout->setRowStretch(1, 0);
         }
@@ -1412,15 +1635,20 @@ namespace sd::widgets
 
     bool VariableTile::IsPropertiesSupported() const
     {
+        // Ian: Every widget type supports Properties now that Show Label is
+        // universal.  Keep the explicit list so new widget types added later
+        // don't accidentally get an empty dialog.
         const bool isProgressBar = (m_widgetType == "double.progress");
         const bool isSlider = (m_widgetType == "double.slider");
         const bool isBoolCheckbox = (m_widgetType == "bool.checkbox");
+        const bool isBoolLed = (m_widgetType == "bool.led");
+        const bool isStringChooser = (m_widgetType == "string.chooser");
         const bool isTextDisplay =
             (m_widgetType == "bool.text") ||
             (m_widgetType == "string.text") ||
             (m_widgetType == "string.multiline") ||
             (m_widgetType == "string.edit");
-        return IsGaugeWidget() || IsLinePlotWidget() || IsDoubleNumericWidget() || isProgressBar || isSlider || isBoolCheckbox || isTextDisplay;
+        return IsGaugeWidget() || IsLinePlotWidget() || IsDoubleNumericWidget() || isProgressBar || isSlider || isBoolCheckbox || isBoolLed || isStringChooser || isTextDisplay;
     }
 
     void VariableTile::OpenPropertiesDialog()
@@ -1450,10 +1678,14 @@ namespace sd::widgets
             auto* showTickMarksCheck = new QCheckBox(&dialog);
             showTickMarksCheck->setChecked(m_gaugeShowTickMarks);
 
+            auto* showLabelCheck = new QCheckBox(&dialog);
+            showLabelCheck->setChecked(m_showLabel);
+
             form->addRow("Upper Limit", upperLimitSpin);
             form->addRow("Lower Limit", lowerLimitSpin);
             form->addRow("Tick Interval", tickIntervalSpin);
             form->addRow("Show Tick Marks", showTickMarksCheck);
+            form->addRow("Show Label", showLabelCheck);
 
             auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
             form->addRow(buttons);
@@ -1472,6 +1704,7 @@ namespace sd::widgets
                 tickIntervalSpin->value(),
                 showTickMarksCheck->isChecked()
             );
+            SetShowLabel(showLabelCheck->isChecked());
             return;
         }
 
@@ -1498,6 +1731,10 @@ namespace sd::widgets
             auto* showPercentCheck = new QCheckBox(&dialog);
             showPercentCheck->setChecked(m_progressBarShowPercentage);
             form->addRow("Show Percentage", showPercentCheck);
+
+            auto* showLabelCheck = new QCheckBox(&dialog);
+            showLabelCheck->setChecked(m_showLabel);
+            form->addRow("Show Label", showLabelCheck);
 
             auto* foregroundButton = new QPushButton(m_progressBarForegroundColor, &dialog);
             foregroundButton->setStyleSheet(QString("background:%1;").arg(m_progressBarForegroundColor));
@@ -1552,6 +1789,7 @@ namespace sd::widgets
             );
             SetProgressBarShowPercentage(showPercentCheck->isChecked());
             SetProgressBarColors(selectedForeground, selectedBackground);
+            SetShowLabel(showLabelCheck->isChecked());
             return;
         }
 
@@ -1580,10 +1818,14 @@ namespace sd::widgets
             auto* showTickMarksCheck = new QCheckBox(&dialog);
             showTickMarksCheck->setChecked(m_sliderShowTickMarks);
 
+            auto* showLabelCheck = new QCheckBox(&dialog);
+            showLabelCheck->setChecked(m_showLabel);
+
             form->addRow("Upper Limit", upperLimitSpin);
             form->addRow("Lower Limit", lowerLimitSpin);
             form->addRow("Tick Interval", tickIntervalSpin);
             form->addRow("Show Tick Marks", showTickMarksCheck);
+            form->addRow("Show Label", showLabelCheck);
 
             auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
             form->addRow(buttons);
@@ -1602,6 +1844,7 @@ namespace sd::widgets
                 tickIntervalSpin->value(),
                 showTickMarksCheck->isChecked()
             );
+            SetShowLabel(showLabelCheck->isChecked());
             return;
         }
 
@@ -1621,6 +1864,10 @@ namespace sd::widgets
             fontSizeSpin->setValue(m_textFontPointSize);
             form->addRow("Font Size", fontSizeSpin);
 
+            auto* showLabelCheck = new QCheckBox(&dialog);
+            showLabelCheck->setChecked(m_showLabel);
+            form->addRow("Show Label", showLabelCheck);
+
             auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
             form->addRow(buttons);
 
@@ -1634,6 +1881,7 @@ namespace sd::widgets
 
             SetDoubleNumericEditable(editableCheck->isChecked());
             SetTextFontPointSize(fontSizeSpin->value());
+            SetShowLabel(showLabelCheck->isChecked());
             return;
         }
 
@@ -1649,6 +1897,10 @@ namespace sd::widgets
             fontSizeSpin->setValue(m_textFontPointSize);
             form->addRow("Font Size", fontSizeSpin);
 
+            auto* showLabelCheck = new QCheckBox(&dialog);
+            showLabelCheck->setChecked(m_showLabel);
+            form->addRow("Show Label", showLabelCheck);
+
             auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
             form->addRow(buttons);
 
@@ -1661,6 +1913,7 @@ namespace sd::widgets
             }
 
             SetTextFontPointSize(fontSizeSpin->value());
+            SetShowLabel(showLabelCheck->isChecked());
             return;
         }
 
@@ -1685,6 +1938,10 @@ namespace sd::widgets
                 form->addRow("Options", optionsEdit);
             }
 
+            auto* showLabelCheck = new QCheckBox(&dialog);
+            showLabelCheck->setChecked(m_showLabel);
+            form->addRow("Show Label", showLabelCheck);
+
             auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
             form->addRow(buttons);
 
@@ -1697,6 +1954,7 @@ namespace sd::widgets
             }
 
             SetTextFontPointSize(fontSizeSpin->value());
+            SetShowLabel(showLabelCheck->isChecked());
             if (m_widgetType == "string.chooser" && optionsEdit != nullptr)
             {
                 const QStringList rawOptions = optionsEdit->text().split(',', Qt::SkipEmptyParts);
@@ -1715,14 +1973,14 @@ namespace sd::widgets
             return;
         }
 
-        if (m_widgetType == "bool.checkbox")
+        if (m_widgetType == "bool.led")
         {
             QDialog dialog(this);
-            dialog.setWindowTitle("Checkbox Properties");
+            dialog.setWindowTitle("LED Indicator Properties");
 
             auto* form = new QFormLayout(&dialog);
             auto* showLabelCheck = new QCheckBox(&dialog);
-            showLabelCheck->setChecked(m_boolCheckboxShowLabel);
+            showLabelCheck->setChecked(m_showLabel);
             form->addRow("Show Label", showLabelCheck);
 
             auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
@@ -1736,7 +1994,32 @@ namespace sd::widgets
                 return;
             }
 
-            SetBoolCheckboxShowLabel(showLabelCheck->isChecked());
+            SetShowLabel(showLabelCheck->isChecked());
+            return;
+        }
+
+        if (m_widgetType == "bool.checkbox")
+        {
+            QDialog dialog(this);
+            dialog.setWindowTitle("Checkbox Properties");
+
+            auto* form = new QFormLayout(&dialog);
+            auto* showLabelCheck = new QCheckBox(&dialog);
+            showLabelCheck->setChecked(m_showLabel);
+            form->addRow("Show Label", showLabelCheck);
+
+            auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+            form->addRow(buttons);
+
+            connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+            connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+
+            if (dialog.exec() != QDialog::Accepted)
+            {
+                return;
+            }
+
+            SetShowLabel(showLabelCheck->isChecked());
             return;
         }
 
