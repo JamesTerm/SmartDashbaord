@@ -14,7 +14,7 @@ static const QString kCameraPublisherPrefix = QStringLiteral("/CameraPublisher/"
 static const QString kStreamsKeySuffix = QStringLiteral("/streams");
 
 CameraPublisherDiscovery::CameraPublisherDiscovery(QObject* parent)
-    : QObject(parent)
+    : ICameraDiscoverySource(parent)
 {
 }
 

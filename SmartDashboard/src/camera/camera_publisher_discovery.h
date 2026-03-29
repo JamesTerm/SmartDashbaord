@@ -3,14 +3,17 @@
 /// @file camera_publisher_discovery.h
 /// @brief Monitors NT4 /CameraPublisher/ keys to auto-discover cameras.
 ///
-/// Ian: CameraPublisherDiscovery is deliberately decoupled from the NT4
-/// transport plugin.  It consumes the same key-update callbacks that tiles
-/// consume — MainWindow routes updates to it.  This avoids linking the
-/// camera feature to a specific transport.  Any transport that delivers
-/// /CameraPublisher/ keys will work.
+/// Ian: CameraPublisherDiscovery is the NT4-specific camera discovery provider.
+/// It implements ICameraDiscoverySource so it can be registered with
+/// CameraDiscoveryAggregator alongside other providers (static URLs, mDNS,
+/// etc.).  It consumes the same key-update callbacks that tiles consume —
+/// MainWindow routes updates to it.  This avoids linking the camera feature
+/// to a specific transport.  Any transport that delivers /CameraPublisher/
+/// keys will work.
+
+#include "camera/camera_discovery_source.h"
 
 #include <QMap>
-#include <QObject>
 #include <QString>
 #include <QStringList>
 #include <QVariant>
@@ -27,7 +30,7 @@ namespace sd::camera
     ///
     /// Stream URL format: "mjpg:http://{address}:{port}/?action=stream"
     /// Strip the "mjpg:" prefix to get the raw HTTP URL.
-    class CameraPublisherDiscovery final : public QObject
+    class CameraPublisherDiscovery final : public ICameraDiscoverySource
     {
         Q_OBJECT
 
@@ -42,26 +45,19 @@ namespace sd::camera
         /// threading concerns.
         void OnVariableUpdate(const QString& key, int valueType, const QVariant& value);
 
+        // ICameraDiscoverySource overrides.
+
         /// @brief Clear all discovered cameras.
         ///
         /// Ian: Called on transport disconnect/switch, following the same
         /// pattern as RunBrowserDock::ClearDiscoveredKeys().
-        void Clear();
+        void Clear() override;
 
         /// @brief Return discovered camera names.
-        QStringList GetCameraNames() const;
+        QStringList GetCameraNames() const override;
 
         /// @brief Return stream URLs for a given camera name.
-        QStringList GetStreamUrls(const QString& cameraName) const;
-
-    signals:
-        /// @brief Emitted when a camera is discovered or its streams change.
-        /// @param name Camera name.
-        /// @param urls Stream URLs (with mjpg: prefix stripped).
-        void CameraDiscovered(const QString& name, const QStringList& urls);
-
-        /// @brief Emitted when all cameras are cleared (e.g. on disconnect).
-        void CamerasCleared();
+        QStringList GetStreamUrls(const QString& cameraName) const override;
 
     private:
         static QStringList ParseStreamUrls(const QVariant& value);

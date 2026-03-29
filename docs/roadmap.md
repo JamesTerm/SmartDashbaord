@@ -24,7 +24,7 @@ Use these buckets to keep roadmap discussions grounded in product identity.
 
 1. **Compatibility first**
    - Teams can leave robot code as-is, or very nearly as-is, when adopting this dashboard.
-   - Existing `SmartDashboard`/`Shuffleboard`/`NetworkTables` publishing workflows are supported directly or through a clear adapter/translation layer.
+   - Existing `SmartDashboard`/`NetworkTables` publishing workflows are supported directly or through a clear adapter/translation layer.
    - Acceptance: a team can connect an existing robot project with little or no code churn and see expected values/widgets.
 
 2. **Strong live dashboard baseline**
@@ -35,7 +35,7 @@ Use these buckets to keep roadmap discussions grounded in product identity.
    - NetworkTables behavior should feel solid enough that teams do not see this dashboard as a special-case tool.
    - Acceptance: common FRC keys and update patterns behave as teams expect.
    - Architecture direction: legacy ecosystem compatibility should be packaged as optional per-ecosystem transport plugins so teams can keep robot code patterns while deploying only the bridge they need.
-   - Current baseline: `Legacy NT` is the first real compatibility plugin and should remain the stable comparison oracle while broader Shuffleboard-oriented additions are layered carefully on top.
+   - Current baseline: `Legacy NT` is the first real compatibility plugin and should remain the stable comparison oracle while additional NT-based features are layered carefully on top.
 
 4. **High-value everyday widget coverage**
    - Prioritize the widgets teams most commonly need before adding niche analysis surfaces.
@@ -87,8 +87,7 @@ Use these buckets to keep roadmap discussions grounded in product identity.
 3. **Broader specialty widget surfaces**
    - Explore richer FRC-specific views only after core adoption is healthy.
    - Examples:
-     - field/mechanism-style views
-     - command/subsystem-oriented panels
+     - field/mechanism-style views (`Field2d`, `Mechanism2d`)
      - other specialty semantic widgets that are useful but not foundational
 
 4. **Major UX polish layers**
@@ -107,8 +106,8 @@ Treat this as the readiness gate before presenting NetworkTables support as a co
 - [x] Layout/edit/save/load workflow feels dependable enough for daily use
 - [x] Connection/reconnect/status behavior is trustworthy and unsurprising
 - [x] Existing common scalar widgets feel complete for normal team use (bool indicators/text/control, numeric text/bar/slider/dial, string text/edit views)
-- [ ] Common `SmartDashboard`/`Shuffleboard` publishing patterns are documented as: works unchanged / works through adapter / not yet supported
-- [ ] Legacy compatibility baseline is explicit (preserve `legacy-smartdashboard-baseline` behavior profile for validation; allow `shuffleboard-additive` behaviors only when they do not break legacy baseline)
+- [ ] Common `SmartDashboard` publishing patterns are documented as: works unchanged / works through adapter / not yet supported
+- [ ] Legacy compatibility baseline is explicit (preserve `legacy-smartdashboard-baseline` behavior profile for validation; allow additive behaviors only when they do not break legacy baseline)
 - [ ] Key migration policy is explicit for operator-controlled values (canonical scoped keys preferred, legacy flat aliases remain supported during migration)
 - [x] Dashboard-owned control values replay/re-publish correctly across simulator reconnects in direct mode
 - [ ] Command/Subsystem status display (`putData` for Scheduler, subsystems, and commands produces expected interactive widgets)
@@ -116,16 +115,16 @@ Treat this as the readiness gate before presenting NetworkTables support as a co
 
 ### High-priority near-foundation items
 
-- [x] Graph/plot support that covers normal `Shuffleboard` expectations for numeric telemetry
+- [x] Graph/plot support that covers normal SmartDashboard expectations for numeric telemetry
 - [x] Camera stream support for teams that rely on driver/diagnostic video in dashboard workflows (MJPEG MVP complete)
 - [ ] Visual control variants where they materially improve migration comfort (`Toggle Button`, `Toggle Switch`, voltage-view-style presentation if needed)
 
 ### Not required to unblock NT rollout
 
-- ~~Enhanced multi-trace plotting beyond normal `Shuffleboard` graph expectations~~ (active — see "Multi-trace line plot" section below)
+- ~~Enhanced multi-trace plotting beyond normal SmartDashboard graph expectations~~ (active — see "Multi-trace line plot" section below)
 - Compass widget
 - Deep replay-analysis additions beyond the current practical workflow
-- Broader specialty `Shuffleboard`/WPILib widgets such as `Field2d`, `Mechanism2d`, command/subsystem panels, or other advanced sendable surfaces
+- Broader specialty WPILib widgets such as `Field2d`, `Mechanism2d`, or other advanced sendable surfaces
 
 ### Readiness question
 
@@ -133,16 +132,53 @@ If a typical FRC team points an existing robot project at this dashboard, can th
 
 ---
 
-## Active: Abstract camera discovery from transport
+## Done: Abstract camera discovery from transport
 
 Camera auto-discovery currently piggy-backs on the transport variable stream — `MainWindow` forwards every key update to `CameraPublisherDiscovery`, which filters for `/CameraPublisher/` keys. This only works when the active transport happens to deliver those keys as variable updates (NT4 does; Direct and Native Link do not).
 
 Camera discovery is not part of the transport contract and should not be. A Direct-connected session should still be able to discover and connect to camera streams. The fix is to extract camera discovery into its own abstracted service that works independently of which transport plugin is active.
 
-- [ ] Define an `ICameraDiscoverySource` interface (or equivalent) that camera discovery providers implement
-- [ ] Move `CameraPublisherDiscovery` behind that interface as one concrete provider (NT4-style `/CameraPublisher/` key monitoring)
-- [ ] Wire `CameraViewerDock` to consume the abstract interface instead of being fed by `MainWindow` variable forwarding
-- [ ] Camera discovery works regardless of active transport plugin (Direct, Native Link, NT4, or none)
+- [x] Define an `ICameraDiscoverySource` interface (or equivalent) that camera discovery providers implement
+- [x] Move `CameraPublisherDiscovery` behind that interface as one concrete provider (NT4-style `/CameraPublisher/` key monitoring)
+- [x] Wire `CameraViewerDock` to consume the abstract interface instead of being fed by `MainWindow` variable forwarding
+- [x] Camera discovery works regardless of active transport plugin (Direct, Native Link, NT4, or none)
+
+---
+
+## Next up: Command/Subsystem status display and Test Mode/LiveWindow
+
+These are Need #6 and #7 and the last two unchecked items in the "Must-have before broad NT rollout" checklist. Both are core SmartDashboard features that command-based teams rely on daily.
+
+### Command/Subsystem status display
+
+- [ ] `SmartDashboard.putData(CommandScheduler)` produces a running-commands list widget
+- [ ] `SmartDashboard.putData(subsystem)` produces a "required by" display showing the currently-requiring command
+- [ ] `SmartDashboard.putData("name", command)` produces an interactive widget with start/cancel buttons
+- [ ] All three integrate with NT4 transport (these use Sendable publishing patterns under `/SmartDashboard/`)
+
+### Test Mode / LiveWindow support
+
+- [ ] Entering Test Mode on the robot causes the dashboard to display LiveWindow widgets
+- [ ] Sensors and actuators grouped by subsystem with interactive sliders
+- [ ] PID tuning widgets with live P/I/D parameter editing
+- [ ] LiveWindow data published under `/LiveWindow/` key prefix is recognized and rendered appropriately
+
+---
+
+## Known issues
+
+### Chooser reset on Enable (Direct Connect only)
+
+**Status**: Documented, deprioritized. Does NOT reproduce on NativeLink or NT4.
+
+**Symptom**: When the user manually selects an autonomous routine (e.g. "Just Move Forward") in SmartDashboard's chooser widget before launching DriverStation and then clicks Enable, the selection resets to the default ("Do Nothing").
+
+**Investigation conducted**:
+- Tested at two historical baselines (`e7aeb27` 2026-03-27 and `26129d8` 2026-03-23) — bug reproduced at both, confirming this is a long-standing latent issue, not a regression from recent work.
+- One real bug was found and fixed: `DirectCommandSubscriber` skipped pre-existing ring buffer writes because `m_readCursor` was initialized to `header->writeIndex` instead of `header->consumerReadIndex` (commit `0551491` in Robot_Simulation). This was correct but did not fully resolve the symptom.
+- There is likely a second mechanism in the auton resolution chain (`FindAutonChooserSelection`, `PublishAutonChooser`, or the `Activate` sequence) that overwrites or ignores the dashboard-selected value on the Direct Connect path.
+
+**Workaround**: Use NativeLink or NT4 transport, where chooser selection survives Enable correctly.
 
 ---
 
@@ -166,7 +202,7 @@ Architecture direction: option A (many independent lightweight line-plot widgets
 
 These are architectural directions that need discussion and decisions before implementation begins.
 
-- Define the compatibility/migration contract for teams coming from `SmartDashboard`/`Shuffleboard` publishing patterns:
+- Define the compatibility/migration contract for teams coming from `SmartDashboard` publishing patterns:
   - what works unchanged
   - what requires an adapter/bridge
   - what remains intentionally unsupported

@@ -8,6 +8,7 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QHBoxLayout>
+#include <QInputDialog>
 #include <QLabel>
 #include <QLineEdit>
 #include <QPushButton>
@@ -115,6 +116,14 @@ void CameraViewerDock::SetupUi()
     m_urlEdit->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     urlLayout->addWidget(m_urlEdit);
 
+    // Ian: "Save" button lets the user persist the current URL as a named
+    // static camera.  This is the primary entry point for manual camera
+    // configuration when no auto-discovery transport is active.
+    m_saveButton = new QPushButton(QStringLiteral("Save"));
+    m_saveButton->setFixedWidth(50);
+    m_saveButton->setToolTip(QStringLiteral("Save this URL as a named camera"));
+    urlLayout->addWidget(m_saveButton);
+
     mainLayout->addLayout(urlLayout);
 
     // Status label.
@@ -132,6 +141,7 @@ void CameraViewerDock::SetupUi()
     connect(m_connectButton, &QPushButton::clicked, this, &CameraViewerDock::OnConnectClicked);
     connect(m_disconnectButton, &QPushButton::clicked, this, &CameraViewerDock::OnDisconnectClicked);
     connect(m_cameraCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &CameraViewerDock::OnCameraSelected);
+    connect(m_saveButton, &QPushButton::clicked, this, &CameraViewerDock::OnSaveStaticCamera);
 
     connect(
         m_reticleCheckBox,
@@ -213,6 +223,19 @@ void CameraViewerDock::AddDiscoveredCamera(const QString& name, const QStringLis
     // auto-reconnect (after stream error) works if the user has previously
     // connected and the stream drops.
     m_userDisconnected = false;
+}
+
+void CameraViewerDock::RemoveDiscoveredCamera(const QString& name)
+{
+    m_discoveredCameras.remove(name);
+    if (m_cameraCombo != nullptr)
+    {
+        const int idx = m_cameraCombo->findText(name);
+        if (idx >= 0)
+        {
+            m_cameraCombo->removeItem(idx);
+        }
+    }
 }
 
 int CameraViewerDock::DiscoveredCameraCount() const
@@ -371,6 +394,39 @@ void CameraViewerDock::OnReconnectTimer()
     }
 
     ConnectToUrl(m_lastConnectedUrl);
+}
+
+void CameraViewerDock::OnSaveStaticCamera()
+{
+    // Ian: Prompt the user for a camera name, then emit the signal so
+    // MainWindow can forward to StaticCameraSource.  The URL comes from
+    // the URL edit field (or the current combo selection).
+    QString url = m_urlEdit != nullptr ? m_urlEdit->text().trimmed() : QString();
+    if (url.isEmpty() && m_cameraCombo != nullptr && m_cameraCombo->currentIndex() >= 0)
+    {
+        url = m_cameraCombo->currentData().toString();
+    }
+
+    if (url.isEmpty())
+    {
+        m_statusLabel->setText(QStringLiteral("No URL to save"));
+        return;
+    }
+
+    bool ok = false;
+    const QString name = QInputDialog::getText(
+        this,
+        QStringLiteral("Save Camera"),
+        QStringLiteral("Camera name:"),
+        QLineEdit::Normal,
+        QString(),
+        &ok
+    );
+
+    if (ok && !name.isEmpty())
+    {
+        emit SaveStaticCameraRequested(name, url);
+    }
 }
 
 void CameraViewerDock::UpdateButtonStates()

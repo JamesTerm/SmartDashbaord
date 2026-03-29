@@ -12,23 +12,23 @@ Build an educational, community-friendly C++ dashboard prototype for FRC that de
 
 ## Product direction
 
-- Primary audience: FRC teams who would otherwise use `Shuffleboard`/`SmartDashboard` for daily robot interaction.
+- Primary audience: FRC teams who would otherwise use `SmartDashboard` for daily robot interaction.
 - Primary goal: deliver a dependable live dashboard/control workflow teams can adopt without friction.
 - Secondary goal: provide built-in recording/replay as a differentiator, without turning the product into an analysis-only tool.
 - Comparison baseline:
-  - first: `Shuffleboard` for day-to-day team usefulness
+  - first: `SmartDashboard` for day-to-day team usefulness
   - second: selected `AdvantageScope`-style replay ergonomics where they clearly improve practical debugging
 - Planning filter for future work:
   - prioritize features that help teams during normal robot development and match-day use
   - avoid deep analytics work unless it clearly supports real team workflows
   - prefer compatibility and migration ease over purity of internal implementation
   - evaluate outside tools for ideas, but only adopt feature directions that fit this product's own identity
-  - study popular dashboards (`Shuffleboard`, `Glass`, `Elastic`, and similar tools) for workflow lessons, but avoid cloning another product's feature surface or branding story
+  - study popular dashboards (`Glass`, `Elastic`, and similar tools) for workflow lessons, but avoid cloning another product's feature surface or branding story
 
 ## Adoption principle
 
 - Teams should be able to use this dashboard with minimal or no robot-code changes.
-- Existing `SmartDashboard`/`Shuffleboard`-style publishing patterns should work whenever reasonably possible.
+- Existing `SmartDashboard`-style publishing patterns should work whenever reasonably possible.
 - If the dashboard keeps a cleaner internal/native transport model, provide compatibility/translation adapters so teams are not forced to rewrite working robot code.
 - Compatibility and migration smoothness are higher priority than exposing the native protocol directly to teams.
 
@@ -38,12 +38,11 @@ Build an educational, community-friendly C++ dashboard prototype for FRC that de
 - Keep the architecture simple enough for students to reason about end-to-end.
 - Support dashboard workflows teams expect: view values, choose widget presentation, save/load layout.
 - Make engineering trade-offs visible and teachable through docs and tests.
-- Be practical for real FRC teams to adopt as a `Shuffleboard`-class live dashboard.
+- Be practical for real FRC teams to adopt as a SmartDashboard-class live dashboard.
 - Preserve room for replay/telemetry features that improve debugging without displacing the live-dashboard focus.
 
 ## Non-goals (current phase)
 
-- Full SmartDashboard feature parity.
 - Multi-consumer direct transport support in current ring-buffer mode.
 - Production deployment packaging for every team environment.
 - Trying to out-feature every dedicated telemetry-analysis tool.

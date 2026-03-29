@@ -7,6 +7,30 @@ Curated milestone history for this repository.
 - Keep milestone sections in descending chronological order (newest first) so recent changes are immediately visible.
 - Historical branch/status wording in older entries is time-bound; read each section as a snapshot from that date.
 
+## 2026-03-29 - Product scope clarified: SmartDashboard-only, Command/Subsystem promoted to Need
+
+### Scope decision
+
+Product scope is now explicitly **complete SmartDashboard feature set**. Shuffleboard-specific features, widgets, and layout concepts are out of scope. NT4 transport remains supported since Glass and SmartDashboard both use the NT4 protocol, but the product identity and comparison baseline is SmartDashboard, not Shuffleboard.
+
+"Full SmartDashboard feature parity" removed from Non-goals in `requirements.md` — it is now the goal.
+
+### Command/Subsystem and Test Mode/LiveWindow promoted
+
+Command/Subsystem status display and Test Mode/LiveWindow support were previously listed under Dream-tier "Broader specialty widget surfaces." These are core SmartDashboard features that command-based teams rely on daily. Promoted to Need #6 and #7 and marked as active next-up work items in the roadmap.
+
+### Chooser reset documented as known issue
+
+The Direct Connect chooser-reset-on-Enable bug was investigated across two historical baselines and confirmed as a long-standing latent issue (not a regression). One contributing bug was fixed (ring buffer read cursor in Robot_Simulation commit `0551491`), but a second mechanism in the auton resolution chain remains. Documented in roadmap Known Issues section with NativeLink/NT4 workaround. Deprioritized.
+
+### Docs updated
+
+- `docs/roadmap.md`: Removed Shuffleboard references, added "Next up" section for Command/Subsystem and Test Mode/LiveWindow, added Known Issues section, cleaned Dream #3 (removed command/subsystem since it's now Need)
+- `docs/requirements.md`: Reframed audience, comparison baseline, and adoption principle to SmartDashboard scope; removed "Full SmartDashboard feature parity" from Non-goals
+- `docs/project_history.md`: This entry
+
+---
+
 ## 2026-03-28 - Recording/playback feature complete (7 of 8 roadmap items)
 
 The recording/playback feature roadmap section is now closed. All functional items are implemented in production code; the remaining gap (dedicated recorder-to-replay roundtrip and seek correctness tests) is deferred to the roadmap's deferred-work section.

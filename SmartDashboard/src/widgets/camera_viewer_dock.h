@@ -78,6 +78,14 @@ namespace sd::widgets
         /// trigger — the camera just shows up when the simulator starts.
         void AddDiscoveredCamera(const QString& name, const QStringList& urls);
 
+        /// @brief Remove a single camera from the selector combo.
+        /// @param name Camera name to remove (aggregated/prefixed name).
+        ///
+        /// Ian: Called when the aggregator removes a camera from one provider
+        /// while other providers still have cameras (so CamerasCleared is not
+        /// emitted).
+        void RemoveDiscoveredCamera(const QString& name);
+
         /// @brief Return the number of discovered cameras.
         int DiscoveredCameraCount() const;
 
@@ -87,6 +95,15 @@ namespace sd::widgets
         /// @brief Return whether auto-reconnect is suppressed (for testing).
         bool IsAutoReconnectSuppressed() const { return m_userDisconnected; }
 
+    signals:
+        /// @brief Emitted when the user clicks "Save" to persist a static camera.
+        /// @param name Camera name entered by the user.
+        /// @param url Stream URL.
+        ///
+        /// Ian: MainWindow connects this to StaticCameraSource::AddCamera().
+        /// The dock doesn't know about StaticCameraSource directly.
+        void SaveStaticCameraRequested(const QString& name, const QString& url);
+
     private slots:
         void OnConnectClicked();
         void OnDisconnectClicked();
@@ -94,6 +111,7 @@ namespace sd::widgets
         void OnStreamStateChanged(sd::camera::CameraStreamSource::State newState);
         void OnFrameReceived(const QImage& frame);
         void OnReconnectTimer();
+        void OnSaveStaticCamera();
 
     private:
         void SetupUi();
@@ -106,6 +124,7 @@ namespace sd::widgets
         QLineEdit* m_urlEdit = nullptr;
         QPushButton* m_connectButton = nullptr;
         QPushButton* m_disconnectButton = nullptr;
+        QPushButton* m_saveButton = nullptr;
         QCheckBox* m_reticleCheckBox = nullptr;
         QLabel* m_statusLabel = nullptr;
 

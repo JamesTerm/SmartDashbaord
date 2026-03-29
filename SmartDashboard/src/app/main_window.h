@@ -49,7 +49,9 @@ class QLocalSocket;
 
 namespace sd::camera
 {
+    class CameraDiscoveryAggregator;
     class CameraPublisherDiscovery;
+    class StaticCameraSource;
 }
 
 namespace sd::widgets
@@ -266,13 +268,23 @@ private:
     // OnTileAdded, we re-apply this hidden set.  Not used in reading mode.
     QSet<QString> m_runBrowserHiddenKeys;  ///< Streaming-mode: keys the user has hidden (persisted).
     // Ian: Camera viewer dock — dockable MJPEG stream viewer.
-    // CameraPublisherDiscovery monitors /CameraPublisher/ keys from NT4
-    // to auto-populate the camera selector.  The dock + discovery lifecycle
-    // follows the same pattern as RunBrowserDock: StopTransport() stops
-    // the stream, disconnect clears discovered cameras.
+    // CameraPublisherDiscovery monitors /CameraPublisher/ keys from any
+    // transport to auto-populate the camera selector.  The dock + discovery
+    // lifecycle follows the same pattern as RunBrowserDock: StopTransport()
+    // stops the stream, disconnect clears discovered cameras.
+    // Ian: Camera discovery — abstracted from transport.
+    // The aggregator merges cameras from all discovery providers
+    // (protocol-discovered, static/manual URLs, etc.) and feeds the
+    // unified list to the dock.  Protocol-discovered cameras have no
+    // display prefix; static cameras show "[Static]".
+    // m_cameraDiscovery handles /CameraPublisher/ keys from any transport.
+    // m_staticCameraSource handles user-configured persistent URLs.
+    // m_cameraAggregator merges both and connects to m_cameraDock.
     QAction* m_cameraViewAction = nullptr;
     sd::widgets::CameraViewerDock* m_cameraDock = nullptr;
     sd::camera::CameraPublisherDiscovery* m_cameraDiscovery = nullptr;
+    sd::camera::StaticCameraSource* m_staticCameraSource = nullptr;
+    sd::camera::CameraDiscoveryAggregator* m_cameraAggregator = nullptr;
     QListWidget* m_replayMarkerList = nullptr;
     QLabel* m_replaySelectionSummaryLabel = nullptr;
     sd::widgets::PlaybackTimelineWidget* m_playbackTimeline = nullptr;

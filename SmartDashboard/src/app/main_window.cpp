@@ -7,7 +7,9 @@
 #include "widgets/playback_timeline_widget.h"
 #include "widgets/run_browser_dock.h"
 #include "widgets/camera_viewer_dock.h"
+#include "camera/camera_discovery_aggregator.h"
 #include "camera/camera_publisher_discovery.h"
+#include "camera/static_camera_source.h"
 
 #include <QAction>
 #include <QActionGroup>
@@ -1152,22 +1154,51 @@ MainWindow::MainWindow(QWidget* parent, bool startTransportOnInit)
         }
     );
 
-    // Ian: CameraPublisherDiscovery monitors /CameraPublisher/ keys arriving
-    // via NT4 variable updates and emits CameraDiscovered / CamerasCleared
-    // signals.  The dock subscribes to these to auto-populate the camera
-    // selection combo.
+    // Ian: Camera discovery — abstracted from transport via aggregator.
+    // The aggregator merges cameras from all discovery providers and feeds
+    // the unified list to the dock.  This decouples camera discovery from
+    // which transport is active (Direct, Native Link, NT4, or none).
+    // The protocol discovery source uses an empty tag so cameras appear
+    // undecorated in the UI (e.g. "SimCamera" not "[NT4] SimCamera") —
+    // the user doesn't care which transport discovered the camera.
+    // Developer-level tracing is available via OutputDebugString in the
+    // aggregator, visible in the Visual Studio Output window.
     m_cameraDiscovery = new sd::camera::CameraPublisherDiscovery(this);
+    m_staticCameraSource = new sd::camera::StaticCameraSource(this);
+    m_staticCameraSource->LoadFromSettings();
+
+    m_cameraAggregator = new sd::camera::CameraDiscoveryAggregator(this);
+    m_cameraAggregator->AddSource(QString(), m_cameraDiscovery);
+    m_cameraAggregator->AddSource(QStringLiteral("Static"), m_staticCameraSource);
+
+    // Ian: Wire aggregator -> dock.  The dock receives camera names
+    // (e.g. "SimCamera", "[Static] ShopCam") and doesn't know which
+    // provider they came from.
     connect(
-        m_cameraDiscovery,
-        &sd::camera::CameraPublisherDiscovery::CameraDiscovered,
+        m_cameraAggregator,
+        &sd::camera::CameraDiscoveryAggregator::CameraDiscovered,
         m_cameraDock,
         &sd::widgets::CameraViewerDock::AddDiscoveredCamera
     );
     connect(
-        m_cameraDiscovery,
-        &sd::camera::CameraPublisherDiscovery::CamerasCleared,
+        m_cameraAggregator,
+        &sd::camera::CameraDiscoveryAggregator::CamerasCleared,
         m_cameraDock,
         &sd::widgets::CameraViewerDock::ClearDiscoveredCameras
+    );
+    connect(
+        m_cameraAggregator,
+        &sd::camera::CameraDiscoveryAggregator::CameraRemoved,
+        m_cameraDock,
+        &sd::widgets::CameraViewerDock::RemoveDiscoveredCamera
+    );
+
+    // Ian: Wire dock "Save" button -> static camera source.
+    connect(
+        m_cameraDock,
+        &sd::widgets::CameraViewerDock::SaveStaticCameraRequested,
+        m_staticCameraSource,
+        &sd::camera::StaticCameraSource::AddCamera
     );
 
     QSettings settings("SmartDashboard", "SmartDashboardApp");
@@ -1765,16 +1796,13 @@ void MainWindow::OnConnectionStateChanged(int state)
             }
         }
 
-        // Ian: On disconnect, clear discovered cameras so stale entries don't
-        // linger in the combo.  If we reconnect, the server will re-announce
-        // /CameraPublisher/ keys and discovery will re-populate the list.
+        // Ian: On disconnect, clear protocol-discovered cameras so stale entries
+        // don't linger in the combo.  Static cameras survive — they're not
+        // tied to the transport.  The aggregator handles removing only the
+        // protocol provider's cameras and emitting appropriate signals to the dock.
         if (m_cameraDiscovery != nullptr)
         {
             m_cameraDiscovery->Clear();
-        }
-        if (m_cameraDock != nullptr)
-        {
-            m_cameraDock->ClearDiscoveredCameras();
         }
     }
 

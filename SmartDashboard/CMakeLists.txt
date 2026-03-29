@@ -39,6 +39,11 @@ qt_add_executable(SmartDashboardApp WIN32
     src/widgets/tile_control_widget.h
     src/widgets/tile_control_widget.cpp
     src/camera/camera_stream_source.h
+    src/camera/camera_discovery_source.h
+    src/camera/camera_discovery_aggregator.h
+    src/camera/camera_discovery_aggregator.cpp
+    src/camera/static_camera_source.h
+    src/camera/static_camera_source.cpp
     src/camera/mjpeg_stream_source.h
     src/camera/mjpeg_stream_source.cpp
     src/camera/camera_publisher_discovery.h
@@ -115,6 +120,9 @@ if(BUILD_TESTING)
         src/widgets/run_browser_dock.cpp
         src/widgets/tile_control_widget.cpp
         src/camera/camera_stream_source.h
+        src/camera/camera_discovery_source.h
+        src/camera/camera_discovery_aggregator.cpp
+        src/camera/static_camera_source.cpp
         src/camera/mjpeg_stream_source.cpp
         src/camera/camera_publisher_discovery.cpp
         src/widgets/camera_display_widget.cpp
