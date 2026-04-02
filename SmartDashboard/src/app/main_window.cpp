@@ -2101,9 +2101,45 @@ void MainWindow::OnClearWidgets()
     m_pluginControlEdits.clear();
     m_nextTileOffset = 0;
     m_lastTransportSeq = 0;
+    m_runBrowserHiddenKeys.clear();
     MarkLayoutDirty();
 
-    // Ian: Notify observers (Run Browser dock) that all tiles were removed.
+    // Ian: Hard-reset the Run Browser.  ClearAllRuns() wipes both replay
+    // runs and streaming state regardless of the current mode.  This is
+    // intentional — "Clear Widgets" means the user wants a blank slate,
+    // including the Run Browser tree.  ClearDiscoveredKeys (fired by
+    // TilesCleared below) has a streaming-mode guard that would skip the
+    // clear when coming from replay mode, so ClearAllRuns is the only
+    // reliable way to guarantee the tree is empty.
+    //
+    // If a non-replay transport is still connected, StartTransport (or
+    // incoming data via GetOrCreateTile → TileAdded) will re-enter
+    // streaming mode and repopulate the tree naturally.
+    if (m_runBrowserDock != nullptr)
+    {
+        m_runBrowserDock->ClearAllRuns();
+
+        // Ian: Re-enter streaming mode whenever the selected transport
+        // is non-replay.  This lets subsequent operations (Load Layout,
+        // incoming transport keys) repopulate the Run Browser tree via
+        // GetOrCreateTile → TileAdded → OnTileAdded.  Without this,
+        // ClearAllRuns leaves m_streamingMode false and OnTileAdded
+        // silently ignores every key.
+        //
+        // We check the *configured* transport kind, not whether
+        // m_transport is non-null, because the user may have switched
+        // to NT4/Direct but not yet clicked Connect — the layout load
+        // that follows still needs the tree to mirror the tiles.
+        if (m_connectionConfig.kind != sd::transport::TransportKind::Replay)
+        {
+            m_runBrowserDock->SetStreamingRootLabel(GetSelectedTransportDisplayName());
+        }
+    }
+
+    // Ian: Notify observers that all tiles were removed.  The
+    // ClearDiscoveredKeys handler is a harmless no-op here because
+    // ClearAllRuns already reset everything (and SetStreamingRootLabel,
+    // if called, re-initialized streaming state cleanly).
     emit TilesCleared();
 }
 
