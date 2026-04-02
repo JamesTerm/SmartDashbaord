@@ -38,6 +38,20 @@ namespace sd::widgets
             static_cast<void>(line);
         }
 
+        // Ian: Extract the leaf name from a NetworkTables key path for use
+        // in plot legend labels.  Matches MainWindow::BuildDisplayLabel
+        // behavior — split on '/' and take the last segment.  E.g.
+        // "/SmartDashboard/Subsystems/Drivetrain/Speed" -> "Speed".
+        QString LeafName(const QString& key)
+        {
+            const QStringList segments = key.split('/', Qt::SkipEmptyParts);
+            if (segments.isEmpty())
+            {
+                return key;
+            }
+            return segments.back();
+        }
+
         QString GetDefaultWidgetType(VariableType type)
         {
             switch (type)
@@ -571,14 +585,9 @@ namespace sd::widgets
 
         if (m_linePlot != nullptr)
         {
-            // Ian: Use the short display label for the legend (strip /SmartDashboard/ prefix).
-            QString label = key;
-            const QString prefix = QStringLiteral("/SmartDashboard/");
-            if (label.startsWith(prefix))
-            {
-                label = label.mid(prefix.length());
-            }
-            m_linePlot->AddSeries(key, label, color);
+            // Ian: Use the leaf name for the legend label — strip all path
+            // segments, not just the /SmartDashboard/ prefix.
+            m_linePlot->AddSeries(key, LeafName(key), color);
         }
 
         DebugTileLog(QString("tile.add_plot_source key=%1 source=%2").arg(m_key).arg(key));
@@ -623,13 +632,7 @@ namespace sd::widgets
             // Rebuild all series on the line plot widget
             for (const auto& src : m_plotSources)
             {
-                QString label = src.key;
-                const QString prefix = QStringLiteral("/SmartDashboard/");
-                if (label.startsWith(prefix))
-                {
-                    label = label.mid(prefix.length());
-                }
-                m_linePlot->AddSeries(src.key, label, src.color);
+                m_linePlot->AddSeries(src.key, LeafName(src.key), src.color);
                 m_linePlot->SetSeriesVisible(src.key, src.visible);
             }
         }
@@ -1497,8 +1500,14 @@ namespace sd::widgets
         else if (!showControl && showDoubleLinePlot)
         {
             // Ian: Line plot label -- centered title above the plot.  When
-            // hidden, the plot occupies the full tile height.
+            // hidden, the plot occupies the full tile height.  The legend
+            // inside the plot also hides with the label so "Show Label"
+            // controls both the tile title and the plot legend together.
             m_titleLabel->setVisible(m_showLabel);
+            if (m_linePlot != nullptr)
+            {
+                m_linePlot->SetShowLegend(m_showLabel);
+            }
             if (m_showLabel)
             {
                 m_layout->addWidget(m_titleLabel, 0, 0, 1, 2, Qt::AlignHCenter | Qt::AlignVCenter);
@@ -2269,6 +2278,10 @@ namespace sd::widgets
         form->addRow("Upper Limit", upperLimitSpin);
         form->addRow("Lower Limit", lowerLimitSpin);
 
+        auto* showLabelCheck = new QCheckBox(&dialog);
+        showLabelCheck->setChecked(m_showLabel);
+        form->addRow("Show Label", showLabelCheck);
+
         // Ian: Series color pickers and visibility checkboxes — one row per
         // additional source, plus the primary series (Fix 4).
         struct SeriesColorState
@@ -2359,6 +2372,7 @@ namespace sd::widgets
         );
         SetLinePlotNumberLinesVisible(numberLinesCheck->isChecked());
         SetLinePlotGridLinesVisible(gridLinesCheck->isChecked());
+        SetShowLabel(showLabelCheck->isChecked());
 
         // Apply color and visibility changes
         for (const auto& sc : seriesColors)

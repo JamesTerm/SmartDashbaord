@@ -4,6 +4,7 @@
 #include <QPainterPath>
 #include <QPaintEvent>
 #include <QPen>
+#include <QStringList>
 
 #include <algorithm>
 #include <cmath>
@@ -11,6 +12,23 @@
 
 namespace sd::widgets
 {
+    namespace
+    {
+        // Ian: Extract the leaf name from a NetworkTables key path for legend
+        // labels.  E.g. "/SmartDashboard/Drive/LeftSpeed" -> "LeftSpeed".
+        // Mirrors the LeafName helper in variable_tile.cpp and the logic in
+        // MainWindow::BuildDisplayLabel.
+        QString LeafName(const QString& key)
+        {
+            const QStringList segments = key.split('/', Qt::SkipEmptyParts);
+            if (segments.isEmpty())
+            {
+                return key;
+            }
+            return segments.back();
+        }
+    }
+
     // Ian: ROY-G-BIV palette for multi-line plot default colors.  The first
     // color (#33b5e5) is the legacy single-series blue, kept as the primary
     // series color for visual continuity with existing single-line plots.
@@ -60,7 +78,7 @@ namespace sd::widgets
             const auto& palette = DefaultColorPalette();
             Series primary;
             primary.key = m_primaryKey;
-            primary.label = m_primaryKey;
+            primary.label = LeafName(m_primaryKey);
             primary.color = palette[0];
             // Insert at front so index 0 is the primary for legacy callers
             m_series.insert(m_series.begin(), std::move(primary));
@@ -132,6 +150,17 @@ namespace sd::widgets
     {
         m_showGridLines = enabled;
         update();
+    }
+
+    void LinePlotWidget::SetShowLegend(bool enabled)
+    {
+        m_showLegend = enabled;
+        update();
+    }
+
+    bool LinePlotWidget::IsShowLegend() const
+    {
+        return m_showLegend;
     }
 
     // --- Multi-series API ---
@@ -360,8 +389,10 @@ namespace sd::widgets
         const int leftPad = m_showNumberLines ? 44 : 6;
         const int rightPad = 6;
         // Ian: Dynamic legend height — wraps to multiple rows when keys
-        // exceed available width (Fix 4).
-        const int legendHeight = hasMultipleSeries ? ComputeLegendHeight(rect().width() - leftPad - rightPad) : 0;
+        // exceed available width (Fix 4).  Legend is completely hidden when
+        // m_showLegend is false, reclaiming the vertical space for the plot.
+        const bool showLegend = hasMultipleSeries && m_showLegend;
+        const int legendHeight = showLegend ? ComputeLegendHeight(rect().width() - leftPad - rightPad) : 0;
 
         const int topPad = 6 + legendHeight;
         const int bottomPad = m_showNumberLines ? 24 : 6;
@@ -371,8 +402,8 @@ namespace sd::widgets
             return;
         }
 
-        // Draw legend above the plot area when multi-series
-        if (hasMultipleSeries)
+        // Draw legend above the plot area when multi-series and legend visible
+        if (showLegend)
         {
             DrawLegend(painter, QRect(leftPad, 4, drawRect.width(), legendHeight), drawRect.width());
         }

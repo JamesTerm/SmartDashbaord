@@ -32,6 +32,8 @@ namespace sd::widgets
         void SetYAxisLimits(double lowerLimit, double upperLimit);
         void SetShowNumberLines(bool enabled);
         void SetShowGridLines(bool enabled);
+        void SetShowLegend(bool enabled);
+        bool IsShowLegend() const;
 
         // --- Multi-series API ---
         // Ian: Series are identified by a string key (the NT variable key).
@@ -119,5 +121,6 @@ namespace sd::widgets
         double m_estimatedSamplePeriodSeconds = 0.02;
         mutable double m_lastXTickInterval = 0.0;
         int m_nextColorIndex = 0;
+        bool m_showLegend = true;
     };
 }
